@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # deva.sh - Rust Developer Image
 # Extends main deva image with Rust toolchain and ecosystem tools
 

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # deva.sh - Docker Image
 # Provides a fully isolated Claude Code environment with sensible development tools
 
