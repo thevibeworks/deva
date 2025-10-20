@@ -7,16 +7,47 @@ RUST_DOCKERFILE := Dockerfile.rust
 MAIN_IMAGE := $(IMAGE_NAME):$(TAG)
 RUST_IMAGE := $(IMAGE_NAME):$(RUST_TAG)
 CONTAINER_NAME := deva-$(shell basename $(PWD))-$(shell date +%s)
-CLAUDE_CODE_VERSION := 1.0.119
-CODEX_VERSION := 0.39.0
+CLAUDE_CODE_VERSION := $(shell npm view @anthropic-ai/claude-code version 2>/dev/null || echo "2.0.1")
+CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.42.0")
 
 export DOCKER_BUILDKIT := 1
 
 .DEFAULT_GOAL := help
 
 .PHONY: build
-build:
+build: build-all
+
+.PHONY: build-main
+build-main:
 	@echo "🔨 Building Docker image with $(DOCKERFILE)..."
+	@if command -v npm >/dev/null 2>&1; then \
+		echo "🔎 Resolving latest versions from npm..."; \
+	else \
+		echo "ℹ npm not found; using defaults/fallbacks"; \
+	fi
+	@# Inspect existing image labels; print direct diff lines
+	@prev_claude=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.claude_code_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
+	 prev_codex=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.codex_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
+	 fmt() { v="$$1"; if [ -z "$$v" ] || [ "$$v" = "<no value>" ]; then echo "-"; else case "$$v" in v*) echo "$$v";; *) echo "v$$v";; esac; fi; }; \
+	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); \
+	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); \
+		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ]; then \
+		   echo "Claude: $$tgtC (no change)"; \
+		   echo "Codex:  $$tgtX (no change)"; \
+		   echo "Already up-to-date"; \
+		 else \
+		   if [ "$$curC" = "$$tgtC" ]; then \
+		     echo "Claude: $$tgtC (no change)"; \
+		   else \
+		     echo "Claude: $$curC -> $$tgtC"; \
+		   fi; \
+		   if [ "$$curX" = "$$tgtX" ]; then \
+		     echo "Codex:  $$tgtX (no change)"; \
+		   else \
+		     echo "Codex:  $$curX -> $$tgtX"; \
+		   fi; \
+		 fi
+	@echo "Hint: override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... or run 'make bump-versions' to pin"
 	docker build -f $(DOCKERFILE) --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Build completed: $(MAIN_IMAGE)"
 
@@ -36,7 +67,7 @@ build-rust:
 .PHONY: build-all
 build-all:
 	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION)..."
-	@$(MAKE) build CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION)
+	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION)
 	@$(MAKE) build-rust BASE_IMAGE=$(MAIN_IMAGE)
 	@echo "✅ All images built successfully"
 
@@ -71,6 +102,17 @@ buildx-multi-local:
 		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
 		-t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed locally: $(MAIN_IMAGE)"
+
+.PHONY: bump-versions
+bump-versions:
+	@./scripts/bump-versions.sh
+
+.PHONY: versions
+versions:
+	@CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+	 CODEX_VERSION=$(CODEX_VERSION) \
+	 MAIN_IMAGE=$(MAIN_IMAGE) \
+	 ./scripts/version-report.sh
 
 .PHONY: clean
 clean:
@@ -191,13 +233,16 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  build                Build main Docker image"
+	@echo "  build                Build all images (auto-detects latest npm versions)"
+	@echo "  build-main           Build main Docker image only"
 	@echo "  build-rust           Build Rust Docker image"
-	@echo "  build-all            Build all images"
+	@echo "  build-all            Build all images (main + rust)"
 	@echo "  rebuild              Rebuild without cache"
 	@echo "  buildx               Build with buildx"
 	@echo "  buildx-multi         Build multi-arch and push"
 	@echo "  buildx-multi-rust    Build multi-arch Rust and push"
+		@echo "  versions             Show version status (current/built)"
+		@echo "  bump-versions        Pin Makefile to latest npm versions"
 	@echo "  test                 Test main image"
 	@echo "  test-rust            Test Rust image"
 	@echo "  shell                Open shell in container"
@@ -218,8 +263,9 @@ help:
 	@echo "  CODEX_VERSION        Codex CLI version (default: $(CODEX_VERSION))"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make build                                    # Build main image"
-	@echo "  make build-rust                               # Build Rust image"
-	@echo "  make DOCKERFILE=$(RUST_DOCKERFILE) build         # Build with specific Dockerfile"
-	@echo "  make TAG=dev build-all                        # Build all with custom tag"
-	@echo "  make CLAUDE_CODE_VERSION=1.0.117 build       # Build with specific Claude version"
+	@echo "  make build                                    # Build all images with latest versions"
+	@echo "  make build-main                               # Build main image only"
+	@echo "  make build-rust                               # Build Rust image only"
+	@echo "  make TAG=dev build                            # Build all with custom tag"
+	@echo "  make CLAUDE_CODE_VERSION=2.0.5 build          # Override with specific version"
+	@echo "  make versions                                 # Check current versions"

@@ -13,6 +13,15 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2025-09-30] Dev Log: Persistent container reuse with tmux-style UX (#108)
+- Why: Per-invocation containers were slow, stateless, and clobbered each other; we wanted tmux-like persistence.
+- What:
+  - Container naming settles on `deva-<parent>-<project>` for the shared instance and `--rm` for throwaway runs, avoiding cross-repo collisions.
+  - Subcommands (`ps`, `attach`, `shell`, `stop`, `rm`, `clean`) mirror docker/tmux; smart auto-select handles the single-container case; `attach` boots an agent, `shell` drops into zsh.
+  - Global mode (`-g`) exposes containers outside the current tree while keeping local defaults sane; lifecycle keeps containers detached but exec-ready.
+  - Cleanup: removed Linux-only flock, dead attach helpers, and stray comments to stay shellcheck-clean without breaking macOS.
+- Result: Containers now persist per project with faster warm starts, intuitive control flow, and no platform regressions.
+
 # [2025-09-23] Dev Log: Multi-auth design for deva framework
 - Why: Port mature multi-auth system from claude.sh to support different AI providers (Anthropic, OpenAI, AWS, Google, GitHub) across all agents.
 - What:

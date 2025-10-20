@@ -15,10 +15,8 @@ agent_prepare() {
     fi
     AGENT_COMMAND=("codex")
 
-    # Parse auth method and filter remaining args using shared function
     parse_auth_args "codex" "${args[@]+"${args[@]}"}"
-    local auth_method="$PARSED_AUTH_METHOD"
-    # Safe array assignment that works with set -u
+    AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
     local has_dangerous=false
@@ -51,80 +49,11 @@ agent_prepare() {
         AGENT_COMMAND+=("-m" "${DEVA_DEFAULT_CODEX_MODEL:-gpt-5-codex}")
     fi
 
-    # Safe array expansion for remaining args
     AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
 
     DOCKER_ARGS+=("-p" "127.0.0.1:1455:1455")
 
-    local using_custom_home=false
-    if [ -n "${CONFIG_HOME:-}" ]; then
-        using_custom_home=true
-    fi
-
-    local codex_home=""
-    if [ "$using_custom_home" = false ] && [ -z "${CONFIG_ROOT:-}" ]; then
-        if [ -d "$HOME/.codex" ]; then
-            DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
-            codex_home="$HOME/.codex"
-        fi
-    else
-        if [ -d "$CONFIG_HOME/.codex" ]; then
-            codex_home="$CONFIG_HOME/.codex"
-        fi
-    fi
-
-    # Back-compat: if CONFIG_HOME was auto-selected and has no Codex creds,
-    # but host creds exist, also mount host creds.
-    if [ "$using_custom_home" = true ] && [ "${CONFIG_HOME_AUTO:-false}" = true ] && [ -z "${CONFIG_ROOT:-}" ]; then
-        if [ ! -d "$CONFIG_HOME/.codex" ] && [ -d "$HOME/.codex" ]; then
-            DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
-            codex_home="$HOME/.codex"
-        fi
-    fi
-
-    # If CONFIG_ROOT is active, detect Codex auth.json there for env stripping
-    if [ -z "$codex_home" ] && [ -n "${CONFIG_ROOT:-}" ] && [ -f "$CONFIG_ROOT/codex/.codex/auth.json" ]; then
-        codex_home="$CONFIG_ROOT/codex/.codex"
-    fi
-
-    # Strip conflicting env vars when OAuth auth.json exists
-    local has_oauth_file=false
-    if [ -n "$codex_home" ] && [ -f "$codex_home/auth.json" ]; then
-        has_oauth_file=true
-        strip_openai_env OPENAI_API_KEY
-        strip_openai_env OPENAI_BASE_URL
-        strip_openai_env OPENAI_ORGANIZATION
-    fi
-
-    # Setup authentication (after config mounting and stripping)
-    # Skip oauth setup if we have existing auth.json - it would conflict
-    if [ "$auth_method" = "chatgpt" ] && [ "$has_oauth_file" = true ]; then
-        # Use existing OAuth file, no additional setup needed
-        :
-    else
-        setup_codex_auth "$auth_method"
-    fi
-}
-
-strip_openai_env() {
-    local target="$1"
-    local cleaned=()
-    local i=0
-    while [ $i -lt ${#DOCKER_ARGS[@]} ]; do
-        if [ "${DOCKER_ARGS[$i]}" = "-e" ]; then
-            local spec="${DOCKER_ARGS[$((i+1))]}"
-            if [[ "$spec" == "$target" ]] || [[ "$spec" == "$target="* ]]; then
-                i=$((i + 2))
-                continue
-            fi
-            cleaned+=("-e" "$spec")
-            i=$((i + 2))
-        else
-            cleaned+=("${DOCKER_ARGS[$i]}")
-            i=$((i + 1))
-        fi
-    done
-    DOCKER_ARGS=("${cleaned[@]}")
+    setup_codex_auth "$AUTH_METHOD"
 }
 
 setup_codex_auth() {
@@ -132,7 +61,6 @@ setup_codex_auth() {
 
     case "$method" in
         chatgpt)
-            # Default ChatGPT OAuth - handled by existing mount logic
             ;;
         api-key)
             validate_openai_key || auth_error "OPENAI_API_KEY not set for --auth-with api-key" \
@@ -147,12 +75,10 @@ setup_codex_auth() {
             DOCKER_ARGS+=("-e" "OPENAI_BASE_URL=http://$COPILOT_HOST_MAPPING:$COPILOT_PROXY_PORT")
             DOCKER_ARGS+=("-e" "OPENAI_API_KEY=dummy")
 
-            # Auto-detect models if not already set
             if [ -z "${OPENAI_MODEL:-}" ]; then
                 local models
                 models=$(pick_copilot_models "http://$COPILOT_LOCALHOST_MAPPING:$COPILOT_PROXY_PORT")
                 local main_model="${models%% *}"
-                # Use main model as default for Codex
                 DOCKER_ARGS+=("-e" "OPENAI_MODEL=$main_model")
             fi
 
