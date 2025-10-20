@@ -1,11 +1,13 @@
 # shellcheck shell=bash
 
+# shellcheck disable=SC2034
 readonly COPILOT_DEFAULT_PORT="4141"
+# shellcheck disable=SC2034
 readonly COPILOT_HOST_MAPPING="host.docker.internal"
+# shellcheck disable=SC2034
 readonly COPILOT_LOCALHOST_MAPPING="localhost"
 readonly COPILOT_LOG_FILE="/tmp/deva-auth-copilot-api.log"
 readonly COPILOT_CACHE_TTL=300
-readonly COPILOT_CACHE_LOCK="/tmp/deva-auth-copilot-models.lock"
 
 COPILOT_MODELS_CACHE=""
 COPILOT_CACHE_TIME=0
@@ -17,7 +19,9 @@ auth_error() {
 }
 
 debug_log() {
-    [ "${DEVA_DEBUG:-}" = "true" ] && echo "DEBUG: $*" >&2 || true
+    if [ "${DEVA_DEBUG:-}" = "true" ]; then
+        echo "DEBUG: $*" >&2
+    fi
 }
 
 validate_port() {
@@ -157,46 +161,35 @@ pick_copilot_models() {
         return 0
     fi
 
-    (
-        flock -x -w 5 200 || return 1
+    debug_log "Cache miss, fetching models from $base_url"
+    local models_json=""
 
-        current_time=$(date +%s)
-        if [ -n "$COPILOT_MODELS_CACHE" ] && [ $((current_time - COPILOT_CACHE_TIME)) -lt $COPILOT_CACHE_TTL ]; then
-            debug_log "Using cached model selection: $COPILOT_MODELS_CACHE"
-            echo "$COPILOT_MODELS_CACHE"
-            return 0
+    if command -v curl >/dev/null 2>&1; then
+        models_json=$(curl -fsS --max-time 2 "$base_url/v1/models" 2>/dev/null || true)
+    fi
+
+    local main_model=""
+    local fast_model=""
+
+    if [ -n "$models_json" ] && command -v jq >/dev/null 2>&1; then
+        local all_models
+        all_models=$(echo "$models_json" | jq -r '.data[].id' 2>/dev/null || true)
+
+        if [ -n "$all_models" ]; then
+            debug_log "Available models: $(echo "$all_models" | tr '\n' ' ')"
+            main_model=$(pick_best_model "main" "$all_models")
+            fast_model=$(pick_best_model "fast" "$all_models")
         fi
+    fi
 
-        debug_log "Cache miss, fetching models from $base_url"
-        local models_json=""
+    main_model="${main_model:-claude-sonnet-4}"
+    fast_model="${fast_model:-o3-mini-2025-01-31}"
 
-        if command -v curl >/dev/null 2>&1; then
-            models_json=$(curl -fsS --max-time 2 "$base_url/v1/models" 2>/dev/null || true)
-        fi
+    COPILOT_MODELS_CACHE="$main_model $fast_model"
+    COPILOT_CACHE_TIME="$current_time"
 
-        local main_model=""
-        local fast_model=""
-
-        if [ -n "$models_json" ] && command -v jq >/dev/null 2>&1; then
-            local all_models
-            all_models=$(echo "$models_json" | jq -r '.data[].id' 2>/dev/null || true)
-
-            if [ -n "$all_models" ]; then
-                debug_log "Available models: $(echo "$all_models" | tr '\n' ' ')"
-                main_model=$(pick_best_model "main" "$all_models")
-                fast_model=$(pick_best_model "fast" "$all_models")
-            fi
-        fi
-
-        main_model="${main_model:-claude-sonnet-4}"
-        fast_model="${fast_model:-o3-mini-2025-01-31}"
-
-        COPILOT_MODELS_CACHE="$main_model $fast_model"
-        COPILOT_CACHE_TIME="$current_time"
-
-        debug_log "Selected and cached models: main=$main_model fast=$fast_model"
-        echo "$main_model $fast_model"
-    ) 200>"$COPILOT_CACHE_LOCK"
+    debug_log "Selected and cached models: main=$main_model fast=$fast_model"
+    echo "$main_model $fast_model"
 }
 
 convert_claude_model_alias() {
@@ -281,6 +274,8 @@ parse_auth_args() {
         esac
     fi
 
+    # shellcheck disable=SC2034
     PARSED_AUTH_METHOD="$auth_method"
+    # shellcheck disable=SC2034
     PARSED_REMAINING_ARGS=("${remaining_args[@]+"${remaining_args[@]}"}")
 }

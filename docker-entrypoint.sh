@@ -32,23 +32,23 @@ get_codex_version() {
 show_environment_info() {
     local header="[deva]"
     case "$DEVA_AGENT" in
-        claude)
-            if [ -n "$CLAUDE_VERSION" ]; then
-                header+=" Starting Claude Code v$CLAUDE_VERSION"
-            else
-                header+=" Claude Code (version detection failed)"
-            fi
-            ;;
-        codex)
-            if [ -n "$CODEX_VERSION" ]; then
-                header+=" Starting Codex ($CODEX_VERSION)"
-            else
-                header+=" Codex CLI (version detection failed)"
-            fi
-            ;;
-        *)
-            header+=" Starting agent: $DEVA_AGENT"
-            ;;
+    claude)
+        if [ -n "$CLAUDE_VERSION" ]; then
+            header+=" Starting Claude Code v$CLAUDE_VERSION"
+        else
+            header+=" Claude Code (version detection failed)"
+        fi
+        ;;
+    codex)
+        if [ -n "$CODEX_VERSION" ]; then
+            header+=" Starting Codex ($CODEX_VERSION)"
+        else
+            header+=" Codex CLI (version detection failed)"
+        fi
+        ;;
+    *)
+        header+=" Starting agent: $DEVA_AGENT"
+        ;;
     esac
     echo "$header"
 
@@ -123,6 +123,56 @@ show_environment_info() {
     fi
 }
 
+normalize_locale_variant() {
+    local in="$1"
+    [ -n "$in" ] || return 0
+    local base="${in%%.*}"
+    local enc="${in#*.}"
+    if [ "$base" = "$in" ]; then
+        printf '%s' "$in"
+        return 0
+    fi
+    enc=$(printf '%s' "$enc" | tr '[:upper:]' '[:lower:]')
+    if [ "$enc" = "utf8" ] || [ "$enc" = "utf-8" ]; then
+        printf '%s.UTF-8' "$base"
+    else
+        printf '%s.%s' "$base" "$enc"
+    fi
+}
+
+ensure_timezone() {
+    if [ -n "$TZ" ] && [ -e "/usr/share/zoneinfo/$TZ" ]; then
+        ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime 2>/dev/null || true
+        echo "$TZ" >/etc/timezone 2>/dev/null || true
+    fi
+}
+
+ensure_locale() {
+    local want="${LC_ALL:-${LANG:-}}"
+    [ -n "$want" ] || return 0
+
+    local want_norm
+    want_norm=$(normalize_locale_variant "$want")
+
+    local want_lower
+    want_lower=$(printf '%s' "$want_norm" | tr '[:upper:]' '[:lower:]')
+    if locale -a 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx -- "$want_lower"; then
+        return 0
+    fi
+
+    local base="${want_norm%%.*}"
+    local gen_line="${base}.UTF-8 UTF-8"
+    if ! grep -q -E "^\s*${base}\.UTF-8\s+UTF-8\s*$" /etc/locale.gen 2>/dev/null; then
+        printf '%s\n' "$gen_line" >>/etc/locale.gen 2>/dev/null || true
+    fi
+    if command -v locale-gen >/dev/null 2>&1; then
+        locale-gen "$base.UTF-8" >/dev/null 2>&1 || true
+    fi
+    if command -v update-locale >/dev/null 2>&1; then
+        update-locale LANG="$LANG" LC_ALL="${LC_ALL:-$LANG}" LANGUAGE="${LANGUAGE:-}" >/dev/null 2>&1 || true
+    fi
+}
+
 setup_nonroot_user() {
     local current_uid
     current_uid=$(id -u "$DEVA_USER")
@@ -130,11 +180,11 @@ setup_nonroot_user() {
     current_gid=$(id -g "$DEVA_USER")
 
     if [ "$DEVA_UID" = "0" ]; then
-        echo "[entrypoint] WARNING: Host UID is 0. Using fallback 1000." 
+        echo "[entrypoint] WARNING: Host UID is 0. Using fallback 1000."
         DEVA_UID=1000
     fi
     if [ "$DEVA_GID" = "0" ]; then
-        echo "[entrypoint] WARNING: Host GID is 0. Using fallback 1000." 
+        echo "[entrypoint] WARNING: Host GID is 0. Using fallback 1000."
         DEVA_GID=1000
     fi
 
@@ -160,12 +210,10 @@ setup_nonroot_user() {
 }
 
 fix_rust_permissions() {
-    # Ensure rustup/cargo dirs are writable by current DEVA_UID after UID remap
     local rh="/opt/rustup"
     local ch="/opt/cargo"
     if [ -d "$rh" ]; then chown -R "$DEVA_UID:$DEVA_GID" "$rh" 2>/dev/null || true; fi
     if [ -d "$ch" ]; then chown -R "$DEVA_UID:$DEVA_GID" "$ch" 2>/dev/null || true; fi
-    # Ensure they exist to avoid runtime failures
     [ -d "$rh" ] || mkdir -p "$rh"
     [ -d "$ch" ] || mkdir -p "$ch"
 }
@@ -178,24 +226,23 @@ build_gosu_env_cmd() {
 
 ensure_agent_binaries() {
     case "$DEVA_AGENT" in
-        claude)
-            if ! command -v claude >/dev/null 2>&1; then
-                echo "error: Claude CLI not found in container"
-                exit 1
-            fi
-            ;;
-        codex)
-            if ! command -v codex >/dev/null 2>&1; then
-                echo "error: Codex CLI not found in container"
-                exit 1
-            fi
-            ;;
+    claude)
+        if ! command -v claude >/dev/null 2>&1; then
+            echo "error: Claude CLI not found in container"
+            exit 1
+        fi
+        ;;
+    codex)
+        if ! command -v codex >/dev/null 2>&1; then
+            echo "error: Codex CLI not found in container"
+            exit 1
+        fi
+        ;;
     esac
 }
 
 main() {
     export PATH="/home/deva/.local/bin:/home/deva/.npm-global/bin:/root/.local/bin:/usr/local/go/bin:/opt/cargo/bin:/usr/local/cargo/bin:$PATH"
-    # Prefer /opt paths used by deva-rust layer
     export RUSTUP_HOME="${RUSTUP_HOME:-/opt/rustup}"
     export CARGO_HOME="${CARGO_HOME:-/opt/cargo}"
 
@@ -204,13 +251,15 @@ main() {
 
     if [ -n "$ANTHROPIC_BASE_URL" ]; then
         case "$ANTHROPIC_BASE_URL" in
-            http://localhost:*|http://localhost/*|http://127.0.0.1:*|http://127.0.0.1/*)
-                export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL/localhost/host.docker.internal}"
-                export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL/127.0.0.1/host.docker.internal}"
-                ;;
+        http://localhost:* | http://localhost/* | http://127.0.0.1:* | http://127.0.0.1/*)
+            export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL/localhost/host.docker.internal}"
+            export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL/127.0.0.1/host.docker.internal}"
+            ;;
         esac
     fi
 
+    ensure_timezone
+    ensure_locale
     show_environment_info
 
     if [ -n "$WORKDIR" ] && [ -d "$WORKDIR" ]; then
@@ -222,11 +271,11 @@ main() {
     fix_rust_permissions
 
     if [ $# -eq 0 ]; then
-    if [ "$DEVA_AGENT" = "codex" ]; then
-        build_gosu_env_cmd "$DEVA_USER" codex --dangerously-bypass-approvals-and-sandbox -m "${DEVA_DEFAULT_CODEX_MODEL:-gpt-5-codex}"
-    else
-        build_gosu_env_cmd "$DEVA_USER" claude --dangerously-skip-permissions
-    fi
+        if [ "$DEVA_AGENT" = "codex" ]; then
+            build_gosu_env_cmd "$DEVA_USER" codex --dangerously-bypass-approvals-and-sandbox -m "${DEVA_DEFAULT_CODEX_MODEL:-gpt-5-codex}"
+        else
+            build_gosu_env_cmd "$DEVA_USER" claude --dangerously-skip-permissions
+        fi
         return
     fi
 

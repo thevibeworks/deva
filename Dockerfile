@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.4
-
 # deva.sh - Docker Image
 # Provides a fully isolated Claude Code environment with sensible development tools
 
@@ -23,7 +21,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl wget git git-lfs gnupg lsb-release locales sudo \
+        ca-certificates curl wget git git-lfs gnupg lsb-release locales tzdata sudo \
         software-properties-common build-essential pkg-config libssl-dev \
         unzip zip bzip2 xz-utils tini gosu less man-db \
         python3-dev libffi-dev \
@@ -53,12 +51,26 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get -y clean && rm -rf /var/lib/apt/lists/*
 
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g npm@latest pnpm copilot-api@latest && \
-    npm cache clean --force
-
+# Install bun runtime before building Copilot API fork
 RUN curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun
+
+# Install Copilot API branch with GPT-5 Codex responses support (PR #119 from caozhiyuan fork)
+# Pinned to specific commit for reproducibility and security
+ARG COPILOT_API_REPO=https://github.com/caozhiyuan/copilot-api.git
+ARG COPILOT_API_BRANCH=feature/gpt-5-codex
+ARG COPILOT_API_COMMIT=HEAD
+
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm install -g npm@latest pnpm && \
+    git clone --branch "${COPILOT_API_BRANCH}" "${COPILOT_API_REPO}" /tmp/copilot-api && \
+    cd /tmp/copilot-api && \
+    git checkout "${COPILOT_API_COMMIT}" && \
+    git log --oneline -5 && \
+    bun install --frozen-lockfile && bun run build && \
+    cd /tmp && npm install -g --ignore-scripts /tmp/copilot-api && \
+    rm -rf /tmp/copilot-api && \
+    npm cache clean --force
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -138,11 +150,26 @@ RUN mkdir -p "$DEVA_HOME/.npm-global" && \
 
 # Set npm configuration for deva user and install CLI tooling
 USER $DEVA_USER
-ARG CLAUDE_CODE_VERSION=1.0.115
-ARG CODEX_VERSION=0.36.0
-RUN npm config set prefix "$DEVA_HOME/.npm-global" && \
-    npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} @mariozechner/claude-trace @openai/codex@${CODEX_VERSION} && \
-    npm cache clean --force
+ARG CLAUDE_CODE_VERSION
+ARG CODEX_VERSION
+
+# Record key tool versions as labels for quick inspection
+LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
+LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
+
+# Speed up npm installs and avoid noisy audits/funds prompts
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
+# Use BuildKit cache for npm to speed up repeated builds
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    npm config set prefix "$DEVA_HOME/.npm-global" && \
+    npm install -g --no-audit --no-fund \
+        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+        @mariozechner/claude-trace \
+        @openai/codex@${CODEX_VERSION} && \
+    npm cache clean --force && \
+    npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex || true
 
 # Install Go tools for Atlassian integration (Confluence/Jira/Bitbucket)
 RUN go install github.com/lroolle/atlas-cli/cmd/atl@main && \

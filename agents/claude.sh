@@ -1,6 +1,5 @@
 # shellcheck shell=bash
 
-# Load shared auth utilities
 # shellcheck disable=SC1091
 if [ -f "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh" ]; then
     source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
@@ -15,10 +14,8 @@ agent_prepare() {
     fi
     AGENT_COMMAND=("claude")
 
-    # Parse auth method and filter remaining args using shared function
     parse_auth_args "claude" "${args[@]+"${args[@]}"}"
-    local auth_method="$PARSED_AUTH_METHOD"
-    # Safe array assignment that works with set -u
+    AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
     local has_dangerously=false
@@ -34,39 +31,9 @@ agent_prepare() {
         AGENT_COMMAND+=("--dangerously-skip-permissions")
     fi
 
-    # Safe array expansion for remaining args
     AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
 
-    # Setup authentication
-    setup_claude_auth "$auth_method"
-
-    local using_custom_home=false
-    if [ -n "${CONFIG_HOME:-}" ]; then
-        using_custom_home=true
-    fi
-
-    if [ "$using_custom_home" = false ] && [ -z "${CONFIG_ROOT:-}" ]; then
-        if [ -d "$HOME/.claude" ]; then
-            DOCKER_ARGS+=("-v" "$HOME/.claude:/home/deva/.claude")
-        fi
-        if [ -f "$HOME/.claude.json" ]; then
-            DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
-        fi
-    fi
-
-    # Back-compat: if CONFIG_HOME was auto-selected and has no Claude creds,
-    # but host creds exist, also mount host creds.
-    if [ "$using_custom_home" = true ] && [ "${CONFIG_HOME_AUTO:-false}" = true ] && [ -z "${CONFIG_ROOT:-}" ]; then
-        if [ ! -d "$CONFIG_HOME/.claude" ] && [ -d "$HOME/.claude" ]; then
-            DOCKER_ARGS+=("-v" "$HOME/.claude:/home/deva/.claude")
-        fi
-        if [ ! -f "$CONFIG_HOME/.claude.json" ] && [ -f "$HOME/.claude.json" ]; then
-            DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
-        fi
-    fi
-    if [ -d "$(pwd)/.claude" ]; then
-        DOCKER_ARGS+=("-v" "$(pwd)/.claude:$(pwd)/.claude")
-    fi
+    setup_claude_auth "$AUTH_METHOD"
 }
 
 setup_claude_auth() {
@@ -74,7 +41,6 @@ setup_claude_auth() {
 
     case "$method" in
         claude)
-            # Default Claude.ai OAuth - handled by existing mount logic
             ;;
         api-key)
             validate_anthropic_key || auth_error "ANTHROPIC_API_KEY not set for --auth-with api-key" \
@@ -89,7 +55,6 @@ setup_claude_auth() {
             DOCKER_ARGS+=("-e" "ANTHROPIC_BASE_URL=http://$COPILOT_HOST_MAPPING:$COPILOT_PROXY_PORT")
             DOCKER_ARGS+=("-e" "ANTHROPIC_API_KEY=dummy")
 
-            # Auto-detect models if not already set
             if [ -z "${ANTHROPIC_MODEL:-}" ] || [ -z "${ANTHROPIC_SMALL_FAST_MODEL:-}" ]; then
                 local models
                 models=$(pick_copilot_models "http://$COPILOT_LOCALHOST_MAPPING:$COPILOT_PROXY_PORT")
@@ -100,13 +65,11 @@ setup_claude_auth() {
                 [ -z "${ANTHROPIC_SMALL_FAST_MODEL:-}" ] && DOCKER_ARGS+=("-e" "ANTHROPIC_SMALL_FAST_MODEL=$fast_model")
             fi
 
-            # Configure proxy settings for container
             local no_proxy="$COPILOT_HOST_MAPPING,$COPILOT_LOCALHOST_MAPPING,127.0.0.1"
             DOCKER_ARGS+=("-e" "NO_PROXY=${NO_PROXY:+$NO_PROXY,}$no_proxy")
             DOCKER_ARGS+=("-e" "no_grpc_proxy=${NO_GRPC_PROXY:+$NO_GRPC_PROXY,}$no_proxy")
             ;;
         oat)
-            # Claude OAuth token (experimental)
             if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
                 auth_error "CLAUDE_CODE_OAUTH_TOKEN not set for --auth-with oat" \
                            "Set: export CLAUDE_CODE_OAUTH_TOKEN=your_token"
@@ -114,7 +77,6 @@ setup_claude_auth() {
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
             ;;
         bedrock)
-            # AWS Bedrock
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_USE_BEDROCK=1")
             if [ -d "$HOME/.aws" ]; then
                 DOCKER_ARGS+=("-v" "$HOME/.aws:/home/deva/.aws:ro")
@@ -133,7 +95,6 @@ setup_claude_auth() {
             fi
             ;;
         vertex)
-            # Google Vertex AI
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_USE_VERTEX=1")
             if [ -d "$HOME/.config/gcloud" ]; then
                 DOCKER_ARGS+=("-v" "$HOME/.config/gcloud:/home/deva/.config/gcloud:ro")

@@ -18,11 +18,8 @@ DEVA_DOCKER_TAG="${DEVA_DOCKER_TAG:-latest}"
 DEVA_CONTAINER_PREFIX="${DEVA_CONTAINER_PREFIX:-deva}"
 DEFAULT_AGENT="${DEVA_DEFAULT_AGENT:-claude}"
 
-# Profile controls
-# Prefer DEVA_PROFILE; accept legacy DEVA_IMAGE_PROFILE for back-compat
 PROFILE="${DEVA_PROFILE:-${DEVA_IMAGE_PROFILE:-}}"
 
-# Shared config directory (mounted for all agents, optional)
 CONFIG_ROOT=""
 
 USER_VOLUMES=()
@@ -39,6 +36,10 @@ LOADED_CONFIGS=()
 AGENT_ARGS=()
 AGENT_EXPLICIT=false
 
+EPHEMERAL_MODE=false
+GLOBAL_MODE=false
+DEBUG_MODE=false
+
 usage() {
     cat <<'USAGE'
 deva.sh - Docker-based multi-agent launcher (Claude, Codex)
@@ -46,15 +47,21 @@ deva.sh - Docker-based multi-agent launcher (Claude, Codex)
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
   deva.sh [agent] [deva flags] [-- agent-flags]
-  deva.sh shell
-  deva.sh help
+  deva.sh <command>
 
-Container management:
-  deva.sh --inspect          Attach to running container for current project
-  deva.sh --ps               List containers for current project
+Container management commands (docker/tmux-style):
+  deva.sh ps [-g]            List containers (current project or --all)
+  deva.sh shell [-g]         Open zsh shell for inspection (pick if multiple)
+  deva.sh stop [-g]          Stop container (pick if multiple)
+  deva.sh rm [-g]            Remove container (pick if multiple)
+  deva.sh clean [-g]         Remove all stopped containers
+  
+Advanced:
   deva.sh --show-config      Show resolved configuration (debug)
 
 Deva flags:
+  --rm                    Ephemeral mode: remove container after exit
+  -g, --global            Global mode: access containers from all projects
   -v SRC:DEST[:OPT]       Mount additional volumes inside the container
   -c DIR, --config-home   DIR
                           Mount an alternate auth/config home into /home/deva
@@ -62,11 +69,45 @@ Deva flags:
   -p NAME, --profile      NAME
                           Select profile: base (default), rust. Pulls tag, falls back to Dockerfile.<profile>
   --host-net              Use host networking for the agent container
+  --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
+Container Behavior (NEW in v0.8.0):
+  Default (persistent):   One container per project, reused across runs.
+                          Preserves state (npm packages, builds, etc).
+                          Faster startup, run any agent (claude/codex).
+  
+  With --rm (ephemeral):  Create new container, auto-remove after exit.
+                          Agent-specific naming for parallel runs.
+
+Container Naming (NEW):
+  Persistent:  deva-<parent>-<project>              # One per project
+  Ephemeral:   deva-<parent>-<project>-<agent>-<pid>  # Agent-specific
+  
+  Example:
+    /Users/eric/work/myapp  → deva-work-myapp
+    /Users/eric/home/myapp  → deva-home-myapp
+
 Examples:
-  deva.sh                             # Launch default agent (Claude)
-  deva.sh -p rust claude              # Deva flags like `deva.sh --flags`
+  # Launch agents (persistent by default)
+  deva.sh                             # Launch claude in persistent container
+  deva.sh claude                      # Same
+  deva.sh codex                       # Launch codex in same container
+  deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
+
+  # Container management (current project)
+  deva.sh ps                          # List containers for this project
+  deva.sh shell                       # Open zsh for inspection
+  deva.sh stop                        # Stop container
+  deva.sh rm                          # Remove container
+  deva.sh clean                       # Clean stopped containers
+
+  # Global mode (all projects)
+  deva.sh ps -g                       # List ALL deva containers
+  deva.sh shell -g                    # Open shell in any container
+  deva.sh stop -g                     # Stop any container
+  
+Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
   deva.sh -c ~/work-claude-home -- --trace
   deva.sh --show-config               # Debug configuration
@@ -88,7 +129,6 @@ print(os.path.abspath(sys.argv[1]))
 PY
 }
 
-# Determine default per-agent config home under XDG
 default_config_home_for_agent() {
     local agent="$1"
     local xdg_home
@@ -201,18 +241,204 @@ translate_localhost() {
     echo "$1" | sed 's/127\.0\.0\.1/host.docker.internal/g' | sed 's/localhost/host.docker.internal/g'
 }
 
+append_unique_line() {
+    local list="$1"
+    local item="$2"
+
+    if [ -z "$item" ]; then
+        printf '%s' "$list"
+        return
+    fi
+
+    if [ -n "$list" ] && printf '%s\n' "$list" | grep -F -x -q -- "$item"; then
+        printf '%s' "$list"
+        return
+    fi
+
+    if [ -n "$list" ]; then
+        printf '%s\n%s' "$list" "$item"
+    else
+        printf '%s' "$item"
+    fi
+}
+
+sanitize_slug_component() {
+    printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+compute_slug_components_for_path() {
+    local path="$1"
+
+    local dir_path
+    if [ -d "$path" ]; then
+        dir_path="$(cd "$path" 2>/dev/null && pwd)"
+    else
+        dir_path="$(cd "$(dirname "$path")" 2>/dev/null && pwd)"
+    fi
+    [ -n "$dir_path" ] || dir_path="$(pwd)"
+
+    local project parent
+    project="$(basename "$dir_path")"
+    parent="$(basename "$(dirname "$dir_path")")"
+
+    case "$parent" in
+        src|github.com|gitlab.com|bitbucket.org|repos|projects|work|code|dev)
+            parent="$(basename "$(dirname "$(dirname "$dir_path")")")"
+            ;;
+    esac
+
+    local sanitized_parent sanitized_project
+    sanitized_parent="$(sanitize_slug_component "$parent")"
+    sanitized_project="$(sanitize_slug_component "$project")"
+
+    printf '%s %s\n' "$sanitized_parent" "$sanitized_project"
+}
+
+generate_container_slug_for_path() {
+    local path="$1"
+    local parent project
+    read -r parent project <<<"$(compute_slug_components_for_path "$path")"
+
+    if [ -z "$project" ]; then
+        echo "$parent"
+        return
+    fi
+
+    if [ -n "$parent" ] && [[ "$project" == *"$parent"* ]] && [ ${#parent} -gt 3 ]; then
+        echo "$project"
+    elif [ -n "$parent" ]; then
+        echo "${parent}-${project}"
+    else
+        echo "$project"
+    fi
+}
+
+generate_container_slug() {
+    generate_container_slug_for_path "$(pwd)"
+}
+
+slug_candidates_for_path() {
+    local path="$1"
+    local parent project
+    read -r parent project <<<"$(compute_slug_components_for_path "$path")"
+
+    local variants=""
+    if [ -n "$project" ]; then
+        variants="$(append_unique_line "$variants" "$project")"
+
+        local trimmed="$project"
+        while [ -n "$trimmed" ]; do
+            if [[ "$trimmed" =~ -[0-9]+$ ]]; then
+                trimmed="${trimmed%-*}"
+                if [ -n "$trimmed" ]; then
+                    variants="$(append_unique_line "$variants" "$trimmed")"
+                    continue
+                fi
+                continue
+            fi
+            if [[ "$trimmed" =~ -(copilot|yolo|yolo-mode|share)$ ]]; then
+                trimmed="${trimmed%-*}"
+                if [ -n "$trimmed" ]; then
+                    variants="$(append_unique_line "$variants" "$trimmed")"
+                    continue
+                fi
+                continue
+            fi
+            break
+        done
+    fi
+
+    local slugs="$variants"
+
+    if [ -n "$parent" ]; then
+        local variant combined
+        for variant in $variants; do
+            [ -n "$variant" ] || continue
+            if [ ${#parent} -gt 3 ] && [[ "$variant" == *"$parent"* ]]; then
+                combined="$variant"
+            else
+                combined="${parent}-${variant}"
+            fi
+            slugs="$(append_unique_line "$slugs" "$combined")"
+        done
+        slugs="$(append_unique_line "$slugs" "$parent")"
+    fi
+
+    printf '%s\n' "$slugs" | sed '/^$/d'
+}
+
 project_container_rows() {
-    local project
-    project="$(basename "$(pwd)")"
-    docker ps --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}' |
-        awk -v proj="-${project}-" -F '\t' 'index($1, proj) > 0'
+    local rows
+    rows=$(docker ps --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}')
+    if [ -z "$rows" ]; then
+        return
+    fi
+    if [ "$GLOBAL_MODE" = true ]; then
+        printf "%s\n" "$rows"
+        return
+    fi
+
+    local path="$PWD"
+    local slugs=""
+
+    while true; do
+        local slug
+        for slug in $(slug_candidates_for_path "$path"); do
+            [ -n "$slug" ] || continue
+            slugs="$(append_unique_line "$slugs" "$slug")"
+        done
+
+        local parent_path
+        parent_path="$(dirname "$path")"
+        if [ "$parent_path" = "$path" ] || [ -z "$parent_path" ]; then
+            break
+        fi
+        path="$parent_path"
+    done
+
+    if [ -z "$slugs" ]; then
+        printf "%s\n" "$rows"
+        return
+    fi
+
+    local pattern=""
+    local slug escaped
+    for slug in $slugs; do
+        [ -n "$slug" ] || continue
+        escaped=$(printf '%s' "$slug" | sed -e 's/[.[\\^$*+?{}()|]/\\&/g')
+        if [ -n "$pattern" ]; then
+            pattern="${pattern}|-${escaped}([.-]|$)"
+        else
+            pattern="-${escaped}([.-]|$)"
+        fi
+    done
+
+    if [ -z "$pattern" ]; then
+        printf "%s\n" "$rows"
+        return
+    fi
+
+    local filtered
+    filtered=$(printf "%s\n" "$rows" | grep -E -- "$pattern" || true)
+
+    if [ -n "$filtered" ]; then
+        printf "%s\n" "$filtered"
+    else
+        printf "%s\n" "$rows"
+    fi
 }
 
 extract_agent_from_name() {
     local name="$1"
-    local rest
-    rest="${name#"${DEVA_CONTAINER_PREFIX}"-}"
-    printf '%s' "${rest%%-*}"
+    local rest="${name#"${DEVA_CONTAINER_PREFIX}"-}"
+
+    # Ephemeral pattern: ends with -<agent>-<pid> where pid is all digits
+    if [[ "$rest" =~ -([a-z]+)-([0-9]+)$ ]]; then
+        local agent="${BASH_REMATCH[1]}"
+        printf '%s' "$agent"
+    else
+        printf 'share'
+    fi
 }
 
 pick_container() {
@@ -260,14 +486,6 @@ pick_container() {
     return 1
 }
 
-attach_to_container() {
-    local container="$1"
-    local user="${DEVA_USER:-deva}"
-    if ! docker exec -it "$container" gosu "$user" /bin/zsh 2>/dev/null; then
-        docker exec -it "$container" /bin/zsh
-    fi
-}
-
 list_containers_pretty() {
     local rows
     rows=$(project_container_rows)
@@ -276,10 +494,20 @@ list_containers_pretty() {
         return
     fi
 
-    printf 'NAME\tAGENT\tSTATUS\tCREATED AT\n'
-    printf '%s\n' "$rows" | while IFS=$'\t' read -r name status created; do
-        printf '%s\t%s\t%s\t%s\n' "$name" "$(extract_agent_from_name "$name")" "$status" "$created"
-    done
+    local output
+    output=$(\
+        {
+            printf 'NAME\tAGENT\tSTATUS\tCREATED AT\n'
+            printf '%s\n' "$rows" | while IFS=$'\t' read -r name status created; do
+                printf '%s\t%s\t%s\t%s\n' "$name" "$(extract_agent_from_name "$name")" "$status" "$created"
+            done
+        } )
+
+    if command -v column >/dev/null 2>&1; then
+        printf '%s\n' "$output" | column -t -s $'\t'
+    else
+        printf '%s\n' "$output"
+    fi
 }
 
 show_config() {
@@ -314,7 +542,6 @@ show_config() {
     if [ ${#USER_ENVS[@]} -gt 0 ]; then
         echo "Environment variables:"
         for env in "${USER_ENVS[@]}"; do
-            # Mask sensitive values
             if [[ "$env" =~ (API_KEY|TOKEN|SECRET|PASSWORD)= ]]; then
                 echo "  -e ${env%%=*}=<masked>"
             else
@@ -332,12 +559,31 @@ show_config() {
 
 prepare_base_docker_args() {
     local container_name
-    local project
-    project="$(basename "$(pwd)")"
-    container_name="${DEVA_CONTAINER_PREFIX}-${ACTIVE_AGENT}-${project}-$$"
+    local slug
+    slug="$(generate_container_slug)"
 
-    DOCKER_ARGS=(
-        run --rm -it
+    local volume_hash=""
+    if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
+        volume_hash=$(compute_volume_hash)
+    fi
+
+    if [ "$EPHEMERAL_MODE" = true ]; then
+        if [ -n "$volume_hash" ]; then
+            container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}-${ACTIVE_AGENT}-$$"
+        else
+            container_name="${DEVA_CONTAINER_PREFIX}-${slug}-${ACTIVE_AGENT}-$$"
+        fi
+        DOCKER_ARGS=(run --rm -it)
+    else
+        if [ -n "$volume_hash" ]; then
+            container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}"
+        else
+            container_name="${DEVA_CONTAINER_PREFIX}-${slug}"
+        fi
+        DOCKER_ARGS=(run -d)
+    fi
+
+    DOCKER_ARGS+=(
         --name "$container_name"
         -v "$(pwd):$(pwd)"
         -w "$(pwd)"
@@ -351,15 +597,47 @@ prepare_base_docker_args() {
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
     if [ -n "${LC_ALL:-}" ]; then DOCKER_ARGS+=(-e "LC_ALL=$LC_ALL"); fi
     if [ -n "${TZ:-}" ]; then DOCKER_ARGS+=(-e "TZ=$TZ"); fi
+    # Fallback: detect host TZ/LANG if not set in env
+    if ! docker_args_has_env "TZ"; then
+        local host_tz=""
+        if command -v timedatectl >/dev/null 2>&1; then
+            host_tz=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+        fi
+        if [ -z "$host_tz" ] && [ -L "/etc/localtime" ]; then
+            local tz_target
+            tz_target=$(readlink "/etc/localtime" 2>/dev/null || true)
+            case "$tz_target" in
+                */zoneinfo/*)
+                    host_tz="${tz_target##*/zoneinfo/}"
+                    ;;
+            esac
+        fi
+        if [ -z "$host_tz" ] && command -v systemsetup >/dev/null 2>&1; then
+            host_tz=$(systemsetup -gettimezone 2>/dev/null | awk -F': ' '{print $2}')
+        fi
+        if [ -n "$host_tz" ]; then DOCKER_ARGS+=(-e "TZ=$host_tz"); fi
+    fi
+
+    if ! docker_args_has_env "LANG"; then
+        local host_lang
+        host_lang=$(locale 2>/dev/null | awk -F= '/^LANG=/{gsub(/"/, ""); print $2}')
+        if [ -n "$host_lang" ]; then DOCKER_ARGS+=(-e "LANG=$host_lang"); fi
+    fi
+    if ! docker_args_has_env "LC_ALL"; then
+        local host_lc_all
+        host_lc_all=$(locale 2>/dev/null | awk -F= '/^LC_ALL=/{gsub(/"/, ""); print $2}')
+        if [ -n "$host_lc_all" ]; then DOCKER_ARGS+=(-e "LC_ALL=$host_lc_all"); fi
+    fi
     if [ -n "${GIT_AUTHOR_NAME:-}" ]; then DOCKER_ARGS+=(-e "GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME"); fi
     if [ -n "${GIT_AUTHOR_EMAIL:-}" ]; then DOCKER_ARGS+=(-e "GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL"); fi
     if [ -n "${GIT_COMMITTER_NAME:-}" ]; then DOCKER_ARGS+=(-e "GIT_COMMITTER_NAME=$GIT_COMMITTER_NAME"); fi
     if [ -n "${GIT_COMMITTER_EMAIL:-}" ]; then DOCKER_ARGS+=(-e "GIT_COMMITTER_EMAIL=$GIT_COMMITTER_EMAIL"); fi
     if [ -n "${GH_TOKEN:-}" ]; then DOCKER_ARGS+=(-e "GH_TOKEN=$GH_TOKEN"); fi
     if [ -n "${GITHUB_TOKEN:-}" ]; then DOCKER_ARGS+=(-e "GITHUB_TOKEN=$GITHUB_TOKEN"); fi
-    if [ -n "${OPENAI_API_KEY:-}" ]; then DOCKER_ARGS+=(-e "OPENAI_API_KEY=$OPENAI_API_KEY"); fi
-    if [ -n "${OPENAI_ORGANIZATION:-}" ]; then DOCKER_ARGS+=(-e "OPENAI_ORGANIZATION=$OPENAI_ORGANIZATION"); fi
-    if [ -n "${OPENAI_BASE_URL:-}" ]; then DOCKER_ARGS+=(-e "OPENAI_BASE_URL=$OPENAI_BASE_URL"); fi
+    if [ -n "${OPENAI_API_KEY:-}" ]; then USER_ENVS+=("OPENAI_API_KEY=$OPENAI_API_KEY"); fi
+    if [ -n "${OPENAI_ORGANIZATION:-}" ]; then USER_ENVS+=("OPENAI_ORGANIZATION=$OPENAI_ORGANIZATION"); fi
+    if [ -n "${OPENAI_BASE_URL:-}" ]; then USER_ENVS+=("OPENAI_BASE_URL=$OPENAI_BASE_URL"); fi
+    if [ -n "${openai_base_url:-}" ]; then USER_ENVS+=("openai_base_url=${openai_base_url}"); fi
 
     if [ -n "${HTTP_PROXY:-}" ]; then
         DOCKER_ARGS+=(-e "HTTP_PROXY=$(translate_localhost "$HTTP_PROXY")")
@@ -386,7 +664,6 @@ append_user_volumes() {
     local mount
     local warned=false
     for mount in "${USER_VOLUMES[@]}"; do
-        # Warn about /root/* mounts (should be /home/deva/*)
         if [[ "$mount" == *:/root/* ]] && [ "$warned" = false ]; then
             echo "WARNING: Detected volume mount to /root/* path" >&2
             echo "  Mount: $mount" >&2
@@ -399,13 +676,90 @@ append_user_volumes() {
     done
 }
 
+docker_args_has_env() {
+    local name="$1"
+    local i
+    for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
+        if [ "${DOCKER_ARGS[$i]}" = "-e" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ]; then
+            local spec="${DOCKER_ARGS[$((i + 1))]}"
+            if [ "$spec" = "$name" ] || [[ "$spec" == "$name="* ]]; then
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+should_skip_env_for_auth() {
+    local name="$1"
+
+    case "$ACTIVE_AGENT" in
+        claude)
+            case "${AUTH_METHOD:-claude}" in
+                claude)
+                    case "$name" in
+                        ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|OPENAI_API_KEY|OPENAI_BASE_URL|openai_base_url)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+                copilot)
+                    case "$name" in
+                        ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+            esac
+            ;;
+        codex)
+            case "${AUTH_METHOD:-chatgpt}" in
+                chatgpt)
+                    case "$name" in
+                        OPENAI_API_KEY|OPENAI_BASE_URL|openai_base_url)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+                copilot)
+                    case "$name" in
+                        OPENAI_API_KEY|OPENAI_BASE_URL|openai_base_url)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+            esac
+            ;;
+    esac
+
+    return 1
+}
+
 append_user_envs() {
     if [ ${#USER_ENVS[@]} -eq 0 ]; then
         return
     fi
 
-    local env_spec
+    local env_spec name
     for env_spec in "${USER_ENVS[@]}"; do
+        if [[ "$env_spec" == *"="* ]]; then
+            name="${env_spec%%=*}"
+        else
+            name="$env_spec"
+        fi
+
+        if [ -z "$name" ]; then
+            continue
+        fi
+
+        if should_skip_env_for_auth "$name"; then
+            continue
+        fi
+
+        if docker_args_has_env "$name"; then
+            continue
+        fi
+
         DOCKER_ARGS+=(-e "$env_spec")
     done
 }
@@ -463,12 +817,10 @@ normalize_volume_spec() {
     local src="${spec%%:*}"
     local remainder="${spec#*:}"
 
-    # Expand tilde
     if [[ "$src" == ~* ]]; then
         src="$(expand_tilde "$src")"
     fi
 
-    # Resolve relative filesystem paths while leaving Docker named volumes untouched
     if [[ "$src" == ./* || "$src" == ../* ]]; then
         src="$(absolute_path "$src")"
     elif [[ "$src" == /* ]]; then
@@ -478,6 +830,39 @@ normalize_volume_spec() {
     fi
 
     echo "$src:$remainder"
+}
+
+compute_volume_hash() {
+    if [ ${#USER_VOLUMES[@]} -eq 0 ]; then
+        return
+    fi
+
+    local hash_input=""
+    local sorted_vols
+    sorted_vols=$(printf '%s\n' "${USER_VOLUMES[@]}" | sort)
+
+    while IFS= read -r vol; do
+        [ -n "$vol" ] || continue
+        local src="${vol%%:*}"
+
+        if [ -e "$src" ]; then
+            local abs_src
+            abs_src=$(cd "$(dirname "$src")" 2>/dev/null && pwd)/$(basename "$src") || abs_src="$src"
+            src="$abs_src"
+        fi
+
+        hash_input="${hash_input}${src}:${vol#*:}|"
+    done <<< "$sorted_vols"
+
+    if [ -n "$hash_input" ]; then
+        if command -v md5sum >/dev/null 2>&1; then
+            echo "$hash_input" | md5sum | cut -c1-8
+        elif command -v shasum >/dev/null 2>&1; then
+            echo "$hash_input" | shasum | cut -c1-8
+        else
+            echo "$hash_input" | cksum | cut -d' ' -f1 | cut -c1-8
+        fi
+    fi
 }
 
 validate_env_name() {
@@ -603,11 +988,9 @@ process_var_config() {
     DEFAULT_AGENT)
         DEFAULT_AGENT="$value"
         ;;
-    # New, preferred key
     PROFILE)
         PROFILE="$value"
         ;;
-    # Legacy compatibility: map IMAGE_PROFILE to PROFILE silently
     IMAGE_PROFILE)
         PROFILE="$value"
         ;;
@@ -785,6 +1168,21 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --rm)
+            EPHEMERAL_MODE=true
+            i=$((i + 1))
+            continue
+            ;;
+        -g | --global)
+            GLOBAL_MODE=true
+            i=$((i + 1))
+            continue
+            ;;
+        --verbose | --debug)
+            DEBUG_MODE=true
+            i=$((i + 1))
+            continue
+            ;;
         *)
             remaining+=("$arg")
             i=$((i + 1))
@@ -808,9 +1206,7 @@ load_agent_module() {
     fi
 }
 
-# Resolve image based on selected profile and overrides
 resolve_profile() {
-    # Map profiles to images (prefer prebuilt registries, fallback handled by check_image)
     local default_repo="ghcr.io/thevibeworks/deva"
     case "${PROFILE:-}" in
     "" | base)
@@ -830,7 +1226,6 @@ resolve_profile() {
         fi
         ;;
     *)
-        # Unknown profile – leave as provided by env, check_image will report
         if [ "$DEVA_DOCKER_IMAGE_ENV_SET" = false ] && [ -z "${DEVA_DOCKER_IMAGE:-}" ]; then
             DEVA_DOCKER_IMAGE="$default_repo"
         fi
@@ -842,14 +1237,10 @@ is_known_agent() { [ -f "$AGENTS_DIR/$1.sh" ]; }
 
 ACTION="run"
 MANAGEMENT_MODE="launch"
-
-# Split CLI into Deva flags, agent, and agent args (after --)
 RAW_ARGS=("$@")
 WRAPPER_ARGS=()
 AGENT_ARGV=()
 ACTIVE_AGENT=""
-
-# Find sentinel index
 SENTINEL_IDX=-1
 if [ ${#RAW_ARGS[@]} -gt 0 ]; then
 for i in "${!RAW_ARGS[@]}"; do
@@ -873,7 +1264,16 @@ else
     fi
 fi
 
-# Detect management commands in PRE_ARGS
+if [ ${#PRE_ARGS[@]} -gt 0 ]; then
+for tok in "${PRE_ARGS[@]}"; do
+    case "$tok" in
+    -g | --global)
+        GLOBAL_MODE=true
+        ;;
+    esac
+done
+fi
+
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
 for tok in "${PRE_ARGS[@]}"; do
     case "$tok" in
@@ -884,33 +1284,36 @@ for tok in "${PRE_ARGS[@]}"; do
     --show-config)
         MANAGEMENT_MODE="show-config"
         ;;
-    shell)
-        MANAGEMENT_MODE="inspect"
-        ACTION="shell"
+    shell | --inspect)
+        MANAGEMENT_MODE="shell"
         ;;
-    --inspect)
-        MANAGEMENT_MODE="inspect"
-        ;;
-    --ps)
+    ps | --ps)
         MANAGEMENT_MODE="ps"
+        ;;
+    stop)
+        MANAGEMENT_MODE="stop"
+        ;;
+    rm | remove)
+        MANAGEMENT_MODE="rm"
+        ;;
+    clean | prune)
+        MANAGEMENT_MODE="clean"
         ;;
     esac
 done
 fi
 
-if [ "$MANAGEMENT_MODE" = "inspect" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ]; then
+if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ] || [ "$MANAGEMENT_MODE" = "stop" ] || [ "$MANAGEMENT_MODE" = "rm" ] || [ "$MANAGEMENT_MODE" = "clean" ]; then
     if [ "$MANAGEMENT_MODE" = "ps" ]; then
         list_containers_pretty
         exit 0
     fi
 
     if [ "$MANAGEMENT_MODE" = "show-config" ]; then
-        # Parse args first to load config
         if [ ${#RAW_ARGS[@]} -gt 0 ]; then
             parse_wrapper_args "${RAW_ARGS[@]}"
         fi
         load_config_sources
-        # Detect agent from PRE_ARGS
         if [ ${#PRE_ARGS[@]} -gt 0 ]; then
             for tok in "${PRE_ARGS[@]}"; do
                 if [[ "$tok" != -* ]] && [[ "$tok" != "help" ]] && [[ "$tok" != "shell" ]] && [[ "$tok" != "--inspect" ]] && [[ "$tok" != "--ps" ]] && [[ "$tok" != "--show-config" ]] && is_known_agent "$tok"; then
@@ -926,12 +1329,79 @@ if [ "$MANAGEMENT_MODE" = "inspect" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MA
         exit 0
     fi
 
-    container_name=$(pick_container) || exit 1
-    attach_to_container "$container_name"
-    exit 0
+    if [ "$MANAGEMENT_MODE" = "stop" ]; then
+        container_name=$(pick_container) || {
+            echo "error: no running containers found" >&2
+            exit 1
+        }
+        echo "Stopping container: $container_name"
+        docker stop "$container_name"
+        exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "rm" ]; then
+        slug="$(generate_container_slug)"
+        rgx=""
+        if [ "$GLOBAL_MODE" = true ]; then
+            rgx="^${DEVA_CONTAINER_PREFIX}-"
+        else
+            escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
+            rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|\\-|$)"
+        fi
+
+        all_names=$(docker ps -a --format '{{.Names}}')
+        matching_names=$(echo "$all_names" | grep -E "$rgx" || true)
+
+        if [ -z "$matching_names" ]; then
+            echo "error: no containers found" >&2
+            exit 1
+        fi
+
+        container_count=$(echo "$matching_names" | wc -l | tr -d ' ')
+        if [ "$container_count" -eq 1 ]; then
+            container_name="$matching_names"
+        else
+            container_name=$(pick_container) || {
+                echo "error: no container selected" >&2
+                exit 1
+            }
+        fi
+
+        echo "Removing container: $container_name"
+        docker rm -f "$container_name"
+        exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "clean" ]; then
+        echo "Removing all stopped deva containers..."
+        rgx=""
+        if [ "$GLOBAL_MODE" = true ]; then
+            rgx="^${DEVA_CONTAINER_PREFIX}-"
+        else
+            slug="$(generate_container_slug)"
+            escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
+            rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|\\-|$)"
+        fi
+
+        all_stopped=$(docker ps -a --filter "status=exited" --format '{{.Names}}')
+        matching_stopped=$(echo "$all_stopped" | grep -E "$rgx" || true)
+
+        if [ -n "$matching_stopped" ]; then
+            echo "$matching_stopped" | xargs docker rm
+            echo "Cleaned up stopped containers"
+        else
+            echo "No stopped containers found"
+        fi
+        exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "shell" ]; then
+        container_name=$(pick_container) || exit 1
+        echo "Opening shell in container: $container_name"
+        exec docker exec -it "$container_name" gosu deva /bin/zsh -l
+    fi
 fi
 
-# Select agent: first token in PRE_ARGS that matches a known agent
 agent_idx=-1
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
 for i in "${!PRE_ARGS[@]}"; do
@@ -950,7 +1420,6 @@ if [ -z "$ACTIVE_AGENT" ]; then
     AGENT_EXPLICIT=false
 fi
 
-# Build WRAPPER_ARGS = PRE_ARGS minus agent token
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
 for i in "${!PRE_ARGS[@]}"; do
     if [ "$i" -eq "$agent_idx" ]; then continue; fi
@@ -958,20 +1427,18 @@ for i in "${!PRE_ARGS[@]}"; do
 done
 fi
 
-# Agent argv is everything after --
 if [ ${#POST_ARGS[@]} -gt 0 ]; then
     AGENT_ARGV=("${POST_ARGS[@]}")
 else
     AGENT_ARGV=()
 fi
 
-# Parse Deva flags
 if [ ${#WRAPPER_ARGS[@]} -gt 0 ]; then
     parse_wrapper_args "${WRAPPER_ARGS[@]}"
 else
     parse_wrapper_args
 fi
-# Back-compat: treat unrecognized wrapper tokens as agent args
+
 if [ ${#AGENT_ARGS[@]} -gt 0 ]; then
     if [ ${#AGENT_ARGV[@]} -gt 0 ]; then
         AGENT_ARGV=("${AGENT_ARGS[@]}" "${AGENT_ARGV[@]}")
@@ -986,18 +1453,15 @@ if [ "$AGENT_EXPLICIT" = false ]; then
     ACTIVE_AGENT="$DEFAULT_AGENT"
 fi
 
-# Default per-agent CONFIG_HOME if not set
 if [ -z "$CONFIG_HOME" ]; then
     set_config_home_value "$(default_config_home_for_agent "$ACTIVE_AGENT")"
     CONFIG_HOME_AUTO=true
 fi
 
-# Discover CONFIG_ROOT when using default XDG per-agent home
 if [ "$CONFIG_HOME_AUTO" = true ]; then
     CONFIG_ROOT="$(dirname "$CONFIG_HOME")"
 fi
 
-# If user passed -c (or legacy -H) pointing at a deva root, treat it as CONFIG_ROOT
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
     if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
@@ -1006,14 +1470,12 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
     fi
 fi
 
-# Auto-link legacy creds into deva root if absent (optional)
 autolink_legacy_into_deva_root() {
     [ "$AUTOLINK" = true ] || return
     [ "$CONFIG_HOME_FROM_CLI" = false ] || return
     [ -n "${CONFIG_ROOT:-}" ] || return
     [ -d "$CONFIG_ROOT" ] || mkdir -p "$CONFIG_ROOT"
 
-    # Claude
     if [ -d "$HOME/.claude" ] || [ -f "$HOME/.claude.json" ]; then
         [ -d "$CONFIG_ROOT/claude" ] || mkdir -p "$CONFIG_ROOT/claude"
         if [ -d "$HOME/.claude" ] && [ ! -e "$CONFIG_ROOT/claude/.claude" ] && [ ! -L "$CONFIG_ROOT/claude/.claude" ]; then
@@ -1025,13 +1487,11 @@ autolink_legacy_into_deva_root() {
             echo "autolink: ~/.claude.json -> $CONFIG_ROOT/claude/.claude.json" >&2
         fi
     fi
-    # Ensure a persistent file exists for Claude CLI settings
     if [ -d "$CONFIG_ROOT/claude" ] && [ ! -e "$CONFIG_ROOT/claude/.claude.json" ] && [ ! -L "$CONFIG_ROOT/claude/.claude.json" ]; then
         echo '{}' >"$CONFIG_ROOT/claude/.claude.json"
         echo "scaffold: created $CONFIG_ROOT/claude/.claude.json" >&2
     fi
 
-    # Codex
     if [ -d "$HOME/.codex" ]; then
         [ -d "$CONFIG_ROOT/codex" ] || mkdir -p "$CONFIG_ROOT/codex"
         if [ ! -e "$CONFIG_ROOT/codex/.codex" ] && [ ! -L "$CONFIG_ROOT/codex/.codex" ]; then
@@ -1039,7 +1499,6 @@ autolink_legacy_into_deva_root() {
             echo "autolink: ~/.codex -> $CONFIG_ROOT/codex/.codex" >&2
         fi
     fi
-    # Ensure Codex dir exists for persistence
     if [ -d "$CONFIG_ROOT" ]; then
         [ -d "$CONFIG_ROOT/codex/.codex" ] || mkdir -p "$CONFIG_ROOT/codex/.codex"
     fi
@@ -1064,26 +1523,181 @@ resolve_profile
 check_image
 prepare_base_docker_args
 append_user_volumes
-append_user_envs
 append_extra_docker_args
-# Mount configs: prefer full deva root if detected
-if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
-    autolink_legacy_into_deva_root
-    for d in "$CONFIG_ROOT"/*; do
-        [ -d "$d" ] || continue
-        [ "$(basename "$d")" = "_shared" ] && continue
-        mount_dir_contents_into_home "$d"
-    done
-else
-    autolink_legacy_into_deva_root
-    mount_config_home
-fi
+
+autolink_legacy_into_deva_root
 load_agent_module
 AGENT_COMMAND=()
 if [ ${#AGENT_ARGV[@]} -gt 0 ]; then
     agent_prepare "${AGENT_ARGV[@]}"
 else
     agent_prepare
+fi
+
+# Update container name based on auth method
+if [ -n "${AUTH_METHOD:-}" ]; then
+    # Determine if we need auth suffix
+    needs_auth_suffix=false
+    if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" != "claude" ]; then
+        needs_auth_suffix=true
+    elif [ "$ACTIVE_AGENT" = "codex" ] && [ "$AUTH_METHOD" != "chatgpt" ]; then
+        needs_auth_suffix=true
+    fi
+
+    if [ "$needs_auth_suffix" = true ]; then
+        slug="$(generate_container_slug)"
+        volume_hash=""
+        if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
+            volume_hash=$(compute_volume_hash)
+        fi
+
+        new_container_name=""
+        if [ "$EPHEMERAL_MODE" = true ]; then
+            if [ -n "$volume_hash" ]; then
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${AUTH_METHOD}-${ACTIVE_AGENT}-$$"
+            else
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${AUTH_METHOD}-${ACTIVE_AGENT}-$$"
+            fi
+        else
+            if [ -n "$volume_hash" ]; then
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${AUTH_METHOD}"
+            else
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${AUTH_METHOD}"
+            fi
+        fi
+
+        # Update container name in DOCKER_ARGS
+        for ((i=0; i<${#DOCKER_ARGS[@]}; i++)); do
+            if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i+1)) -lt ${#DOCKER_ARGS[@]} ]; then
+                DOCKER_ARGS[i+1]="$new_container_name"
+                break
+            fi
+        done
+    fi
+fi
+
+# Centralized mounting logic based on auth method
+if [ -n "${AUTH_METHOD:-}" ]; then
+    is_default_auth=false
+    if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" = "claude" ]; then
+        is_default_auth=true
+    elif [ "$ACTIVE_AGENT" = "codex" ] && [ "$AUTH_METHOD" = "chatgpt" ]; then
+        is_default_auth=true
+    fi
+
+    if [ "$is_default_auth" = true ]; then
+        # Default auth: mount all OAuth credentials for shared container
+        if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
+            # CONFIG_ROOT mode: mount all agent dirs (includes OAuth via symlinks)
+            for d in "$CONFIG_ROOT"/*; do
+                [ -d "$d" ] || continue
+                [ "$(basename "$d")" = "_shared" ] && continue
+                mount_dir_contents_into_home "$d"
+            done
+        else
+            # Direct mode: mount both ~/.claude and ~/.codex
+            if [ -d "$HOME/.claude" ]; then
+                DOCKER_ARGS+=("-v" "$HOME/.claude:/home/deva/.claude")
+            fi
+            if [ -f "$HOME/.claude.json" ]; then
+                DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
+            fi
+            if [ -d "$HOME/.codex" ]; then
+                DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
+            fi
+        fi
+    else
+        # Non-default auth: exclude OAuth credential files
+        if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
+            # CONFIG_ROOT mode: selectively mount, excluding credentials
+            for agent_dir in "$CONFIG_ROOT"/*; do
+                [ -d "$agent_dir" ] || continue
+                agent_name=$(basename "$agent_dir")
+                [ "$agent_name" = "_shared" ] && continue
+
+                # Determine credential file to exclude
+                exclude_file=""
+                case "$agent_name" in
+                    claude) exclude_file=".credentials.json" ;;
+                    codex) exclude_file="auth.json" ;;
+                esac
+
+                # Mount agent dir contents, excluding OAuth credentials
+                for item in "$agent_dir"/.* "$agent_dir"/*; do
+                    [ -e "$item" ] || continue
+                    name=$(basename "$item")
+                    case "$name" in
+                        .|..) continue ;;
+                    esac
+
+                    # Skip OAuth credential files
+                    if [ -n "$exclude_file" ]; then
+                        # Check if item is the credential file or contains it
+                        if [ "$name" = "$exclude_file" ]; then
+                            continue
+                        elif [ -d "$item" ] && [ -f "$item/$exclude_file" ]; then
+                            # It's a .claude or .codex directory containing credentials
+                            # Mount contents individually, excluding credential
+                            for subitem in "$item"/* "$item"/.*; do
+                                [ -e "$subitem" ] || continue
+                                subname=$(basename "$subitem") || {
+                                    echo "warning: failed to get basename for $subitem" >&2
+                                    continue
+                                }
+                                [ -n "$subname" ] || continue
+                                case "$subname" in
+                                    .|..|"$exclude_file") continue ;;
+                                esac
+                                DOCKER_ARGS+=("-v" "$subitem:/home/deva/$name/$subname")
+                            done
+                            continue
+                        fi
+                    fi
+
+                    DOCKER_ARGS+=("-v" "$item:/home/deva/$name")
+                done
+            done
+        else
+            # Direct mode: mount ~/.claude and ~/.codex, excluding credentials
+            if [ -d "$HOME/.claude" ]; then
+                for item in "$HOME/.claude"/* "$HOME/.claude"/.*; do
+                    [ -e "$item" ] || continue
+                    name=$(basename "$item") || {
+                        echo "warning: failed to get basename for $item" >&2
+                        continue
+                    }
+                    [ -n "$name" ] || continue
+                    case "$name" in
+                        .|..|.credentials.json) continue ;;
+                    esac
+                    DOCKER_ARGS+=("-v" "$item:/home/deva/.claude/$name")
+                done
+            fi
+            if [ -f "$HOME/.claude.json" ]; then
+                DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
+            fi
+            if [ -d "$HOME/.codex" ]; then
+                for item in "$HOME/.codex"/* "$HOME/.codex"/.*; do
+                    [ -e "$item" ] || continue
+                    name=$(basename "$item") || {
+                        echo "warning: failed to get basename for $item" >&2
+                        continue
+                    }
+                    [ -n "$name" ] || continue
+                    case "$name" in
+                        .|..|auth.json) continue ;;
+                    esac
+                    DOCKER_ARGS+=("-v" "$item:/home/deva/.codex/$name")
+                done
+            fi
+        fi
+    fi
+fi
+
+# Mount project-local .claude directory if exists
+append_user_envs
+if [ -d "$(pwd)/.claude" ]; then
+    DOCKER_ARGS+=("-v" "$(pwd)/.claude:$(pwd)/.claude")
 fi
 
 DOCKER_ARGS+=("${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}")
@@ -1097,5 +1711,46 @@ if [ ${#AGENT_COMMAND[@]} -eq 0 ]; then
     exit 1
 fi
 
-echo "Launching ${ACTIVE_AGENT} via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
-docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"
+CONTAINER_NAME=""
+for ((i=0; i<${#DOCKER_ARGS[@]}; i++)); do
+    if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i+1)) -lt ${#DOCKER_ARGS[@]} ]; then
+        CONTAINER_NAME="${DOCKER_ARGS[$((i+1))]}"
+        break
+    fi
+done
+
+if [ "$DEBUG_MODE" = true ]; then
+    echo "=== DEBUG: Docker command ===" >&2
+    echo "Container name: $CONTAINER_NAME" >&2
+    echo "USER_VOLUMES (${#USER_VOLUMES[@]}): ${USER_VOLUMES[*]}" >&2
+    echo "Ephemeral mode: $EPHEMERAL_MODE" >&2
+    echo "" >&2
+    if [ "$EPHEMERAL_MODE" = false ]; then
+        echo "docker run -d ${DOCKER_ARGS[*]:2} tail -f /dev/null" >&2
+        echo "docker exec -it $CONTAINER_NAME /usr/local/bin/docker-entrypoint.sh ${AGENT_COMMAND[*]}" >&2
+    else
+        echo "docker ${DOCKER_ARGS[*]} ${AGENT_COMMAND[*]}" >&2
+    fi
+    echo "===========================" >&2
+    echo "" >&2
+fi
+
+if [ "$EPHEMERAL_MODE" = false ]; then
+    if ! docker ps -q --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
+        if docker ps -aq --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
+            echo "Starting stopped container: $CONTAINER_NAME"
+            docker start "$CONTAINER_NAME" >/dev/null
+        else
+            echo "Creating persistent container: $CONTAINER_NAME"
+            docker "${DOCKER_ARGS[@]}" tail -f /dev/null >/dev/null
+            sleep 0.5
+        fi
+    else
+        echo "Attaching to existing container: $CONTAINER_NAME"
+    fi
+    
+    exec docker exec -it "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+else
+    echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+    docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"
+fi
