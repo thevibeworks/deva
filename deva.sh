@@ -52,6 +52,8 @@ Usage:
 Container management:
   deva.sh --inspect          Attach to running container for current project
   deva.sh --ps               List containers for current project
+  deva.sh rm                 Remove containers for current project
+  deva.sh clean              Remove all deva containers (including stopped)
   deva.sh --show-config      Show resolved configuration (debug)
 
 Deva flags:
@@ -203,9 +205,17 @@ translate_localhost() {
 
 project_container_rows() {
     local project
+    local all_containers="${1:-false}"
     project="$(basename "$(pwd)")"
-    docker ps --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}' |
-        awk -v proj="-${project}-" -F '\t' 'index($1, proj) > 0'
+
+    local ps_flags=""
+    if [ "$all_containers" = "true" ]; then
+        ps_flags="-a"
+    fi
+
+    # List containers matching the project name pattern
+    docker ps $ps_flags --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}' |
+        grep -F -- "-${project}-" || true
 }
 
 extract_agent_from_name() {
@@ -279,6 +289,76 @@ list_containers_pretty() {
     printf 'NAME\tAGENT\tSTATUS\tCREATED AT\n'
     printf '%s\n' "$rows" | while IFS=$'\t' read -r name status created; do
         printf '%s\t%s\t%s\t%s\n' "$name" "$(extract_agent_from_name "$name")" "$status" "$created"
+    done
+}
+
+remove_project_containers() {
+    local project
+    project="$(basename "$(pwd)")"
+    local rows
+    rows=$(project_container_rows true)
+
+    if [ -z "$rows" ]; then
+        echo "No containers found for project $project"
+        return 0
+    fi
+
+    local count
+    count=$(printf '%s\n' "$rows" | wc -l | tr -d ' ')
+    echo "Found $count container(s) for project $project:"
+    printf '%s\n' "$rows" | while IFS=$'\t' read -r name status created; do
+        printf '  - %s\t[%s]\n' "$name" "$status"
+    done
+    echo ""
+
+    printf 'Remove all containers for project %s? (y/N): ' "$project"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "Aborted"
+        return 1
+    fi
+
+    printf '%s\n' "$rows" | while IFS=$'\t' read -r name status _; do
+        echo "Removing container: $name"
+        if docker rm -f "$name" >/dev/null 2>&1; then
+            echo "✓ Removed $name"
+        else
+            echo "✗ Failed to remove $name" >&2
+        fi
+    done
+}
+
+remove_all_containers() {
+    local all_rows
+    all_rows=$(docker ps -a --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}')
+
+    if [ -z "$all_rows" ]; then
+        echo "No deva containers found"
+        return 0
+    fi
+
+    local count
+    count=$(printf '%s\n' "$all_rows" | wc -l | tr -d ' ')
+    echo "Found $count deva container(s):"
+    printf '%s\n' "$all_rows" | while IFS=$'\t' read -r name status created; do
+        printf '  - %s\t[%s]\n' "$name" "$status"
+    done
+    echo ""
+
+    printf 'Remove ALL deva containers? (y/N): '
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "Aborted"
+        return 1
+    fi
+
+    printf '%s\n' "$all_rows" | while IFS=$'\t' read -r name status _; do
+        echo "Removing container: $name"
+        if docker rm -f "$name" >/dev/null 2>&1; then
+            echo "✓ Removed $name"
+        else
+            echo "✗ Failed to remove $name" >&2
+        fi
     done
 }
 
@@ -894,13 +974,29 @@ for tok in "${PRE_ARGS[@]}"; do
     --ps)
         MANAGEMENT_MODE="ps"
         ;;
+    rm)
+        MANAGEMENT_MODE="rm"
+        ;;
+    clean)
+        MANAGEMENT_MODE="clean"
+        ;;
     esac
 done
 fi
 
-if [ "$MANAGEMENT_MODE" = "inspect" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ]; then
+if [ "$MANAGEMENT_MODE" = "inspect" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ] || [ "$MANAGEMENT_MODE" = "rm" ] || [ "$MANAGEMENT_MODE" = "clean" ]; then
     if [ "$MANAGEMENT_MODE" = "ps" ]; then
         list_containers_pretty
+        exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "rm" ]; then
+        remove_project_containers
+        exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "clean" ]; then
+        remove_all_containers
         exit 0
     fi
 
@@ -913,7 +1009,7 @@ if [ "$MANAGEMENT_MODE" = "inspect" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MA
         # Detect agent from PRE_ARGS
         if [ ${#PRE_ARGS[@]} -gt 0 ]; then
             for tok in "${PRE_ARGS[@]}"; do
-                if [[ "$tok" != -* ]] && [[ "$tok" != "help" ]] && [[ "$tok" != "shell" ]] && [[ "$tok" != "--inspect" ]] && [[ "$tok" != "--ps" ]] && [[ "$tok" != "--show-config" ]] && is_known_agent "$tok"; then
+                if [[ "$tok" != -* ]] && [[ "$tok" != "help" ]] && [[ "$tok" != "shell" ]] && [[ "$tok" != "--inspect" ]] && [[ "$tok" != "--ps" ]] && [[ "$tok" != "--show-config" ]] && [[ "$tok" != "rm" ]] && [[ "$tok" != "clean" ]] && is_known_agent "$tok"; then
                     ACTIVE_AGENT="$tok"
                     break
                 fi

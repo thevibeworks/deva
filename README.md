@@ -218,6 +218,12 @@ deva-codex-my-project-67890           codex  Up 5 minutes   2025-09-18 18:07:15 
 # Attach to any container (fzf picker if multiple)
 deva.sh --inspect
 deva.sh shell        # alias for --inspect
+
+# Remove containers for current project (with confirmation)
+deva.sh rm
+
+# Remove ALL deva containers including stopped ones (with confirmation)
+deva.sh clean
 ```
 
 ## Multi-Account Auth Architecture
@@ -253,6 +259,8 @@ deva.sh codex -c ~/auth-homes/work-corp
 
 - `deva.sh --ps` – list `deva-*` containers scoped to the current project (includes inferred agent column).
 - `deva.sh --inspect` / `deva.sh shell` – attach to a running container (`fzf` picker if more than one, otherwise auto-attach).
+- `deva.sh rm` – remove all containers (running and stopped) for the current project with confirmation prompt.
+- `deva.sh clean` – remove ALL deva containers (including stopped) across all projects with confirmation prompt.
 
 Container naming pattern: `deva-<agent>-<project>-<pid>`.
 
