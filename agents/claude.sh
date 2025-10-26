@@ -41,17 +41,32 @@ setup_claude_auth() {
 
     case "$method" in
         claude)
+            AUTH_DETAILS="claude-app-oauth (~/.claude)"
             ;;
         api-key)
-            validate_anthropic_key || auth_error "ANTHROPIC_API_KEY not set for --auth-with api-key" \
-                                                  "Set: export ANTHROPIC_API_KEY=your_api_key"
-            DOCKER_ARGS+=("-e" "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+            # Auto-detect OAuth token vs regular API key
+            if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+                DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+                AUTH_DETAILS="oauth-token (CLAUDE_CODE_OAUTH_TOKEN)"
+                echo "Using OAuth token from CLAUDE_CODE_OAUTH_TOKEN" >&2
+            elif [ -n "${ANTHROPIC_API_KEY:-}" ] && is_oauth_token_pattern "$ANTHROPIC_API_KEY"; then
+                DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$ANTHROPIC_API_KEY")
+                AUTH_DETAILS="oauth-token (auto-detected from ANTHROPIC_API_KEY)"
+                echo "Detected OAuth token in ANTHROPIC_API_KEY, using as CLAUDE_CODE_OAUTH_TOKEN" >&2
+            elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+                DOCKER_ARGS+=("-e" "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+                AUTH_DETAILS="api-key (ANTHROPIC_API_KEY)"
+            else
+                auth_error "No API key found for --auth-with api-key" \
+                           "Set: export ANTHROPIC_API_KEY=sk-ant-... or export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..."
+            fi
             ;;
         copilot)
             validate_github_token || auth_error "No GitHub token found for copilot auth" \
                                                 "Run: copilot-api auth, or set GH_TOKEN=\$(gh auth token)"
             start_copilot_proxy
 
+            AUTH_DETAILS="github-copilot (proxy port $COPILOT_PROXY_PORT)"
             DOCKER_ARGS+=("-e" "ANTHROPIC_BASE_URL=http://$COPILOT_HOST_MAPPING:$COPILOT_PROXY_PORT")
             DOCKER_ARGS+=("-e" "ANTHROPIC_API_KEY=dummy")
 
@@ -74,9 +89,11 @@ setup_claude_auth() {
                 auth_error "CLAUDE_CODE_OAUTH_TOKEN not set for --auth-with oat" \
                            "Set: export CLAUDE_CODE_OAUTH_TOKEN=your_token"
             fi
+            AUTH_DETAILS="oauth-token (CLAUDE_CODE_OAUTH_TOKEN)"
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
             ;;
         bedrock)
+            AUTH_DETAILS="aws-bedrock (region: ${AWS_REGION:-default})"
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_USE_BEDROCK=1")
             if [ -d "$HOME/.aws" ]; then
                 DOCKER_ARGS+=("-v" "$HOME/.aws:/home/deva/.aws:ro")
@@ -95,6 +112,7 @@ setup_claude_auth() {
             fi
             ;;
         vertex)
+            AUTH_DETAILS="google-vertex (gcloud)"
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_USE_VERTEX=1")
             if [ -d "$HOME/.config/gcloud" ]; then
                 DOCKER_ARGS+=("-v" "$HOME/.config/gcloud:/home/deva/.config/gcloud:ro")
@@ -103,6 +121,15 @@ setup_claude_auth() {
                 DOCKER_ARGS+=("-v" "$GOOGLE_APPLICATION_CREDENTIALS:$GOOGLE_APPLICATION_CREDENTIALS:ro")
                 DOCKER_ARGS+=("-e" "GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_APPLICATION_CREDENTIALS")
             fi
+            ;;
+        credentials-file)
+            if [ -z "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
+                auth_error "CUSTOM_CREDENTIALS_FILE not set for credentials-file auth"
+            fi
+            AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
+            backup_credentials "claude" "${CONFIG_ROOT:-}" "$CUSTOM_CREDENTIALS_FILE"
+            DOCKER_ARGS+=("-v" "$CUSTOM_CREDENTIALS_FILE:/home/deva/.claude/.credentials.json")
+            echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.claude/.credentials.json" >&2
             ;;
         *)
             auth_error "auth method '$method' not implemented"

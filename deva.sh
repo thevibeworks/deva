@@ -29,6 +29,7 @@ CONFIG_HOME=""
 CONFIG_HOME_AUTO=false
 CONFIG_HOME_FROM_CLI=false
 AUTOLINK=true
+_WS_HASH_CACHE=""
 if [ -n "${DEVA_NO_AUTOLINK:-}" ]; then AUTOLINK=false; fi
 SKIP_CONFIG=false
 CONFIG_ERRORS=()
@@ -51,11 +52,12 @@ Usage:
 
 Container management commands (docker/tmux-style):
   deva.sh ps [-g]            List containers (current project or --all)
+  deva.sh status [-g]        Show session info (current workspace or --all)
   deva.sh shell [-g]         Open zsh shell for inspection (pick if multiple)
   deva.sh stop [-g]          Stop container (pick if multiple)
-  deva.sh rm [-g]            Remove container (pick if multiple)
+  deva.sh rm [-g] [--all]    Remove container (pick if multiple), or all for this workspace
   deva.sh clean [-g]         Remove all stopped containers
-  
+
 Advanced:
   deva.sh --show-config      Show resolved configuration (debug)
 
@@ -76,14 +78,14 @@ Container Behavior (NEW in v0.8.0):
   Default (persistent):   One container per project, reused across runs.
                           Preserves state (npm packages, builds, etc).
                           Faster startup, run any agent (claude/codex).
-  
+
   With --rm (ephemeral):  Create new container, auto-remove after exit.
                           Agent-specific naming for parallel runs.
 
 Container Naming (NEW):
   Persistent:  deva-<parent>-<project>              # One per project
   Ephemeral:   deva-<parent>-<project>-<agent>-<pid>  # Agent-specific
-  
+
   Example:
     /Users/eric/work/myapp  → deva-work-myapp
     /Users/eric/home/myapp  → deva-home-myapp
@@ -106,7 +108,7 @@ Examples:
   deva.sh ps -g                       # List ALL deva containers
   deva.sh shell -g                    # Open shell in any container
   deva.sh stop -g                     # Stop any container
-  
+
 Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
   deva.sh -c ~/work-claude-home -- --trace
@@ -282,9 +284,9 @@ compute_slug_components_for_path() {
     parent="$(basename "$(dirname "$dir_path")")"
 
     case "$parent" in
-        src|github.com|gitlab.com|bitbucket.org|repos|projects|work|code|dev)
-            parent="$(basename "$(dirname "$(dirname "$dir_path")")")"
-            ;;
+    src | github.com | gitlab.com | bitbucket.org | repos | projects | work | code | dev)
+        parent="$(basename "$(dirname "$(dirname "$dir_path")")")"
+        ;;
     esac
 
     local sanitized_parent sanitized_project
@@ -369,14 +371,27 @@ slug_candidates_for_path() {
 
 project_container_rows() {
     local rows
+    if [ "$GLOBAL_MODE" = true ]; then
+        rows=$(docker ps --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}')
+        [ -n "$rows" ] && printf "%s\n" "$rows"
+        return
+    fi
+
+    # Prefer workspace label match when available (new containers)
+    local ws_hash
+    ws_hash=$(workspace_hash)
+    rows=$(docker ps --filter "label=deva.workspace_hash=$ws_hash" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}')
+    if [ -n "$rows" ]; then
+        printf "%s\n" "$rows"
+        return
+    fi
+
+    # Fallback to slug-based name filtering for legacy containers
     rows=$(docker ps --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}\t{{.Status}}\t{{.CreatedAt}}')
     if [ -z "$rows" ]; then
         return
     fi
-    if [ "$GLOBAL_MODE" = true ]; then
-        printf "%s\n" "$rows"
-        return
-    fi
+    # Continue to slug filtering below (don't return here!)
 
     local path="$PWD"
     local slugs=""
@@ -495,13 +510,14 @@ list_containers_pretty() {
     fi
 
     local output
-    output=$(\
+    output=$(
         {
             printf 'NAME\tAGENT\tSTATUS\tCREATED AT\n'
             printf '%s\n' "$rows" | while IFS=$'\t' read -r name status created; do
                 printf '%s\t%s\t%s\t%s\n' "$name" "$(extract_agent_from_name "$name")" "$status" "$created"
             done
-        } )
+        }
+    )
 
     if command -v column >/dev/null 2>&1; then
         printf '%s\n' "$output" | column -t -s $'\t'
@@ -594,6 +610,21 @@ prepare_base_docker_args() {
         --add-host host.docker.internal:host-gateway
     )
 
+    # Attach labels to identify workspace and container grouping
+    local ws_hash
+    ws_hash=$(workspace_hash)
+    DOCKER_ARGS+=(
+        --label "deva.prefix=${DEVA_CONTAINER_PREFIX}"
+        --label "deva.slug=${slug}"
+        --label "deva.workspace=$(pwd)"
+        --label "deva.workspace_hash=${ws_hash}"
+        --label "deva.agent=${ACTIVE_AGENT}"
+        --label "deva.ephemeral=${EPHEMERAL_MODE}"
+    )
+    if [ -n "$volume_hash" ]; then
+        DOCKER_ARGS+=(--label "deva.volhash=${volume_hash}")
+    fi
+
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
     if [ -n "${LC_ALL:-}" ]; then DOCKER_ARGS+=(-e "LC_ALL=$LC_ALL"); fi
     if [ -n "${TZ:-}" ]; then DOCKER_ARGS+=(-e "TZ=$TZ"); fi
@@ -607,9 +638,9 @@ prepare_base_docker_args() {
             local tz_target
             tz_target=$(readlink "/etc/localtime" 2>/dev/null || true)
             case "$tz_target" in
-                */zoneinfo/*)
-                    host_tz="${tz_target##*/zoneinfo/}"
-                    ;;
+            */zoneinfo/*)
+                host_tz="${tz_target##*/zoneinfo/}"
+                ;;
             esac
         fi
         if [ -z "$host_tz" ] && command -v systemsetup >/dev/null 2>&1; then
@@ -694,42 +725,70 @@ should_skip_env_for_auth() {
     local name="$1"
 
     case "$ACTIVE_AGENT" in
+    claude)
+        case "${AUTH_METHOD:-claude}" in
         claude)
-            case "${AUTH_METHOD:-claude}" in
-                claude)
-                    case "$name" in
-                        ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|OPENAI_API_KEY|OPENAI_BASE_URL|openai_base_url)
-                            return 0
-                            ;;
-                    esac
-                    ;;
-                copilot)
-                    case "$name" in
-                        ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL)
-                            return 0
-                            ;;
-                    esac
-                    ;;
+            case "$name" in
+            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+                return 0
+                ;;
             esac
             ;;
-        codex)
-            case "${AUTH_METHOD:-chatgpt}" in
-                chatgpt)
-                    case "$name" in
-                        OPENAI_API_KEY|OPENAI_BASE_URL|openai_base_url)
-                            return 0
-                            ;;
-                    esac
-                    ;;
-                copilot)
-                    case "$name" in
-                        OPENAI_API_KEY|OPENAI_BASE_URL|openai_base_url)
-                            return 0
-                            ;;
-                    esac
-                    ;;
+        api-key | oat)
+            case "$name" in
+            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+                return 0
+                ;;
             esac
             ;;
+        copilot)
+            case "$name" in
+            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN)
+                return 0
+                ;;
+            esac
+            ;;
+        bedrock | vertex | credentials-file)
+            case "$name" in
+            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+                return 0
+                ;;
+            esac
+            ;;
+        esac
+        ;;
+    codex)
+        case "${AUTH_METHOD:-chatgpt}" in
+        chatgpt)
+            case "$name" in
+            OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+                return 0
+                ;;
+            esac
+            ;;
+        api-key)
+            case "$name" in
+            OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url | ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL)
+                return 0
+                ;;
+            esac
+            ;;
+        copilot)
+            case "$name" in
+            OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+                return 0
+                ;;
+            esac
+            ;;
+        credentials-file)
+            case "$name" in
+            OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url | ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL)
+                return 0
+                ;;
+            esac
+            ;;
+        esac
+        ;;
     esac
 
     return 1
@@ -852,7 +911,7 @@ compute_volume_hash() {
         fi
 
         hash_input="${hash_input}${src}:${vol#*:}|"
-    done <<< "$sorted_vols"
+    done <<<"$sorted_vols"
 
     if [ -n "$hash_input" ]; then
         if command -v md5sum >/dev/null 2>&1; then
@@ -863,6 +922,113 @@ compute_volume_hash() {
             echo "$hash_input" | cksum | cut -d' ' -f1 | cut -c1-8
         fi
     fi
+}
+
+workspace_hash() {
+    if [ -n "$_WS_HASH_CACHE" ]; then
+        printf '%s' "$_WS_HASH_CACHE"
+        return
+    fi
+
+    local p
+    p="$(pwd)"
+    if command -v md5sum >/dev/null 2>&1; then
+        _WS_HASH_CACHE=$(printf '%s' "$p" | md5sum | cut -c1-8)
+    elif command -v shasum >/dev/null 2>&1; then
+        _WS_HASH_CACHE=$(printf '%s' "$p" | shasum | cut -c1-8)
+    else
+        _WS_HASH_CACHE=$(printf '%s' "$p" | cksum | cut -d' ' -f1 | cut -c1-8)
+    fi
+    printf '%s' "$_WS_HASH_CACHE"
+}
+
+write_session_file() {
+    local session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+    mkdir -p "$session_dir" 2>/dev/null || return 0
+
+    local session_file="$session_dir/${CONTAINER_NAME}.json"
+    local tmp_file="${session_file}.tmp.$$"
+
+    # Build auth section with optional credential_file
+    local auth_json
+    if [ "${AUTH_METHOD:-}" = "credentials-file" ] && [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
+        auth_json=$(cat <<AUTHEOF
+    "method": "${AUTH_METHOD:-default}",
+    "details": "${AUTH_DETAILS:-}",
+    "credential_file": "$CUSTOM_CREDENTIALS_FILE"
+AUTHEOF
+)
+    else
+        auth_json=$(cat <<AUTHEOF
+    "method": "${AUTH_METHOD:-default}",
+    "details": "${AUTH_DETAILS:-}"
+AUTHEOF
+)
+    fi
+
+    cat > "$tmp_file" 2>/dev/null <<EOF
+{
+  "container": "$CONTAINER_NAME",
+  "agent": "$ACTIVE_AGENT",
+  "workspace": "$(pwd)",
+  "workspace_hash": "$(workspace_hash)",
+  "auth": {
+$auth_json
+  },
+  "ephemeral": $EPHEMERAL_MODE,
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)",
+  "last_seen": "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)",
+  "status": "running",
+  "pid": $$
+}
+EOF
+    [ -f "$tmp_file" ] && mv "$tmp_file" "$session_file" 2>/dev/null
+}
+
+update_session_file() {
+    local session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+    local session_file="$session_dir/${CONTAINER_NAME}.json"
+
+    [ -f "$session_file" ] || return 0
+
+    if command -v jq >/dev/null 2>&1; then
+        local ts
+        ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%FT%TZ)
+        jq --arg ts "$ts" \
+           '.last_seen = $ts | .status = "running"' \
+           "$session_file" > "${session_file}.tmp" 2>/dev/null && \
+        mv "${session_file}.tmp" "$session_file" 2>/dev/null
+    fi
+}
+
+remove_session_file() {
+    local container_name="$1"
+    local session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+    rm -f "$session_dir/${container_name}.json" 2>/dev/null
+}
+
+cleanup_stale_sessions() {
+    local session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+    [ -d "$session_dir" ] || return 0
+
+    local all_containers
+    all_containers=$(docker ps -a --format '{{.Names}}' 2>/dev/null)
+
+    for session in "$session_dir"/*.json; do
+        [ -f "$session" ] || continue
+        local name
+        if command -v jq >/dev/null 2>&1; then
+            name=$(jq -r '.container // empty' "$session" 2>/dev/null)
+        else
+            name=$(grep -o '"container"[[:space:]]*:[[:space:]]*"[^"]*"' "$session" | sed 's/.*: *"\([^"]*\)".*/\1/')
+        fi
+
+        [ -z "$name" ] && continue
+
+        if ! echo "$all_containers" | grep -q "^${name}$"; then
+            rm -f "$session" 2>/dev/null
+        fi
+    done
 }
 
 validate_env_name() {
@@ -1243,12 +1409,12 @@ AGENT_ARGV=()
 ACTIVE_AGENT=""
 SENTINEL_IDX=-1
 if [ ${#RAW_ARGS[@]} -gt 0 ]; then
-for i in "${!RAW_ARGS[@]}"; do
-    if [ "${RAW_ARGS[$i]}" = "--" ]; then
-        SENTINEL_IDX=$i
-        break
-    fi
-done
+    for i in "${!RAW_ARGS[@]}"; do
+        if [ "${RAW_ARGS[$i]}" = "--" ]; then
+            SENTINEL_IDX=$i
+            break
+        fi
+    done
 fi
 
 PRE_ARGS=()
@@ -1265,45 +1431,48 @@ else
 fi
 
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
-for tok in "${PRE_ARGS[@]}"; do
-    case "$tok" in
-    -g | --global)
-        GLOBAL_MODE=true
-        ;;
-    esac
-done
+    for tok in "${PRE_ARGS[@]}"; do
+        case "$tok" in
+        -g | --global)
+            GLOBAL_MODE=true
+            ;;
+        esac
+    done
 fi
 
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
-for tok in "${PRE_ARGS[@]}"; do
-    case "$tok" in
-    help | --help | -h)
-        usage
-        exit 0
-        ;;
-    --show-config)
-        MANAGEMENT_MODE="show-config"
-        ;;
-    shell | --inspect)
-        MANAGEMENT_MODE="shell"
-        ;;
-    ps | --ps)
-        MANAGEMENT_MODE="ps"
-        ;;
-    stop)
-        MANAGEMENT_MODE="stop"
-        ;;
-    rm | remove)
-        MANAGEMENT_MODE="rm"
-        ;;
-    clean | prune)
-        MANAGEMENT_MODE="clean"
-        ;;
-    esac
-done
+    for tok in "${PRE_ARGS[@]}"; do
+        case "$tok" in
+        help | --help | -h)
+            usage
+            exit 0
+            ;;
+        --show-config)
+            MANAGEMENT_MODE="show-config"
+            ;;
+        shell | --inspect)
+            MANAGEMENT_MODE="shell"
+            ;;
+        ps | --ps)
+            MANAGEMENT_MODE="ps"
+            ;;
+        stop)
+            MANAGEMENT_MODE="stop"
+            ;;
+        rm | remove)
+            MANAGEMENT_MODE="rm"
+            ;;
+        clean | prune)
+            MANAGEMENT_MODE="clean"
+            ;;
+        status)
+            MANAGEMENT_MODE="status"
+            ;;
+        esac
+    done
 fi
 
-if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ] || [ "$MANAGEMENT_MODE" = "stop" ] || [ "$MANAGEMENT_MODE" = "rm" ] || [ "$MANAGEMENT_MODE" = "clean" ]; then
+if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ] || [ "$MANAGEMENT_MODE" = "stop" ] || [ "$MANAGEMENT_MODE" = "rm" ] || [ "$MANAGEMENT_MODE" = "clean" ] || [ "$MANAGEMENT_MODE" = "status" ]; then
     if [ "$MANAGEMENT_MODE" = "ps" ]; then
         list_containers_pretty
         exit 0
@@ -1340,57 +1509,214 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
     fi
 
     if [ "$MANAGEMENT_MODE" = "rm" ]; then
-        slug="$(generate_container_slug)"
-        rgx=""
-        if [ "$GLOBAL_MODE" = true ]; then
-            rgx="^${DEVA_CONTAINER_PREFIX}-"
-        else
-            escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
-            rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|\\-|$)"
+        RM_ALL=false
+        if [ ${#PRE_ARGS[@]} -gt 0 ]; then
+            for tok in "${PRE_ARGS[@]}"; do
+                case "$tok" in
+                -a | --all | all) RM_ALL=true ;;
+                esac
+            done
         fi
 
-        all_names=$(docker ps -a --format '{{.Names}}')
-        matching_names=$(echo "$all_names" | grep -E "$rgx" || true)
+        # Prefer label-based selection for current workspace
+        ws_hash=$(workspace_hash)
+        matching_names=$(docker ps -a --filter "label=deva.workspace_hash=$ws_hash" --format '{{.Names}}')
+        if [ -z "$matching_names" ]; then
+            if [ "$GLOBAL_MODE" = true ]; then
+                matching_names=$(docker ps -a --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}')
+            else
+                slug="$(generate_container_slug)"
+                escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
+                rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|-|$)"
+                all_names=$(docker ps -a --format '{{.Names}}')
+                matching_names=$(echo "$all_names" | grep -E -- "$rgx" || true)
+            fi
+        fi
 
         if [ -z "$matching_names" ]; then
-            echo "error: no containers found" >&2
-            exit 1
+            echo "No deva containers found for this project"
+            exit 0
         fi
 
-        container_count=$(echo "$matching_names" | wc -l | tr -d ' ')
-        if [ "$container_count" -eq 1 ]; then
-            container_name="$matching_names"
+        if [ "$RM_ALL" = true ]; then
+            echo "Removing all containers for this workspace:"
+            printf '%s\n' "$matching_names"
+            while IFS= read -r n; do
+                [ -n "$n" ] || continue
+                if docker rm -f "$n" >/dev/null 2>&1; then
+                    echo "  removed: $n"
+                    remove_session_file "$n"
+                else
+                    echo "  failed:  $n" >&2
+                fi
+            done <<<"$matching_names"
         else
-            container_name=$(pick_container) || {
-                echo "error: no container selected" >&2
-                exit 1
-            }
+            container_count=$(echo "$matching_names" | wc -l | tr -d ' ')
+            if [ "$container_count" -eq 1 ]; then
+                container_name="$matching_names"
+            else
+                if command -v fzf >/dev/null 2>&1; then
+                    container_name=$(printf '%s\n' "$matching_names" | fzf --prompt="Select container to remove> " --height=15 --border)
+                else
+                    i=1
+                    mapfile -t _names < <(printf '%s\n' "$matching_names")
+                    echo "Matching containers:"
+                    for n in "${_names[@]}"; do
+                        printf '  %d) %s\n' "$i" "$n"
+                        i=$((i + 1))
+                    done
+                    printf 'Select container (1-%d): ' "${#_names[@]}"
+                    read -r choice
+                    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#_names[@]}" ]; then
+                        container_name="${_names[$((choice - 1))]}"
+                    else
+                        container_name=""
+                    fi
+                fi
+                if [ -z "${container_name:-}" ]; then
+                    echo "error: no container selected" >&2
+                    exit 1
+                fi
+            fi
+            echo "Removing container: $container_name"
+            docker rm -f "$container_name" && remove_session_file "$container_name"
         fi
-
-        echo "Removing container: $container_name"
-        docker rm -f "$container_name"
         exit 0
     fi
 
     if [ "$MANAGEMENT_MODE" = "clean" ]; then
         echo "Removing all stopped deva containers..."
-        rgx=""
         if [ "$GLOBAL_MODE" = true ]; then
-            rgx="^${DEVA_CONTAINER_PREFIX}-"
+            matching_stopped=$(docker ps -a --filter "status=exited" --filter "name=${DEVA_CONTAINER_PREFIX}-" --format '{{.Names}}')
         else
-            slug="$(generate_container_slug)"
-            escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
-            rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|\\-|$)"
+            ws_hash=$(workspace_hash)
+            matching_stopped=$(docker ps -a --filter "status=exited" --filter "label=deva.workspace_hash=$ws_hash" --format '{{.Names}}')
+            if [ -z "$matching_stopped" ]; then
+                slug="$(generate_container_slug)"
+                escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
+                rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|-|$)"
+                all_stopped=$(docker ps -a --filter "status=exited" --format '{{.Names}}')
+                matching_stopped=$(echo "$all_stopped" | grep -E -- "$rgx" || true)
+            fi
         fi
 
-        all_stopped=$(docker ps -a --filter "status=exited" --format '{{.Names}}')
-        matching_stopped=$(echo "$all_stopped" | grep -E "$rgx" || true)
-
         if [ -n "$matching_stopped" ]; then
+            while IFS= read -r n; do
+                [ -n "$n" ] || continue
+                remove_session_file "$n"
+            done <<<"$matching_stopped"
             echo "$matching_stopped" | xargs docker rm
             echo "Cleaned up stopped containers"
         else
             echo "No stopped containers found"
+        fi
+
+        # Clean up stale session files
+        cleanup_stale_sessions
+        exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "status" ]; then
+        session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+        show_all=false
+
+        # Check for -g/--all flag
+        for tok in "${PRE_ARGS[@]}"; do
+            case "$tok" in
+            -g | --all) show_all=true ;;
+            esac
+        done
+
+        if [ "$show_all" = true ]; then
+            # Show all sessions
+            if [ ! -d "$session_dir" ] || [ -z "$(ls -A "$session_dir" 2>/dev/null)" ]; then
+                echo "No active sessions found"
+                exit 0
+            fi
+
+            echo "=== All Active Sessions ==="
+            echo
+            for session in "$session_dir"/*.json; do
+                [ -f "$session" ] || continue
+                if command -v jq >/dev/null 2>&1; then
+                    container=$(jq -r '.container' "$session" 2>/dev/null)
+                    agent=$(jq -r '.agent' "$session" 2>/dev/null)
+                    workspace=$(jq -r '.workspace' "$session" 2>/dev/null)
+                    auth_method=$(jq -r '.auth.method' "$session" 2>/dev/null)
+                    auth_details=$(jq -r '.auth.details' "$session" 2>/dev/null)
+                    ephemeral=$(jq -r '.ephemeral' "$session" 2>/dev/null)
+                    started=$(jq -r '.started_at' "$session" 2>/dev/null)
+
+                    # Check if container is still running
+                    if docker ps -q --filter "name=^${container}$" | grep -q .; then
+                        status="running"
+                    elif docker ps -aq --filter "name=^${container}$" | grep -q .; then
+                        status="stopped"
+                    else
+                        status="removed"
+                    fi
+
+                    echo "Container: $container"
+                    echo "  Agent:     $agent"
+                    echo "  Status:    $status"
+                    echo "  Workspace: $workspace"
+                    echo "  Auth:      $auth_method"
+                    [ "$auth_details" != "null" ] && [ -n "$auth_details" ] && echo "  Details:   $auth_details"
+                    echo "  Ephemeral: $ephemeral"
+                    echo "  Started:   $started"
+                    echo
+                fi
+            done
+        else
+            # Show current workspace sessions
+            ws_hash=$(workspace_hash)
+            found=false
+
+            if [ -d "$session_dir" ]; then
+                for session in "$session_dir"/*.json; do
+                    [ -f "$session" ] || continue
+                    if command -v jq >/dev/null 2>&1; then
+                        session_ws_hash=$(jq -r '.workspace_hash' "$session" 2>/dev/null)
+                        if [ "$session_ws_hash" = "$ws_hash" ]; then
+                            found=true
+                            container=$(jq -r '.container' "$session" 2>/dev/null)
+                            agent=$(jq -r '.agent' "$session" 2>/dev/null)
+                            workspace=$(jq -r '.workspace' "$session" 2>/dev/null)
+                            auth_method=$(jq -r '.auth.method' "$session" 2>/dev/null)
+                            auth_details=$(jq -r '.auth.details' "$session" 2>/dev/null)
+                            ephemeral=$(jq -r '.ephemeral' "$session" 2>/dev/null)
+                            started=$(jq -r '.started_at' "$session" 2>/dev/null)
+                            last_seen=$(jq -r '.last_seen' "$session" 2>/dev/null)
+
+                            # Check if container is still running
+                            if docker ps -q --filter "name=^${container}$" | grep -q .; then
+                                status="running"
+                            elif docker ps -aq --filter "name=^${container}$" | grep -q .; then
+                                status="stopped"
+                            else
+                                status="removed"
+                            fi
+
+                            echo "=== Container Status ==="
+                            echo
+                            echo "Container: $container"
+                            echo "Agent:     $agent"
+                            echo "Status:    $status"
+                            echo "Workspace: $workspace"
+                            echo "Auth:      $auth_method"
+                            [ "$auth_details" != "null" ] && [ -n "$auth_details" ] && echo "Details:   $auth_details"
+                            echo "Ephemeral: $ephemeral"
+                            echo "Started:   $started"
+                            echo "Last Seen: $last_seen"
+                        fi
+                    fi
+                done
+            fi
+
+            if [ "$found" = false ]; then
+                echo "No active sessions for this workspace"
+                echo "Use 'deva.sh status --all' to see all sessions"
+            fi
         fi
         exit 0
     fi
@@ -1404,15 +1730,15 @@ fi
 
 agent_idx=-1
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
-for i in "${!PRE_ARGS[@]}"; do
-    tok="${PRE_ARGS[$i]}"
-    if [[ "$tok" != -* ]] && is_known_agent "$tok"; then
-        ACTIVE_AGENT="$tok"
-        agent_idx=$i
-        AGENT_EXPLICIT=true
-        break
-    fi
-done
+    for i in "${!PRE_ARGS[@]}"; do
+        tok="${PRE_ARGS[$i]}"
+        if [[ "$tok" != -* ]] && is_known_agent "$tok"; then
+            ACTIVE_AGENT="$tok"
+            agent_idx=$i
+            AGENT_EXPLICIT=true
+            break
+        fi
+    done
 fi
 
 if [ -z "$ACTIVE_AGENT" ]; then
@@ -1421,10 +1747,10 @@ if [ -z "$ACTIVE_AGENT" ]; then
 fi
 
 if [ ${#PRE_ARGS[@]} -gt 0 ]; then
-for i in "${!PRE_ARGS[@]}"; do
-    if [ "$i" -eq "$agent_idx" ]; then continue; fi
-    WRAPPER_ARGS+=("${PRE_ARGS[$i]}")
-done
+    for i in "${!PRE_ARGS[@]}"; do
+        if [ "$i" -eq "$agent_idx" ]; then continue; fi
+        WRAPPER_ARGS+=("${PRE_ARGS[$i]}")
+    done
 fi
 
 if [ ${#POST_ARGS[@]} -gt 0 ]; then
@@ -1551,30 +1877,67 @@ if [ -n "${AUTH_METHOD:-}" ]; then
             volume_hash=$(compute_volume_hash)
         fi
 
+        # Hash credential file path for credentials-file auth
+        creds_hash=""
+        if [ "$AUTH_METHOD" = "credentials-file" ] && [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
+            if command -v md5sum >/dev/null 2>&1; then
+                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | md5sum | cut -c1-8)
+            elif command -v shasum >/dev/null 2>&1; then
+                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | shasum | cut -c1-8)
+            else
+                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | cksum | cut -d' ' -f1 | cut -c1-8)
+            fi
+        fi
+
         new_container_name=""
+        auth_suffix="${AUTH_METHOD}"
+        [ -n "$creds_hash" ] && auth_suffix="${AUTH_METHOD}-${creds_hash}"
+
         if [ "$EPHEMERAL_MODE" = true ]; then
             if [ -n "$volume_hash" ]; then
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${AUTH_METHOD}-${ACTIVE_AGENT}-$$"
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${auth_suffix}-${ACTIVE_AGENT}-$$"
             else
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${AUTH_METHOD}-${ACTIVE_AGENT}-$$"
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${auth_suffix}-${ACTIVE_AGENT}-$$"
             fi
         else
             if [ -n "$volume_hash" ]; then
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${AUTH_METHOD}"
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${auth_suffix}"
             else
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${AUTH_METHOD}"
+                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${auth_suffix}"
             fi
         fi
 
         # Update container name in DOCKER_ARGS
-        for ((i=0; i<${#DOCKER_ARGS[@]}; i++)); do
-            if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i+1)) -lt ${#DOCKER_ARGS[@]} ]; then
-                DOCKER_ARGS[i+1]="$new_container_name"
+        for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
+            if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ]; then
+                DOCKER_ARGS[i + 1]="$new_container_name"
                 break
             fi
         done
     fi
+
+    # Label auth method for easier filtering
+    DOCKER_ARGS+=(--label "deva.auth=${AUTH_METHOD}")
+
+    # Export container introspection variables
+    DOCKER_ARGS+=(-e "DEVA_AUTH_METHOD=${AUTH_METHOD}")
+    [ -n "${AUTH_DETAILS:-}" ] && DOCKER_ARGS+=(-e "DEVA_AUTH_DETAILS=${AUTH_DETAILS}")
 fi
+
+# Determine container name early for env injection
+CONTAINER_NAME=""
+for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
+    if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ]; then
+        CONTAINER_NAME="${DOCKER_ARGS[$((i + 1))]}"
+        break
+    fi
+done
+
+# Always export container context (regardless of auth method)
+DOCKER_ARGS+=(-e "DEVA_CONTAINER_NAME=${CONTAINER_NAME}")
+DOCKER_ARGS+=(-e "DEVA_AGENT=${ACTIVE_AGENT}")
+DOCKER_ARGS+=(-e "DEVA_WORKSPACE=$(pwd)")
+DOCKER_ARGS+=(-e "DEVA_EPHEMERAL=${EPHEMERAL_MODE}")
 
 # Centralized mounting logic based on auth method
 if [ -n "${AUTH_METHOD:-}" ]; then
@@ -1618,8 +1981,8 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                 # Determine credential file to exclude
                 exclude_file=""
                 case "$agent_name" in
-                    claude) exclude_file=".credentials.json" ;;
-                    codex) exclude_file="auth.json" ;;
+                claude) exclude_file=".credentials.json" ;;
+                codex) exclude_file="auth.json" ;;
                 esac
 
                 # Mount agent dir contents, excluding OAuth credentials
@@ -1627,7 +1990,7 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                     [ -e "$item" ] || continue
                     name=$(basename "$item")
                     case "$name" in
-                        .|..) continue ;;
+                    . | ..) continue ;;
                     esac
 
                     # Skip OAuth credential files
@@ -1646,7 +2009,7 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                                 }
                                 [ -n "$subname" ] || continue
                                 case "$subname" in
-                                    .|..|"$exclude_file") continue ;;
+                                . | .. | "$exclude_file") continue ;;
                                 esac
                                 DOCKER_ARGS+=("-v" "$subitem:/home/deva/$name/$subname")
                             done
@@ -1668,7 +2031,7 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                     }
                     [ -n "$name" ] || continue
                     case "$name" in
-                        .|..|.credentials.json) continue ;;
+                    . | .. | .credentials.json) continue ;;
                     esac
                     DOCKER_ARGS+=("-v" "$item:/home/deva/.claude/$name")
                 done
@@ -1685,7 +2048,7 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                     }
                     [ -n "$name" ] || continue
                     case "$name" in
-                        .|..|auth.json) continue ;;
+                    . | .. | auth.json) continue ;;
                     esac
                     DOCKER_ARGS+=("-v" "$item:/home/deva/.codex/$name")
                 done
@@ -1712,9 +2075,9 @@ if [ ${#AGENT_COMMAND[@]} -eq 0 ]; then
 fi
 
 CONTAINER_NAME=""
-for ((i=0; i<${#DOCKER_ARGS[@]}; i++)); do
-    if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i+1)) -lt ${#DOCKER_ARGS[@]} ]; then
-        CONTAINER_NAME="${DOCKER_ARGS[$((i+1))]}"
+for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
+    if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ]; then
+        CONTAINER_NAME="${DOCKER_ARGS[$((i + 1))]}"
         break
     fi
 done
@@ -1736,21 +2099,59 @@ if [ "$DEBUG_MODE" = true ]; then
 fi
 
 if [ "$EPHEMERAL_MODE" = false ]; then
-    if ! docker ps -q --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
-        if docker ps -aq --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
-            echo "Starting stopped container: $CONTAINER_NAME"
-            docker start "$CONTAINER_NAME" >/dev/null
-        else
-            echo "Creating persistent container: $CONTAINER_NAME"
-            docker "${DOCKER_ARGS[@]}" tail -f /dev/null >/dev/null
-            sleep 0.5
-        fi
-    else
+    # Check if container is running
+    container_action="attach"
+    if docker ps -q --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
         echo "Attaching to existing container: $CONTAINER_NAME"
+        container_action="attach"
+    elif docker ps -aq --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
+        # Container exists but stopped
+        echo "Starting stopped container: $CONTAINER_NAME"
+        if ! docker start "$CONTAINER_NAME" >/dev/null 2>&1; then
+            echo "error: failed to start container $CONTAINER_NAME" >&2
+            exit 1
+        fi
+        container_action="start"
+    else
+        # Container doesn't exist - try to create it
+        echo "Creating persistent container: $CONTAINER_NAME"
+        if ! docker "${DOCKER_ARGS[@]}" tail -f /dev/null >/dev/null 2>&1; then
+            # Creation failed - likely name collision from concurrent run
+            # Wait for the other process to finish creating the container
+            echo "Container name in use, waiting for initialization..."
+            timeout=10
+            while [ $timeout -gt 0 ]; do
+                if docker ps -q --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
+                    echo "Container ready, attaching..."
+                    break
+                fi
+                sleep 0.5
+                timeout=$((timeout - 1))
+            done
+            if [ $timeout -eq 0 ]; then
+                echo "error: timed out waiting for container $CONTAINER_NAME" >&2
+                exit 1
+            fi
+            container_action="attach"
+        else
+            sleep 0.3
+            container_action="create"
+        fi
     fi
-    
+
+    # Write or update session file
+    if [ "$container_action" = "create" ] || [ "$container_action" = "start" ]; then
+        write_session_file
+    else
+        update_session_file
+    fi
+
     exec docker exec -it "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
-    docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"
+    write_session_file
+    if ! docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"; then
+        echo "error: failed to launch ephemeral container" >&2
+        exit 1
+    fi
 fi
