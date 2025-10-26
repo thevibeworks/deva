@@ -61,10 +61,12 @@ setup_codex_auth() {
 
     case "$method" in
         chatgpt)
+            AUTH_DETAILS="chatgpt-oauth (~/.codex)"
             ;;
         api-key)
             validate_openai_key || auth_error "OPENAI_API_KEY not set for --auth-with api-key" \
                                               "Set: export OPENAI_API_KEY=your_api_key"
+            AUTH_DETAILS="api-key (OPENAI_API_KEY)"
             DOCKER_ARGS+=("-e" "OPENAI_API_KEY=$OPENAI_API_KEY")
             ;;
         copilot)
@@ -72,6 +74,7 @@ setup_codex_auth() {
                                                 "Run: copilot-api auth, or set GH_TOKEN=\$(gh auth token)"
             start_copilot_proxy
 
+            AUTH_DETAILS="github-copilot (proxy port $COPILOT_PROXY_PORT)"
             DOCKER_ARGS+=("-e" "OPENAI_BASE_URL=http://$COPILOT_HOST_MAPPING:$COPILOT_PROXY_PORT")
             DOCKER_ARGS+=("-e" "OPENAI_API_KEY=dummy")
 
@@ -86,6 +89,15 @@ setup_codex_auth() {
             local no_proxy="$COPILOT_HOST_MAPPING,$COPILOT_LOCALHOST_MAPPING,127.0.0.1"
             DOCKER_ARGS+=("-e" "NO_PROXY=${NO_PROXY:+$NO_PROXY,}$no_proxy")
             DOCKER_ARGS+=("-e" "no_grpc_proxy=${NO_GRPC_PROXY:+$NO_GRPC_PROXY,}$no_proxy")
+            ;;
+        credentials-file)
+            if [ -z "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
+                auth_error "CUSTOM_CREDENTIALS_FILE not set for credentials-file auth"
+            fi
+            AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
+            backup_credentials "codex" "${CONFIG_ROOT:-}" "$CUSTOM_CREDENTIALS_FILE"
+            DOCKER_ARGS+=("-v" "$CUSTOM_CREDENTIALS_FILE:/home/deva/.codex/auth.json")
+            echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.codex/auth.json" >&2
             ;;
         *)
             auth_error "auth method '$method' not implemented"

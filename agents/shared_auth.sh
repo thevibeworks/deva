@@ -43,11 +43,20 @@ validate_github_token() {
 }
 
 validate_anthropic_key() {
-    [ -n "${ANTHROPIC_API_KEY:-}" ]
+    [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]
 }
 
 validate_openai_key() {
     [ -n "${OPENAI_API_KEY:-}" ]
+}
+
+# Detects OAuth token pattern in environment variables only
+# (not for inspecting credential file contents)
+# OAuth tokens: sk-ant-oat01-*
+# API keys: sk-ant-api03-*
+is_oauth_token_pattern() {
+    local key="$1"
+    [[ "$key" == sk-ant-oat01-* ]]
 }
 
 COPILOT_PROXY_PID=""
@@ -212,6 +221,66 @@ convert_openai_model_alias() {
     esac
 }
 
+is_file_path() {
+    local arg="$1"
+    [[ "$arg" == /* ]] || [[ "$arg" == ~* ]] || [[ "$arg" == ./* ]] || [[ "$arg" == ../* ]] || [[ "$arg" == *.json ]]
+}
+
+expand_and_validate_file() {
+    local path="$1"
+    if [[ "$path" == ~* ]]; then
+        path="${path/#\~/$HOME}"
+    fi
+    if [ ! -f "$path" ]; then
+        auth_error "Credentials file not found: $path"
+    fi
+    if [[ "$path" == /* ]]; then
+        echo "$path"
+    else
+        echo "$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+    fi
+}
+
+backup_credentials() {
+    local agent_name="$1"
+    local config_root="$2"
+    local source_file="${3:-}"  # Optional: file to compare against
+    local backup_path=""
+    local creds_file=""
+
+    case "$agent_name" in
+        claude)
+            if [ -n "$config_root" ] && [ -d "$config_root/claude/.claude" ]; then
+                creds_file="$config_root/claude/.claude/.credentials.json"
+            elif [ -d "$HOME/.claude" ]; then
+                creds_file="$HOME/.claude/.credentials.json"
+            fi
+            ;;
+        codex)
+            if [ -n "$config_root" ] && [ -d "$config_root/codex/.codex" ]; then
+                creds_file="$config_root/codex/.codex/auth.json"
+            elif [ -d "$HOME/.codex" ]; then
+                creds_file="$HOME/.codex/auth.json"
+            fi
+            ;;
+    esac
+
+    if [ -n "$creds_file" ] && [ -f "$creds_file" ]; then
+        # Compare with source file if provided (avoid duplicate backups)
+        if [ -n "$source_file" ] && [ -f "$source_file" ]; then
+            if cmp -s "$creds_file" "$source_file"; then
+                echo "Credentials file identical to source, skipping backup" >&2
+                return 0
+            fi
+        fi
+
+        backup_path="${creds_file}.backup-$(date +%Y%m%d-%H%M%S)"
+        echo "Backing up existing credentials: $creds_file -> $backup_path" >&2
+        cp "$creds_file" "$backup_path"
+        echo "To restore: mv $backup_path $creds_file" >&2
+    fi
+}
+
 parse_auth_args() {
     local agent_name="$1"
     shift
@@ -238,24 +307,30 @@ parse_auth_args() {
         case "${args[$i]}" in
             --auth-with)
                 if [ $((i + 1)) -ge ${#args[@]} ]; then
-                    auth_error "--auth-with requires a method"
+                    auth_error "--auth-with requires a method or file path"
                 fi
                 auth_method="${args[$((i + 1))]}"
 
-                local method_supported=false
-                local method
-                for method in "${supported_methods[@]}"; do
-                    if [ "$method" = "$auth_method" ]; then
-                        method_supported=true
-                        break
-                    fi
-                done
+                if is_file_path "$auth_method"; then
+                    # shellcheck disable=SC2034
+                    CUSTOM_CREDENTIALS_FILE=$(expand_and_validate_file "$auth_method")
+                    auth_method="credentials-file"
+                else
+                    local method_supported=false
+                    local method
+                    for method in "${supported_methods[@]}"; do
+                        if [ "$method" = "$auth_method" ]; then
+                            method_supported=true
+                            break
+                        fi
+                    done
 
-                if [ "$method_supported" = false ]; then
-                    local supported_list
-                    supported_list=$(IFS=', '; echo "${supported_methods[*]}")
-                    auth_error "$agent_name agent doesn't support auth method '$auth_method'" \
-                               "Supported: $supported_list"
+                    if [ "$method_supported" = false ]; then
+                        local supported_list
+                        supported_list=$(IFS=', '; echo "${supported_methods[*]}")
+                        auth_error "$agent_name agent doesn't support auth method '$auth_method'" \
+                                   "Supported: $supported_list, or provide a credentials file path"
+                    fi
                 fi
 
                 i=$((i + 2))

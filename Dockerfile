@@ -75,6 +75,9 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# Pre-install Python 3.14t (free-threaded) for uv
+RUN /root/.local/bin/uv python install 3.14t
+
 RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     GO_ARCH=$([ "$ARCH" = "amd64" ] && echo "amd64" || echo "arm64") && \
@@ -173,7 +176,7 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
     npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex || true
 
 # Install Go tools for Atlassian integration (Confluence/Jira/Bitbucket)
-RUN go install github.com/lroolle/atlas-cli/cmd/atl@main && \
+RUN go install github.com/lroolle/atlas-cli/cmd/atl@5f6a20c4d164bf6fe6f5c60f9ac12dfccf210758 && \
     sudo mv $HOME/go/bin/atl /usr/local/bin/
 
 RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh "$DEVA_HOME/.oh-my-zsh" && \
@@ -186,6 +189,10 @@ RUN echo 'export ZSH="$HOME/.oh-my-zsh"' > "$DEVA_HOME/.zshrc" && \
     echo 'plugins=(git docker python golang node npm aws zsh-autosuggestions zsh-syntax-highlighting)' >> "$DEVA_HOME/.zshrc" && \
     echo 'source $ZSH/oh-my-zsh.sh' >> "$DEVA_HOME/.zshrc" && \
     echo 'export PATH=$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/go/bin:/usr/local/go/bin:$PATH' >> "$DEVA_HOME/.zshrc"
+
+# Pre-install uv for deva user and warm Python 3.14t
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    $DEVA_HOME/.local/bin/uv python install 3.14t
 
 USER root
 
