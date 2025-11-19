@@ -30,16 +30,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         openssh-client rsync \
         shellcheck bat fd-find silversearcher-ag \
         vim \
-        procps psmisc zsh && \
-    add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3.12-venv python3-pip pipx && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
-    locale-gen en_US.UTF-8
+        procps psmisc zsh
 
-# Initialize Git LFS so it's usable for all users
 RUN git lfs install --system
 
 # Install language runtimes in parallel-friendly layers
@@ -56,11 +48,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun
 
-# Install Copilot API branch with GPT-5 Codex responses support (PR #119 from caozhiyuan fork)
-# Pinned to specific commit for reproducibility and security
+# Install Copilot API branch with GPT-5 Codex responses support (caozhiyuan fork)
+# feature/responses-api adds: GPT-5-Codex support, model reasoning, token caching, enhanced streaming
 ARG COPILOT_API_REPO=https://github.com/caozhiyuan/copilot-api.git
-ARG COPILOT_API_BRANCH=feature/gpt-5-codex
-ARG COPILOT_API_COMMIT=HEAD
+ARG COPILOT_API_BRANCH=feature/responses-api
+ARG COPILOT_API_COMMIT=83cdfde17d7d3be36bd2493cc7592ff13be4928d
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g npm@latest pnpm && \

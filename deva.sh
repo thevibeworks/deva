@@ -2057,6 +2057,18 @@ if [ -n "${AUTH_METHOD:-}" ]; then
     fi
 fi
 
+# Set statusline log paths via env vars (XDG-compliant)
+DOCKER_ARGS+=("-e" "CLAUDE_DATA_DIR=/home/deva/.config/deva/claude")
+DOCKER_ARGS+=("-e" "CLAUDE_CACHE_DIR=/home/deva/.cache/deva/claude/sessions")
+
+# Mount deva config and cache directories for statusline usage tracking
+if [ -d "$HOME/.config/deva" ]; then
+    DOCKER_ARGS+=("-v" "$HOME/.config/deva:/home/deva/.config/deva")
+fi
+if [ -d "$HOME/.cache/deva" ]; then
+    DOCKER_ARGS+=("-v" "$HOME/.cache/deva:/home/deva/.cache/deva")
+fi
+
 # Mount project-local .claude directory if exists
 append_user_envs
 if [ -d "$(pwd)/.claude" ]; then

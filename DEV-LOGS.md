@@ -13,6 +13,12 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+
+# [2025-10-26] Dev Log: Custom credential files via --auth-with
+- Why: Users have multiple credential files, needed direct path support beyond predefined auth methods
+- What: `--auth-with /path/to/creds.json` now works, auto-backup existing credentials, workspace session tracking in `~/.config/deva/sessions/*.json`
+- Result: Flexible credential switching, backward compatible with predefined methods (claude/api-key/bedrock/etc)
+
 # [2025-09-30] Dev Log: Persistent container reuse with tmux-style UX (#108)
 - Why: Per-invocation containers were slow, stateless, and clobbered each other; we wanted tmux-like persistence.
 - What:
