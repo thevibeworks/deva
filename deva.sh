@@ -13,6 +13,7 @@ if [ -n "${DEVA_DOCKER_TAG+x}" ]; then
     DEVA_DOCKER_TAG_ENV_SET=true
 fi
 
+VERSION="0.8.0"
 DEVA_DOCKER_IMAGE="${DEVA_DOCKER_IMAGE:-ghcr.io/thevibeworks/deva}"
 DEVA_DOCKER_TAG="${DEVA_DOCKER_TAG:-latest}"
 DEVA_CONTAINER_PREFIX="${DEVA_CONTAINER_PREFIX:-deva}"
@@ -1447,6 +1448,11 @@ if [ ${#PRE_ARGS[@]} -gt 0 ]; then
             usage
             exit 0
             ;;
+        --version)
+            echo "deva.sh v${VERSION}"
+            echo "Docker Image: ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+            exit 0
+            ;;
         --show-config)
             MANAGEMENT_MODE="show-config"
             ;;
@@ -2127,24 +2133,32 @@ if [ "$EPHEMERAL_MODE" = false ]; then
     else
         # Container doesn't exist - try to create it
         echo "Creating persistent container: $CONTAINER_NAME"
-        if ! docker "${DOCKER_ARGS[@]}" tail -f /dev/null >/dev/null 2>&1; then
-            # Creation failed - likely name collision from concurrent run
-            # Wait for the other process to finish creating the container
-            echo "Container name in use, waiting for initialization..."
-            timeout=10
-            while [ $timeout -gt 0 ]; do
-                if docker ps -q --filter "name=^${CONTAINER_NAME}$" | grep -q .; then
-                    echo "Container ready, attaching..."
-                    break
+        error_output=$(docker "${DOCKER_ARGS[@]}" tail -f /dev/null 2>&1)
+        docker_exit=$?
+        if [ $docker_exit -ne 0 ]; then
+            # Check if specifically a name collision (concurrent run)
+            if echo "$error_output" | grep -qE 'already in use|Conflict'; then
+                echo "Container name in use, waiting for initialization..."
+                attempts=20  # 20 * 0.5s = 10s total
+                while [ $attempts -gt 0 ]; do
+                    if docker ps -q --filter "name=^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
+                        echo "Container ready, attaching..."
+                        break
+                    fi
+                    sleep 0.5
+                    attempts=$((attempts - 1))
+                done
+                if [ $attempts -eq 0 ]; then
+                    echo "error: timed out waiting for container $CONTAINER_NAME" >&2
+                    exit 1
                 fi
-                sleep 0.5
-                timeout=$((timeout - 1))
-            done
-            if [ $timeout -eq 0 ]; then
-                echo "error: timed out waiting for container $CONTAINER_NAME" >&2
+                container_action="attach"
+            else
+                # Real error - surface immediately
+                echo "error: failed to create container $CONTAINER_NAME:" >&2
+                echo "$error_output" >&2
                 exit 1
             fi
-            container_action="attach"
         else
             sleep 0.3
             container_action="create"
