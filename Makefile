@@ -103,9 +103,15 @@ buildx-multi-local:
 		-t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed locally: $(MAIN_IMAGE)"
 
-.PHONY: bump-versions
-bump-versions:
-	@./scripts/bump-versions.sh
+.PHONY: versions-up
+versions-up:
+	@echo "🔄 Upgrading to latest versions from npm..."
+	@echo "Claude Code: $(CLAUDE_CODE_VERSION)"
+	@echo "Codex: $(CODEX_VERSION)"
+	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION)
+	@echo "🔨 Rebuilding Rust image..."
+	@docker build -f $(RUST_DOCKERFILE) --build-arg BASE_IMAGE=$(MAIN_IMAGE) -t $(RUST_IMAGE) .
+	@echo "✅ All images upgraded to latest versions"
 
 .PHONY: versions
 versions:
@@ -241,8 +247,8 @@ help:
 	@echo "  buildx               Build with buildx"
 	@echo "  buildx-multi         Build multi-arch and push"
 	@echo "  buildx-multi-rust    Build multi-arch Rust and push"
-		@echo "  versions             Show version status (current/built)"
-		@echo "  bump-versions        Pin Makefile to latest npm versions"
+	@echo "  versions             Compare built vs latest versions with changelogs"
+	@echo "  versions-up          Upgrade both images to latest npm versions"
 	@echo "  test                 Test main image"
 	@echo "  test-rust            Test Rust image"
 	@echo "  shell                Open shell in container"
