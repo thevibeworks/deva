@@ -218,6 +218,12 @@ fix_rust_permissions() {
     [ -d "$ch" ] || mkdir -p "$ch"
 }
 
+fix_docker_socket_permissions() {
+    if [ -S /var/run/docker.sock ]; then
+        chmod 666 /var/run/docker.sock 2>/dev/null || true
+    fi
+}
+
 build_gosu_env_cmd() {
     local user="$1"
     shift
@@ -269,6 +275,7 @@ main() {
     ensure_agent_binaries
     setup_nonroot_user
     fix_rust_permissions
+    fix_docker_socket_permissions
 
     if [ $# -eq 0 ]; then
         if [ "$DEVA_AGENT" = "codex" ]; then

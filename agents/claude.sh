@@ -1,9 +1,7 @@
 # shellcheck shell=bash
 
 # shellcheck disable=SC1091
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
 
 agent_prepare() {
     local -a args
@@ -44,7 +42,6 @@ setup_claude_auth() {
             AUTH_DETAILS="claude-app-oauth (~/.claude)"
             ;;
         api-key)
-            # Auto-detect OAuth token vs regular API key
             if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
                 DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
                 AUTH_DETAILS="oauth-token (CLAUDE_CODE_OAUTH_TOKEN)"
@@ -127,7 +124,6 @@ setup_claude_auth() {
                 auth_error "CUSTOM_CREDENTIALS_FILE not set for credentials-file auth"
             fi
             AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
-            backup_credentials "claude" "${CONFIG_ROOT:-}" "$CUSTOM_CREDENTIALS_FILE"
             DOCKER_ARGS+=("-v" "$CUSTOM_CREDENTIALS_FILE:/home/deva/.claude/.credentials.json")
             echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.claude/.credentials.json" >&2
             ;;

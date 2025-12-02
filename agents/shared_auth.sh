@@ -50,10 +50,6 @@ validate_openai_key() {
     [ -n "${OPENAI_API_KEY:-}" ]
 }
 
-# Detects OAuth token pattern in environment variables only
-# (not for inspecting credential file contents)
-# OAuth tokens: sk-ant-oat01-*
-# API keys: sk-ant-api03-*
 is_oauth_token_pattern() {
     local key="$1"
     [[ "$key" == sk-ant-oat01-* ]]
@@ -64,7 +60,11 @@ COPILOT_PROXY_PORT="$COPILOT_DEFAULT_PORT"
 
 is_process_alive() {
     local pid="$1"
-    [ -n "$pid" ] && [ -d "/proc/$pid" ] && grep -q "copilot-api" "/proc/$pid/cmdline" 2>/dev/null
+    [ -n "$pid" ] || return 1
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 1
+    fi
+    ps -p "$pid" -o args= 2>/dev/null | grep -q "copilot-api"
 }
 
 start_copilot_proxy() {
@@ -241,46 +241,6 @@ expand_and_validate_file() {
     fi
 }
 
-backup_credentials() {
-    local agent_name="$1"
-    local config_root="$2"
-    local source_file="${3:-}"  # Optional: file to compare against
-    local backup_path=""
-    local creds_file=""
-
-    case "$agent_name" in
-        claude)
-            if [ -n "$config_root" ] && [ -d "$config_root/claude/.claude" ]; then
-                creds_file="$config_root/claude/.claude/.credentials.json"
-            elif [ -d "$HOME/.claude" ]; then
-                creds_file="$HOME/.claude/.credentials.json"
-            fi
-            ;;
-        codex)
-            if [ -n "$config_root" ] && [ -d "$config_root/codex/.codex" ]; then
-                creds_file="$config_root/codex/.codex/auth.json"
-            elif [ -d "$HOME/.codex" ]; then
-                creds_file="$HOME/.codex/auth.json"
-            fi
-            ;;
-    esac
-
-    if [ -n "$creds_file" ] && [ -f "$creds_file" ]; then
-        # Compare with source file if provided (avoid duplicate backups)
-        if [ -n "$source_file" ] && [ -f "$source_file" ]; then
-            if cmp -s "$creds_file" "$source_file"; then
-                echo "Credentials file identical to source, skipping backup" >&2
-                return 0
-            fi
-        fi
-
-        backup_path="${creds_file}.backup-$(date +%Y%m%d-%H%M%S)"
-        echo "Backing up existing credentials: $creds_file -> $backup_path" >&2
-        cp "$creds_file" "$backup_path"
-        echo "To restore: mv $backup_path $creds_file" >&2
-    fi
-}
-
 parse_auth_args() {
     local agent_name="$1"
     shift
@@ -293,6 +253,9 @@ parse_auth_args() {
             ;;
         codex)
             supported_methods=(chatgpt api-key copilot)
+            ;;
+        gemini)
+            supported_methods=(oauth api-key gemini-api-key vertex compute-adc gemini-app-oauth)
             ;;
         *)
             auth_error "Unknown agent: $agent_name"
@@ -312,7 +275,6 @@ parse_auth_args() {
                 auth_method="${args[$((i + 1))]}"
 
                 if is_file_path "$auth_method"; then
-                    # shellcheck disable=SC2034
                     CUSTOM_CREDENTIALS_FILE=$(expand_and_validate_file "$auth_method")
                     auth_method="credentials-file"
                 else
@@ -346,11 +308,10 @@ parse_auth_args() {
         case "$agent_name" in
             claude) auth_method="claude" ;;
             codex) auth_method="chatgpt" ;;
+            gemini) auth_method="oauth" ;;
         esac
     fi
 
-    # shellcheck disable=SC2034
     PARSED_AUTH_METHOD="$auth_method"
-    # shellcheck disable=SC2034
     PARSED_REMAINING_ARGS=("${remaining_args[@]+"${remaining_args[@]}"}")
 }

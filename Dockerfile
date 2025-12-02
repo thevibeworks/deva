@@ -48,23 +48,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun
 
-# Install Copilot API branch with GPT-5 Codex responses support (caozhiyuan fork)
-# feature/responses-api adds: GPT-5-Codex support, model reasoning, token caching, enhanced streaming
-ARG COPILOT_API_REPO=https://github.com/caozhiyuan/copilot-api.git
-ARG COPILOT_API_BRANCH=feature/responses-api
-ARG COPILOT_API_COMMIT=83cdfde17d7d3be36bd2493cc7592ff13be4928d
-
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g npm@latest pnpm && \
-    git clone --branch "${COPILOT_API_BRANCH}" "${COPILOT_API_REPO}" /tmp/copilot-api && \
-    cd /tmp/copilot-api && \
-    git checkout "${COPILOT_API_COMMIT}" && \
-    git log --oneline -5 && \
-    bun install --frozen-lockfile && bun run build && \
-    cd /tmp && npm install -g --ignore-scripts /tmp/copilot-api && \
-    rm -rf /tmp/copilot-api && \
-    npm cache clean --force
-
+# Install stable runtimes BEFORE volatile packages to maximize cache reuse
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Pre-install Python 3.14t (free-threaded) for uv
@@ -76,6 +60,26 @@ RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     cd /tmp/go-cache && \
     wget -q https://go.dev/dl/go1.22.0.linux-${GO_ARCH}.tar.gz && \
     tar -C /usr/local -xzf go1.22.0.linux-${GO_ARCH}.tar.gz
+
+# Install Copilot API (ericc-ch fork with latest features)
+# Placed at end of runtimes stage to avoid invalidating cache for stable runtimes
+ARG COPILOT_API_REPO=https://github.com/ericc-ch/copilot-api.git
+ARG COPILOT_API_BRANCH=master
+ARG COPILOT_API_COMMIT=master
+ARG COPILOT_API_VERSION
+
+LABEL org.opencontainers.image.copilot_api_version=${COPILOT_API_VERSION}
+
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm install -g npm@latest pnpm && \
+    git clone --branch "${COPILOT_API_BRANCH}" "${COPILOT_API_REPO}" /tmp/copilot-api && \
+    cd /tmp/copilot-api && \
+    git checkout "${COPILOT_API_COMMIT}" && \
+    git log --oneline -5 && \
+    bun install --frozen-lockfile && bun run build && \
+    cd /tmp && npm install -g --ignore-scripts /tmp/copilot-api && \
+    rm -rf /tmp/copilot-api && \
+    npm cache clean --force
 
 FROM runtimes AS cloud-tools
 
@@ -146,31 +150,12 @@ RUN mkdir -p "$DEVA_HOME/.npm-global" && \
 
 # Set npm configuration for deva user and install CLI tooling
 USER $DEVA_USER
-ARG CLAUDE_CODE_VERSION
-ARG CODEX_VERSION
-
-# Record key tool versions as labels for quick inspection
-LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
-LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 
 # Speed up npm installs and avoid noisy audits/funds prompts
 ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false
 
-# Use BuildKit cache for npm to speed up repeated builds
-RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
-    npm config set prefix "$DEVA_HOME/.npm-global" && \
-    npm install -g --no-audit --no-fund \
-        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-        @mariozechner/claude-trace \
-        @openai/codex@${CODEX_VERSION} && \
-    npm cache clean --force && \
-    npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex || true
-
-# Install Go tools for Atlassian integration (Confluence/Jira/Bitbucket)
-RUN go install github.com/lroolle/atlas-cli/cmd/atl@5f6a20c4d164bf6fe6f5c60f9ac12dfccf210758 && \
-    sudo mv $HOME/go/bin/atl /usr/local/bin/
-
+# Install stable components BEFORE ARG declarations to maximize cache reuse
 RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh "$DEVA_HOME/.oh-my-zsh" && \
     git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions "$DEVA_HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" && \
     git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git "$DEVA_HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
@@ -185,6 +170,36 @@ RUN echo 'export ZSH="$HOME/.oh-my-zsh"' > "$DEVA_HOME/.zshrc" && \
 # Pre-install uv for deva user and warm Python 3.14t
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $DEVA_HOME/.local/bin/uv python install 3.14t
+
+# Declare ARGs immediately before usage to minimize cache invalidation
+ARG CLAUDE_CODE_VERSION
+ARG CODEX_VERSION
+ARG GEMINI_CLI_VERSION=latest
+
+# Record key tool versions as labels for quick inspection
+LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
+LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
+LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
+
+# Use BuildKit cache for npm to speed up repeated builds
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    npm config set prefix "$DEVA_HOME/.npm-global" && \
+    npm install -g --no-audit --no-fund \
+        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+        @mariozechner/claude-trace \
+        @openai/codex@${CODEX_VERSION} \
+        @google/gemini-cli@${GEMINI_CLI_VERSION} && \
+    npm cache clean --force && \
+    npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true
+
+# Volatile packages: Install at the end to avoid cascading rebuilds
+ARG ATLAS_CLI_VERSION=main
+
+LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
+
+# Install Go tools for Atlassian integration (Confluence/Jira/Bitbucket)
+RUN go install github.com/lroolle/atlas-cli/cmd/atl@${ATLAS_CLI_VERSION} && \
+    sudo mv $HOME/go/bin/atl /usr/local/bin/
 
 USER root
 

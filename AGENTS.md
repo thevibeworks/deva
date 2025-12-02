@@ -1,5 +1,19 @@
 This file provides guidance to codex, Claude Code when working with code in this repository.
 
+## Deva Architecture: Container-Based Agent Sandboxing
+
+**CRITICAL DESIGN PATTERN**: Deva purposely runs ALL agents inside Docker containers. The container IS the sandbox.
+
+- Each agent (claude, codex, gemini) runs in isolated container environment
+- Agent internal sandboxes/permission systems are DISABLED:
+  - claude: `--dangerously-skip-permissions`
+  - gemini: `--yolo` flag
+  - codex: equivalent unrestricted mode
+- Container provides security boundary instead of agent-level prompts
+- Result: No interactive permission prompts while maintaining isolation
+
+**Why**: Avoids permission fatigue in trusted workspaces while keeping agents containerized for safety.
+
 ## We're following Issue-Based Development (IBD) workflow
 1. Before running any Git/GitHub CLI `Bash` command (`git commit`, `gh issue create`, `gh pr create`, etc.), open the corresponding file in @workflows to review required steps.
 2. Always apply the exact templates or conventions from the following files:
@@ -120,6 +134,19 @@ Model aliases are automatically converted to appropriate formats (API model name
 - Shows a clear warning about Claude's full access to the directory
 - Requires explicit confirmation (`yes`) to proceed
 - Protects users from accidentally giving Claude access to all personal files
+
+**Docker Socket Warning** (SECURITY-SENSITIVE):
+By default, `/var/run/docker.sock` is auto-mounted if present. This grants full Docker API access to the container - effectively equivalent to root on the host. The "container as sandbox" model is weakened when Docker socket is mounted.
+
+Implications:
+- Agent can start/stop any container on host
+- Agent can mount any host path into new containers
+- Agent can escape to host via privileged container creation
+
+Mitigations:
+- Use `--no-docker` flag to disable auto-mount
+- Set `DEVA_NO_DOCKER=1` environment variable
+- Only mount when Docker-in-Docker workflows are required
 
 ## Docker Architecture Details
 

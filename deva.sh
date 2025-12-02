@@ -44,7 +44,7 @@ DEBUG_MODE=false
 
 usage() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini)
 
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
@@ -72,13 +72,14 @@ Deva flags:
   -p NAME, --profile      NAME
                           Select profile: base (default), rust. Pulls tag, falls back to Dockerfile.<profile>
   --host-net              Use host networking for the agent container
+  --no-docker             Disable auto-mount of Docker socket (default: auto-mount if present)
   --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
 Container Behavior (NEW in v0.8.0):
   Default (persistent):   One container per project, reused across runs.
                           Preserves state (npm packages, builds, etc).
-                          Faster startup, run any agent (claude/codex).
+                          Faster startup, run any agent (claude/codex/gemini).
 
   With --rm (ephemeral):  Create new container, auto-remove after exit.
                           Agent-specific naming for parallel runs.
@@ -96,6 +97,7 @@ Examples:
   deva.sh                             # Launch claude in persistent container
   deva.sh claude                      # Same
   deva.sh codex                       # Launch codex in same container
+  deva.sh gemini                      # Launch gemini in same container
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -114,6 +116,7 @@ Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
   deva.sh -c ~/work-claude-home -- --trace
   deva.sh --show-config               # Debug configuration
+  deva.sh --no-docker claude          # Disable Docker-in-Docker auto-mount
 USAGE
 }
 
@@ -175,6 +178,29 @@ check_image() {
 
     # Try pulling first
     if docker pull "${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >/dev/null 2>&1; then
+        return
+    fi
+
+    # Smart fallback: check for available profile images locally
+    local available_tags=""
+    local original_tag="$DEVA_DOCKER_TAG"
+
+    # Check common profile tags (prefer rust as it's a superset of base)
+    for tag in rust latest; do
+        if [ "$tag" = "$DEVA_DOCKER_TAG" ]; then
+            continue  # Skip the one we already tried
+        fi
+        if docker image inspect "${DEVA_DOCKER_IMAGE}:${tag}" >/dev/null 2>&1; then
+            available_tags="${available_tags}${tag} "
+        fi
+    done
+
+    if [ -n "$available_tags" ]; then
+        # Found alternative images - use the first one
+        local fallback_tag="${available_tags%% *}"  # Get first tag
+        echo "Image ${DEVA_DOCKER_IMAGE}:${original_tag} not found" >&2
+        echo "Using available image: ${DEVA_DOCKER_IMAGE}:${fallback_tag}" >&2
+        DEVA_DOCKER_TAG="$fallback_tag"
         return
     fi
 
@@ -629,6 +655,12 @@ prepare_base_docker_args() {
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
     if [ -n "${LC_ALL:-}" ]; then DOCKER_ARGS+=(-e "LC_ALL=$LC_ALL"); fi
     if [ -n "${TZ:-}" ]; then DOCKER_ARGS+=(-e "TZ=$TZ"); fi
+
+    # Auto-mount Docker socket for DinD workflows (opt-out via --no-docker or DEVA_NO_DOCKER=1)
+    if [ -z "${DEVA_NO_DOCKER:-}" ] && [ -S /var/run/docker.sock ]; then
+        DOCKER_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+    fi
+
     # Fallback: detect host TZ/LANG if not set in env
     if ! docker_args_has_env "TZ"; then
         local host_tz=""
@@ -784,6 +816,45 @@ should_skip_env_for_auth() {
         credentials-file)
             case "$name" in
             OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url | ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL)
+                return 0
+                ;;
+            esac
+            ;;
+        esac
+        ;;
+    gemini)
+        case "${AUTH_METHOD:-oauth}" in
+        oauth | gemini-app-oauth)
+            case "$name" in
+            GOOGLE_API_KEY | GEMINI_API_KEY | ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | OPENAI_API_KEY | OPENAI_BASE_URL)
+                return 0
+                ;;
+            esac
+            ;;
+        api-key | gemini-api-key)
+            case "$name" in
+            GOOGLE_API_KEY | GEMINI_API_KEY)
+                return 0
+                ;;
+            esac
+            ;;
+        vertex)
+            case "$name" in
+            GOOGLE_API_KEY | GEMINI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY)
+                return 0
+                ;;
+            esac
+            ;;
+        compute-adc)
+            case "$name" in
+            GOOGLE_API_KEY | GEMINI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY)
+                return 0
+                ;;
+            esac
+            ;;
+        credentials-file)
+            case "$name" in
+            GOOGLE_API_KEY | GEMINI_API_KEY | ANTHROPIC_API_KEY | OPENAI_API_KEY)
                 return 0
                 ;;
             esac
@@ -1330,6 +1401,11 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --no-docker)
+            export DEVA_NO_DOCKER=1
+            i=$((i + 1))
+            continue
+            ;;
         --host-net)
             EXTRA_DOCKER_ARGS+=("--net" "host")
             i=$((i + 1))
@@ -1795,7 +1871,7 @@ if [ "$CONFIG_HOME_AUTO" = true ]; then
 fi
 
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
-    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ]; then
+    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
         CONFIG_HOME=""
         CONFIG_HOME_AUTO=false
@@ -1834,6 +1910,17 @@ autolink_legacy_into_deva_root() {
     if [ -d "$CONFIG_ROOT" ]; then
         [ -d "$CONFIG_ROOT/codex/.codex" ] || mkdir -p "$CONFIG_ROOT/codex/.codex"
     fi
+
+    if [ -d "$HOME/.gemini" ]; then
+        [ -d "$CONFIG_ROOT/gemini" ] || mkdir -p "$CONFIG_ROOT/gemini"
+        if [ ! -e "$CONFIG_ROOT/gemini/.gemini" ] && [ ! -L "$CONFIG_ROOT/gemini/.gemini" ]; then
+            ln -s "$HOME/.gemini" "$CONFIG_ROOT/gemini/.gemini"
+            echo "autolink: ~/.gemini -> $CONFIG_ROOT/gemini/.gemini" >&2
+        fi
+    fi
+    if [ -d "$CONFIG_ROOT" ]; then
+        [ -d "$CONFIG_ROOT/gemini/.gemini" ] || mkdir -p "$CONFIG_ROOT/gemini/.gemini"
+    fi
 }
 
 check_agent "$ACTIVE_AGENT"
@@ -1844,6 +1931,9 @@ if [ -n "$CONFIG_HOME" ]; then
     fi
     if [ "$ACTIVE_AGENT" = "claude" ] && [ ! -f "$CONFIG_HOME/.claude.json" ]; then
         echo '{}' >"$CONFIG_HOME/.claude.json"
+    fi
+    if [ "$ACTIVE_AGENT" = "gemini" ] && [ ! -f "$CONFIG_HOME/settings.json" ]; then
+        echo '{}' >"$CONFIG_HOME/settings.json"
     fi
 fi
 

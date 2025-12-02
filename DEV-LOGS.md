@@ -14,6 +14,11 @@
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
 
+# [2025-11-27] Dev Log: Docker-in-Docker auto-mount support
+- Why: Common dev workflow need - testing containers, building images, CI/CD simulation inside deva environments
+- What: Auto-mount Docker socket (`/var/run/docker.sock`) by default with graceful detection, opt-out via `--no-docker` flag or `DEVA_NO_DOCKER=1`, quick permission fix (chmod 666) for deva user access
+- Result: DinD works out-of-box on Linux/macOS/WSL2, no manual socket mounting needed, aligns with YOLO philosophy (make it work, container is the boundary)
+
 # [2025-10-26] Dev Log: Custom credential files via --auth-with
 - Why: Users have multiple credential files, needed direct path support beyond predefined auth methods
 - What: `--auth-with /path/to/creds.json` now works, auto-backup existing credentials, workspace session tracking in `~/.config/deva/sessions/*.json`
