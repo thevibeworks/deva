@@ -41,6 +41,7 @@ AGENT_EXPLICIT=false
 EPHEMERAL_MODE=false
 GLOBAL_MODE=false
 DEBUG_MODE=false
+DRY_RUN=false
 
 usage() {
     cat <<'USAGE'
@@ -73,6 +74,7 @@ Deva flags:
                           Select profile: base (default), rust. Pulls tag, falls back to Dockerfile.<profile>
   --host-net              Use host networking for the agent container
   --no-docker             Disable auto-mount of Docker socket (default: auto-mount if present)
+  --dry-run               Show docker command without executing (implies --debug)
   --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
@@ -114,9 +116,9 @@ Examples:
 
 Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
-  deva.sh -c ~/work-claude-home -- --trace
-  deva.sh --show-config               # Debug configuration
-  deva.sh --no-docker claude          # Disable Docker-in-Docker auto-mount
+  deva.sh claude -- --trace --continue   # Use claude-trace wrapper for request tracing
+  deva.sh --show-config                  # Debug configuration
+  deva.sh --no-docker claude             # Disable Docker-in-Docker auto-mount
 USAGE
 }
 
@@ -1426,6 +1428,12 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --dry-run)
+            DRY_RUN=true
+            DEBUG_MODE=true
+            i=$((i + 1))
+            continue
+            ;;
         *)
             remaining+=("$arg")
             i=$((i + 1))
@@ -1879,9 +1887,9 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
 fi
 
 autolink_legacy_into_deva_root() {
-    [ "$AUTOLINK" = true ] || return
-    [ "$CONFIG_HOME_FROM_CLI" = false ] || return
-    [ -n "${CONFIG_ROOT:-}" ] || return
+    [ "$AUTOLINK" = true ] || return 0
+    [ "$CONFIG_HOME_FROM_CLI" = false ] || return 0
+    [ -n "${CONFIG_ROOT:-}" ] || return 0
     [ -d "$CONFIG_ROOT" ] || mkdir -p "$CONFIG_ROOT"
 
     if [ -d "$HOME/.claude" ] || [ -f "$HOME/.claude.json" ]; then
@@ -1908,7 +1916,7 @@ autolink_legacy_into_deva_root() {
         fi
     fi
     if [ -d "$CONFIG_ROOT" ]; then
-        [ -d "$CONFIG_ROOT/codex/.codex" ] || mkdir -p "$CONFIG_ROOT/codex/.codex"
+        [ -d "$CONFIG_ROOT/codex/.codex" ] || [ -L "$CONFIG_ROOT/codex/.codex" ] || mkdir -p "$CONFIG_ROOT/codex/.codex"
     fi
 
     if [ -d "$HOME/.gemini" ]; then
@@ -1919,7 +1927,7 @@ autolink_legacy_into_deva_root() {
         fi
     fi
     if [ -d "$CONFIG_ROOT" ]; then
-        [ -d "$CONFIG_ROOT/gemini/.gemini" ] || mkdir -p "$CONFIG_ROOT/gemini/.gemini"
+        [ -d "$CONFIG_ROOT/gemini/.gemini" ] || [ -L "$CONFIG_ROOT/gemini/.gemini" ] || mkdir -p "$CONFIG_ROOT/gemini/.gemini"
     fi
 }
 
@@ -2036,7 +2044,10 @@ DOCKER_ARGS+=(-e "DEVA_WORKSPACE=$(pwd)")
 DOCKER_ARGS+=(-e "DEVA_EPHEMERAL=${EPHEMERAL_MODE}")
 
 # Centralized mounting logic based on auth method
-if [ -n "${AUTH_METHOD:-}" ]; then
+# If --config-home is set, use it exclusively and skip auth-based mounting
+if [ -n "$CONFIG_HOME" ]; then
+    mount_config_home
+elif [ -n "${AUTH_METHOD:-}" ]; then
     is_default_auth=false
     if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" = "claude" ]; then
         is_default_auth=true
@@ -2204,6 +2215,10 @@ if [ "$DEBUG_MODE" = true ]; then
     fi
     echo "===========================" >&2
     echo "" >&2
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    exit 0
 fi
 
 if [ "$EPHEMERAL_MODE" = false ]; then

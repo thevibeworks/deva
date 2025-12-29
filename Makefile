@@ -21,7 +21,7 @@ DETECTED_IMAGE := $(shell \
 CLAUDE_CODE_VERSION := $(shell npm view @anthropic-ai/claude-code version 2>/dev/null || echo "2.0.1")
 CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.42.0")
 GEMINI_CLI_VERSION := $(shell npm view @google/gemini-cli version 2>/dev/null || echo "latest")
-ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/commits/main --jq '.sha' 2>/dev/null || echo "789eefa650d66e97dd8fddceabf9e09f2a5d04a4")
+ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.1")
 COPILOT_API_VERSION := $(shell gh api repos/ericc-ch/copilot-api/branches/master --jq '.commit.sha' 2>/dev/null || echo "83cdfde17d7d3be36bd2493cc7592ff13be4928d")
 
 export DOCKER_BUILDKIT := 1
@@ -132,70 +132,17 @@ buildx-multi-local:
 
 .PHONY: versions-up
 versions-up:
-	@echo "\033[1;36m╔════════════════════════════════════════════════════╗\033[0m"
-	@echo "\033[1;36m║  Upgrading to Latest Versions                     ║\033[0m"
-	@echo "\033[1;36m╚════════════════════════════════════════════════════╝\033[0m"
-	@echo "\033[0;90m⏰ Time: $$(date '+%Y-%m-%d %H:%M:%S')\033[0m"
-	@echo ""
-	@echo "\033[0;90mFetching release dates...\033[0m"
-	@echo "\033[0;90mChecking image: $(DETECTED_IMAGE)\033[0m"
-	@# Get current image versions for comparison
-	@prev_claude=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.claude_code_version" }}' $(DETECTED_IMAGE) 2>/dev/null || echo "-"); \
-	 prev_codex=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.codex_version" }}' $(DETECTED_IMAGE) 2>/dev/null || echo "-"); \
-	 prev_gemini=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.gemini_cli_version" }}' $(DETECTED_IMAGE) 2>/dev/null || echo "-"); \
-	 prev_atlas=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.atlas_cli_version" }}' $(DETECTED_IMAGE) 2>/dev/null || echo "-"); \
-	 prev_copilot=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.copilot_api_version" }}' $(DETECTED_IMAGE) 2>/dev/null || echo "-"); \
-	 fmt() { v="$$1"; if [ -z "$$v" ] || [ "$$v" = "<no value>" ]; then echo "-"; else case "$$v" in v*) echo "$$v";; *) echo "v$$v";; esac; fi; }; \
-	 fmt_date() { d="$$1"; if [ -z "$$d" ]; then echo ""; else date -d "$$d" '+%b %d, %Y %H:%M' 2>/dev/null || date -jf '%Y-%m-%dT%H:%M:%SZ' "$$d" '+%b %d, %Y %H:%M' 2>/dev/null || echo "$$d"; fi; }; \
-	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); curG=$$(fmt "$$prev_gemini"); curA="$${prev_atlas:0:7}"; curP="$${prev_copilot:0:7}"; \
-	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); tgtG=$$(fmt "$(GEMINI_CLI_VERSION)"); \
-	 tgtA="$(ATLAS_CLI_VERSION)"; tgtA="$${tgtA:0:7}"; tgtP="$(COPILOT_API_VERSION)"; tgtP="$${tgtP:0:7}"; \
-	 dateC=$$(npm view "@anthropic-ai/claude-code@$(CLAUDE_CODE_VERSION)" time --json 2>/dev/null | jq -r '.["$(CLAUDE_CODE_VERSION)"] // .' 2>/dev/null | head -1); \
-	 dateX=$$(npm view "@openai/codex@$(CODEX_VERSION)" time --json 2>/dev/null | jq -r '.["$(CODEX_VERSION)"] // .' 2>/dev/null | head -1); \
-	 dateG=$$(npm view "@google/gemini-cli@$(GEMINI_CLI_VERSION)" time --json 2>/dev/null | jq -r '.["$(GEMINI_CLI_VERSION)"] // .' 2>/dev/null | head -1); \
-	 dateA=$$(gh api "repos/lroolle/atlas-cli/commits/$(ATLAS_CLI_VERSION)" --jq '.commit.committer.date' 2>/dev/null || echo ""); \
-	 dateP=$$(gh api "repos/ericc-ch/copilot-api/commits/$(COPILOT_API_VERSION)" --jq '.commit.committer.date' 2>/dev/null || echo ""); \
-	 fmtC=$$(fmt_date "$$dateC"); fmtX=$$(fmt_date "$$dateX"); fmtG=$$(fmt_date "$$dateG"); fmtA=$$(fmt_date "$$dateA"); fmtP=$$(fmt_date "$$dateP"); \
-	 echo ""; \
-	 echo "\033[1;33m📦 Version Changes:\033[0m"; \
-	 if [ "$$curC" = "$$tgtC" ]; then \
-	   echo "  \033[0;90mClaude Code: $$tgtC ($$fmtC) https://www.npmjs.com/package/@anthropic-ai/claude-code\033[0m \033[0;32m(no change)\033[0m"; \
-	 else \
-	   echo "  \033[1;37mClaude Code:\033[0m \033[0;31m$$curC\033[0m → \033[0;32m$$tgtC\033[0m \033[0;90m($$fmtC) https://www.npmjs.com/package/@anthropic-ai/claude-code\033[0m"; \
-	 fi; \
-	 if [ "$$curX" = "$$tgtX" ]; then \
-	   echo "  \033[0;90mCodex:       $$tgtX ($$fmtX) https://www.npmjs.com/package/@openai/codex\033[0m \033[0;32m(no change)\033[0m"; \
-	 else \
-	   echo "  \033[1;37mCodex:      \033[0m \033[0;31m$$curX\033[0m → \033[0;32m$$tgtX\033[0m \033[0;90m($$fmtX) https://www.npmjs.com/package/@openai/codex\033[0m"; \
-	 fi; \
-	 if [ "$$curG" = "$$tgtG" ]; then \
-	   echo "  \033[0;90mGemini CLI:  $$tgtG ($$fmtG) https://www.npmjs.com/package/@google/gemini-cli\033[0m \033[0;32m(no change)\033[0m"; \
-	 else \
-	   echo "  \033[1;37mGemini CLI: \033[0m \033[0;31m$$curG\033[0m → \033[0;32m$$tgtG\033[0m \033[0;90m($$fmtG) https://www.npmjs.com/package/@google/gemini-cli\033[0m"; \
-	 fi; \
-	 if [ "$$curA" = "$$tgtA" ]; then \
-	   echo "  \033[0;90mAtlas CLI:   $$tgtA ($$fmtA) https://github.com/lroolle/atlas-cli\033[0m \033[0;32m(no change)\033[0m"; \
-	 else \
-	   echo "  \033[1;37mAtlas CLI:  \033[0m \033[0;31m$$curA\033[0m → \033[0;32m$$tgtA\033[0m \033[0;90m($$fmtA) https://github.com/lroolle/atlas-cli\033[0m"; \
-	 fi; \
-	 if [ "$$curP" = "$$tgtP" ]; then \
-	   echo "  \033[0;90mCopilot API: $$tgtP ($$fmtP) https://github.com/ericc-ch/copilot-api\033[0m \033[0;32m(no change)\033[0m"; \
-	 else \
-	   echo "  \033[1;37mCopilot API:\033[0m \033[0;31m$$curP\033[0m → \033[0;32m$$tgtP\033[0m \033[0;90m($$fmtP) https://github.com/ericc-ch/copilot-api\033[0m"; \
-	 fi
-	@echo ""
-	@echo "\033[1;33m⚠  Starting build in 5 seconds... Press Ctrl+C to cancel\033[0m"
-	@echo "\033[0;90mHint: Override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... GEMINI_CLI_VERSION=... ATLAS_CLI_VERSION=... COPILOT_API_VERSION=...\033[0m"
-	@bash -c 'for i in 5 4 3 2 1; do echo -ne "\r\033[1;36m⏳ $$i...\033[0m "; sleep 1; done; echo -ne "\r\033[K"'
-	@echo "\033[1;32m✓ Proceeding with build...\033[0m"
-	@echo ""
-	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
-	@echo ""
-	@echo "\033[1;36m🔨 Rebuilding Rust image...\033[0m"
-	@docker build -f $(RUST_DOCKERFILE) --build-arg BASE_IMAGE=$(MAIN_IMAGE) -t $(RUST_IMAGE) .
-	@echo ""
-	@echo "\033[1;32m✅ All images upgraded to latest versions\033[0m"
-	@echo "\033[0;90m⏰ Completed: $$(date '+%Y-%m-%d %H:%M:%S')\033[0m"
+	@MAIN_IMAGE=$(DETECTED_IMAGE) \
+	 BUILD_IMAGE=$(MAIN_IMAGE) \
+	 RUST_IMAGE=$(RUST_IMAGE) \
+	 DOCKERFILE=$(DOCKERFILE) \
+	 RUST_DOCKERFILE=$(RUST_DOCKERFILE) \
+	 CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+	 CODEX_VERSION=$(CODEX_VERSION) \
+	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	 ./scripts/version-upgrade.sh
 
 .PHONY: versions
 versions:

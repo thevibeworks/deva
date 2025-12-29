@@ -203,7 +203,8 @@ setup_nonroot_user() {
     if [ "$DEVA_UID" != "$current_uid" ]; then
         [ "$VERBOSE" = "true" ] && echo "[entrypoint] updating $DEVA_USER UID: $current_uid -> $DEVA_UID"
         usermod -u "$DEVA_UID" -g "$DEVA_GID" "$DEVA_USER"
-        chown -R "$DEVA_UID:$DEVA_GID" "$DEVA_HOME" 2>/dev/null || true
+        # Only chown files owned by container, skip mounted volumes
+        find "$DEVA_HOME" -maxdepth 1 ! -type l -user root -exec chown "$DEVA_UID:$DEVA_GID" {} \; 2>/dev/null || true
     fi
 
     chmod 755 /root 2>/dev/null || true
@@ -291,18 +292,44 @@ main() {
 
     if [ "$DEVA_AGENT" = "claude" ]; then
         if [ "$cmd" = "claude" ] || [ "$cmd" = "$(command -v claude 2>/dev/null)" ]; then
-            build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@" --dangerously-skip-permissions
-        elif [ "$cmd" = "claude-trace" ]; then
-            args=("$@")
-            new_args=()
-            for arg in "${args[@]}"; do
-                if [ "$arg" = "--run-with" ]; then
-                    new_args+=("--run-with" "--dangerously-skip-permissions")
-                else
-                    new_args+=("$arg")
+            # Add --dangerously-skip-permissions if not already present
+            local has_dsp=false
+            for arg in "$@"; do
+                if [ "$arg" = "--dangerously-skip-permissions" ]; then
+                    has_dsp=true
+                    break
                 fi
             done
-            build_gosu_env_cmd "$DEVA_USER" "$cmd" "${new_args[@]}"
+            if [ "$has_dsp" = true ]; then
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
+            else
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@" --dangerously-skip-permissions
+            fi
+        elif [ "$cmd" = "claude-trace" ]; then
+            # claude-trace: ensure --dangerously-skip-permissions follows --run-with
+            local has_dsp=false
+            for arg in "$@"; do
+                if [ "$arg" = "--dangerously-skip-permissions" ]; then
+                    has_dsp=true
+                    break
+                fi
+            done
+            if [ "$has_dsp" = true ]; then
+                # Already has --dangerously-skip-permissions, pass through
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
+            else
+                # Insert --dangerously-skip-permissions after --run-with
+                args=("$@")
+                new_args=()
+                for arg in "${args[@]}"; do
+                    if [ "$arg" = "--run-with" ]; then
+                        new_args+=("--run-with" "--dangerously-skip-permissions")
+                    else
+                        new_args+=("$arg")
+                    fi
+                done
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "${new_args[@]}"
+            fi
         else
             build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
         fi

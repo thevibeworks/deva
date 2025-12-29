@@ -181,7 +181,7 @@ LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 
-# Use BuildKit cache for npm to speed up repeated builds
+# Install CLI tools via npm
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
     npm config set prefix "$DEVA_HOME/.npm-global" && \
     npm install -g --no-audit --no-fund \
@@ -197,9 +197,12 @@ ARG ATLAS_CLI_VERSION=main
 
 LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
 
-# Install Go tools for Atlassian integration (Confluence/Jira/Bitbucket)
-RUN go install github.com/lroolle/atlas-cli/cmd/atl@${ATLAS_CLI_VERSION} && \
-    sudo mv $HOME/go/bin/atl /usr/local/bin/
+# Install atlas-cli binary + skill via upstream install.sh
+# - Uses prebuilt release tarball (faster than go install)
+# - Falls back to go install if no prebuilt for platform
+# - Installs skill with proper structure (SKILL.md + references/)
+RUN curl -fsSL "https://raw.githubusercontent.com/lroolle/atlas-cli/${ATLAS_CLI_VERSION}/install.sh" \
+    | bash -s -- --skill-dir $DEVA_HOME/.skills
 
 USER root
 
