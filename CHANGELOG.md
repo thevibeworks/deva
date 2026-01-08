@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.0] - 2025-09-18 🔄 **BREAKING: MAJOR REBRAND & REFACTOR**
+## [0.9.0] - 2026-01-08
+
+### Added
+- **tmux bridge**: Connect container tmux client to host tmux server via TCP bridge
+  - `deva-bridge-tmux-host` (host-side) and `deva-bridge-tmux` (container-side)
+  - Build tmux 3.6a from source with SHA256 verification
+  - Documented as privileged host bridge in AGENTS.md
+- **Gemini agent support**: Add `agents/gemini.sh` for Google Gemini CLI
+- **Docker-in-Docker auto-mount**: `/var/run/docker.sock` auto-mounted with `--no-docker` opt-out
+- **Version management**: `scripts/version-upgrade.sh` and `scripts/release-utils.sh`
+- **Build resilience**: Use `gh api` instead of `curl` to avoid GitHub rate limits
+
+### Fixed
+- docker-entrypoint.sh: usermod error handling for mounted volumes (no longer fatal under set -e)
+- Dockerfile: explicit chmod 755 for script permissions (fixes execute-only bug)
+
+### Changed
+- Environment variables for tmux bridge use `DEVA_BRIDGE_*` prefix
+
+## [0.7.0] - 2025-09-18 - **BREAKING: MAJOR REBRAND & REFACTOR**
 
 **Claude Code YOLO → deva.sh Multi-Agent Wrapper**
 
