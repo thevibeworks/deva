@@ -148,6 +148,37 @@ Mitigations:
 - Set `DEVA_NO_DOCKER=1` environment variable
 - Only mount when Docker-in-Docker workflows are required
 
+## Bridges (privileged)
+
+Deva's container IS the sandbox. Bridges punch controlled holes back to the host for specific integrations. Each bridge has TWO components: host-side and container-side.
+
+| Bridge | Host Command | Container Command | Risk |
+|--------|--------------|-------------------|------|
+| Docker | (auto-mount `/var/run/docker.sock`) | `docker ...` | Root-equivalent on host |
+| tmux | `deva-bridge-tmux-host` | `deva-bridge-tmux` | Host command execution |
+
+**tmux bridge**: Connect container tmux client to host tmux server.
+- Problem: Unix socket mount fails across macOS<->Linux kernel boundary
+- Solution: socat TCP proxy (host) + socat Unix socket (container)
+- Security: Container gains full tmux control (send-keys, run-shell, scrollback)
+
+Usage:
+```bash
+# Host (macOS)
+./scripts/deva-bridge-tmux-host
+
+# Container
+deva-bridge-tmux
+tmux -S /tmp/host-tmux.sock list-sessions
+```
+
+Environment variables:
+- `DEVA_BRIDGE_BIND`: host bind address (default: 127.0.0.1)
+- `DEVA_BRIDGE_PORT`: TCP port (default: 41555)
+- `DEVA_BRIDGE_HOST`: container's host address (default: host.docker.internal)
+- `DEVA_BRIDGE_SOCKET`: host tmux socket path (default: auto-detected)
+- `DEVA_BRIDGE_SOCK`: container local socket (default: /tmp/host-tmux.sock)
+
 ## Docker Architecture Details
 
 ### Volume Mounting Strategy

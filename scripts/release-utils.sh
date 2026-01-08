@@ -172,7 +172,7 @@ fetch_changelog() {
 fetch_markdown_changelog() {
     local url=$1 current=$2 latest=$3
     local data
-    data=$(curl -fsSL --max-time 10 --retry 2 "$url" 2>/dev/null) || return
+    data=$(curl -fsSL --max-time 10 --retry 2 "$url" 2>/dev/null) || { echo "(fetch failed)"; return 0; }
 
     python3 -c '
 import re, sys
@@ -218,7 +218,7 @@ for change in reversed(changes[-3:]):
 fetch_github_releases() {
     local repo=$1 current=$2 latest=$3
     local json
-    json=$(curl -fsSL --max-time 10 "https://api.github.com/repos/$repo/releases" 2>/dev/null) || return
+    json=$(gh api "repos/$repo/releases" 2>/dev/null) || { echo "(fetch failed)"; return 0; }
 
     python3 -c '
 import json, sys, re
@@ -357,7 +357,20 @@ load_versions() {
         if [[ -n $latest_val ]]; then
             set_latest "$tool" "$latest_val"
         else
-            set_latest "$tool" "$(fetch_latest_version "$tool")"
+            local fetched
+            fetched=$(fetch_latest_version "$tool")
+            if [[ -n $fetched ]]; then
+                set_latest "$tool" "$fetched"
+            else
+                # Network failure - fallback to current image version
+                local current=$(get_current "$tool")
+                if [[ -n $current ]]; then
+                    echo -e "${YELLOW}Warning: Failed to fetch latest $tool, using current: $current${RESET}" >&2
+                    set_latest "$tool" "$current"
+                else
+                    echo -e "${RED}Error: Cannot determine version for $tool${RESET}" >&2
+                fi
+            fi
         fi
 
         set_date "$tool" "$(fetch_version_date "$tool" "$(get_latest "$tool")")"
@@ -436,7 +449,7 @@ print_recent_changelogs() {
 fetch_recent_markdown_changelog() {
     local url=$1 count=${2:-3}
     local data
-    data=$(curl -fsSL --max-time 10 --retry 2 "$url" 2>/dev/null) || return
+    data=$(curl -fsSL --max-time 10 --retry 2 "$url" 2>/dev/null) || { echo "(fetch failed)"; return 0; }
 
     python3 -c '
 import re, sys
@@ -464,7 +477,7 @@ for section in sections:
 fetch_recent_github_releases() {
     local repo=$1 count=${2:-3}
     local json
-    json=$(curl -fsSL --max-time 10 "https://api.github.com/repos/$repo/releases?per_page=$count" 2>/dev/null) || return
+    json=$(gh api "repos/$repo/releases?per_page=$count" 2>/dev/null) || { echo "(fetch failed)"; return 0; }
 
     python3 -c '
 import json, sys, re

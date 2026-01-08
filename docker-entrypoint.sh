@@ -202,7 +202,22 @@ setup_nonroot_user() {
 
     if [ "$DEVA_UID" != "$current_uid" ]; then
         [ "$VERBOSE" = "true" ] && echo "[entrypoint] updating $DEVA_USER UID: $current_uid -> $DEVA_UID"
-        usermod -u "$DEVA_UID" -g "$DEVA_GID" "$DEVA_USER"
+        # usermod may fail with rc=12 when it can't chown home directory (mounted volumes)
+        # The UID change itself usually succeeds even when chown fails
+        if ! usermod -u "$DEVA_UID" -g "$DEVA_GID" "$DEVA_USER" 2>/dev/null; then
+            # Verify what UID we actually got
+            local actual_uid
+            actual_uid=$(id -u "$DEVA_USER" 2>/dev/null)
+            if [ -z "$actual_uid" ]; then
+                echo "[entrypoint] ERROR: cannot determine UID for $DEVA_USER" >&2
+                exit 1
+            fi
+            if [ "$actual_uid" != "$DEVA_UID" ]; then
+                echo "[entrypoint] WARNING: UID change failed ($DEVA_USER is UID $actual_uid, wanted $DEVA_UID)" >&2
+                # Adapt to reality so subsequent operations use correct UID
+                DEVA_UID="$actual_uid"
+            fi
+        fi
         # Only chown files owned by container, skip mounted volumes
         find "$DEVA_HOME" -maxdepth 1 ! -type l -user root -exec chown "$DEVA_UID:$DEVA_GID" {} \; 2>/dev/null || true
     fi

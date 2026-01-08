@@ -30,7 +30,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         openssh-client rsync \
         shellcheck bat fd-find silversearcher-ag \
         vim \
-        procps psmisc zsh
+        procps psmisc zsh socat \
+        libevent-dev libncurses-dev bison
 
 RUN git lfs install --system
 
@@ -123,6 +124,24 @@ RUN --mount=type=cache,target=/tmp/delta-cache,sharing=locked \
     mv delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu/delta /usr/local/bin/ && \
     rm -rf delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu*
 
+# Install tmux from source (protocol version must match host for socket bridge)
+# Same major.minor usually works; exact match is pragmatic, not required.
+ARG TMUX_VERSION=3.6a
+ARG TMUX_SHA256=b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759
+RUN --mount=type=cache,target=/tmp/tmux-cache,sharing=locked \
+    set -eu && \
+    cd /tmp/tmux-cache && \
+    TARBALL="tmux-${TMUX_VERSION}.tar.gz" && \
+    wget -q "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/${TARBALL}" && \
+    echo "${TMUX_SHA256}  ${TARBALL}" | sha256sum -c - && \
+    tar -xzf "${TARBALL}" && \
+    cd "tmux-${TMUX_VERSION}" && \
+    ./configure --prefix=/usr/local && \
+    make -j"$(nproc)" && \
+    make install && \
+    rm -rf /tmp/tmux-cache/tmux-* && \
+    hash -r && \
+    tmux -V
 
 ENV NPM_CONFIG_FETCH_RETRIES=5 \
     NPM_CONFIG_FETCH_RETRY_FACTOR=2 \
@@ -207,9 +226,11 @@ RUN curl -fsSL "https://raw.githubusercontent.com/lroolle/atlas-cli/${ATLAS_CLI_
 USER root
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/deva-bridge-tmux /usr/local/bin/deva-bridge-tmux
 
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
-    chmod -R +x /usr/local/bin/scripts || true
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh && \
+    chmod 755 /usr/local/bin/deva-bridge-tmux && \
+    chmod -R 755 /usr/local/bin/scripts || true
 
 WORKDIR /root
 

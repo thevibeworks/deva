@@ -1,0 +1,480 @@
+* [2026-01-08] Dev Log: LSP Support for Deva Containers              :OPS:
+
+** Context
+Claude Code LSP plugin system requires language server binaries in container PATH
+
+** Why
+Claude Code officially supports LSP (via plugin system) for code intelligence (go-to-definition, find-references, hover, diagnostics). Current deva containers lack LSP binaries and plugin installation strategy.
+
+** What
+- Design LSP installation strategy for deva containers
+- Document plugin-binary architecture trade-offs
+- Create implementation plan for deva-lsp-setup script
+
+** Problem Space
+
+*** LSP Components (Two-Part Architecture)
+Claude Code LSP requires TWO components per language:
+
+1. LSP plugin - Claude Code integration layer
+   - Installed via: =claude plugin install <name>=
+   - State persisted: =~/.claude/= (mounted from host)
+   - Configures: connection protocol, launch command, capabilities
+
+2. Language server binary - Actual LSP implementation
+   - Must be in: =$PATH= (inside container)
+   - Installation varies: npm, pip, cargo, apt, go install
+   - Size varies: pyright ~50MB, jdtls ~200MB
+
+*** Container Complexity
+| Challenge | Impact |
+|-----------+--------|
+| Image build vs runtime | Binaries at build → bloat; runtime → latency |
+| Plugin state persistence | =~/.claude/= mounted from host, survives container restarts |
+| Multi-image variants | deva:latest, deva:rust need different LSP stacks |
+| Binary size | jdtls (Java) ~200MB, impacts push/pull time |
+
+*** Available Official LSP Plugins
+
+| Language   | Plugin            | Binary                   | Install Command                            | Size   |
+|------------+-------------------+--------------------------+--------------------------------------------+--------|
+| Python     | pyright-lsp       | pyright-langserver       | =pip install pyright= OR =npm i -g pyright= | ~50MB  |
+| TypeScript | typescript-lsp    | typescript-language-server | =npm i -g typescript-language-server typescript= | ~40MB  |
+| Rust       | rust-analyzer-lsp | rust-analyzer            | =rustup component add rust-analyzer=       | ~30MB  |
+| Go         | gopls-lsp         | gopls                    | =go install golang.org/x/tools/gopls@latest= | ~20MB  |
+| C/C++      | clangd-lsp        | clangd                   | =apt install clangd=                       | ~60MB  |
+| C#         | csharp-lsp        | csharp-ls                | =dotnet tool install -g csharp-ls=         | ~40MB  |
+| Java       | jdtls-lsp         | jdtls                    | Complex setup (Eclipse JDT.LS)             | ~200MB |
+| Lua        | lua-lsp           | lua-language-server      | Platform-specific download                 | ~10MB  |
+| PHP        | php-lsp           | intelephense             | =npm i -g intelephense=                    | ~30MB  |
+| Swift      | swift-lsp         | sourcekit-lsp            | Bundled with Swift toolchain               | N/A    |
+
+*** Trade-Off Analysis
+
+**** Option A: On-Demand Installation (Recommended)
+#+BEGIN_SRC
+Pros:
+- Lean base image (~800MB vs ~1.2GB with all LSPs)
+- User installs only needed languages
+- Clear separation of concerns
+
+Cons:
+- First-time setup latency (~30s-2min per language)
+- User must understand LSP architecture
+- Requires documentation
+
+Implementation:
+- Create /usr/local/bin/deva-lsp-setup script
+- Support: python, typescript, rust, go, cpp
+- Handle both binary + plugin installation
+- Idempotent (skip if already installed)
+#+END_SRC
+
+**** Option B: Pre-Baked Images
+#+BEGIN_SRC
+Pros:
+- Zero setup, instant LSP
+- Better UX for language-specific images
+
+Cons:
+- Image proliferation (deva:python-lsp, deva:ts-lsp, etc.)
+- Harder to maintain
+- Larger storage footprint
+
+Implementation:
+- Extend Dockerfile with language-specific stages
+- Build matrix: deva:{lang}-lsp tags
+- Pre-install plugin at build time (NO - plugin state in ~/.claude)
+#+END_SRC
+
+**** Option C: Auto-Detection at Entrypoint
+#+BEGIN_SRC
+Pros:
+- "Magic" UX - LSP just works
+- No user intervention
+
+Cons:
+- Startup latency on every container create
+- False positives (e.g., package.json in Python project)
+- Violates principle of least surprise
+
+Implementation:
+- docker-entrypoint.sh scans for language markers
+- Installs LSP binaries silently
+- Suggests plugin installation (can't auto-install - needs host ~/.claude)
+#+END_SRC
+
+** Proposed Solution: Option A (On-Demand deva-lsp-setup)
+
+*** Design: deva-lsp-setup Script
+
+#+BEGIN_SRC bash
+#!/bin/sh
+# deva-lsp-setup - Install LSP support for Claude Code
+# Usage: deva-lsp-setup <language> [--plugin-only] [--binary-only]
+#
+# Languages: python, typescript, rust, go, cpp, all
+# Flags:
+#   --plugin-only  Skip binary, just install Claude plugin
+#   --binary-only  Skip plugin, just install language server binary
+#
+# Examples:
+#   deva-lsp-setup python           # Install pyright + pyright-lsp plugin
+#   deva-lsp-setup typescript        # Install ts-language-server + typescript-lsp plugin
+#   deva-lsp-setup rust --binary-only  # Just install rust-analyzer (plugin from host)
+#   deva-lsp-setup all               # Install all common LSPs
+#+END_SRC
+
+*** Implementation Strategy
+
+**** Script Location
+- Path: =/usr/local/bin/deva-lsp-setup=
+- Copy in Dockerfile: =COPY scripts/deva-lsp-setup /usr/local/bin/=
+- Permissions: =chmod +x= in Dockerfile
+- Follows pattern from: =scripts/deva-bridge-tmux=
+
+**** Supported Languages (Phase 1)
+Top 5 languages by deva usage (inferred from base image stack):
+
+1. =python= → pyright (npm) + pyright-lsp plugin
+2. =typescript= → typescript-language-server + typescript (npm) + typescript-lsp plugin
+3. =rust= → rust-analyzer (rustup) + rust-analyzer-lsp plugin
+4. =go= → gopls (go install) + gopls-lsp plugin
+5. =cpp= → clangd (apt) + clangd-lsp plugin
+
+**** Binary Installation Logic
+
+#+BEGIN_SRC bash
+# Python (pyright via npm - faster than pip)
+npm install -g pyright
+
+# TypeScript
+npm install -g typescript-language-server typescript
+
+# Rust (rust-analyzer already in deva:rust - verify presence)
+if ! command -v rust-analyzer >/dev/null 2>&1; then
+  rustup component add rust-analyzer
+fi
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# C/C++ (requires sudo)
+sudo apt-get update && sudo apt-get install -y clangd
+#+END_SRC
+
+**** Plugin Installation Logic
+
+#+BEGIN_SRC bash
+# Check if plugin already installed
+if claude plugin list | grep -q "$plugin_name"; then
+  echo "Plugin $plugin_name already installed, skipping"
+  return 0
+fi
+
+# Install plugin
+claude plugin install "$plugin_name"
+
+# Verify installation
+claude plugin list | grep "$plugin_name" || {
+  echo "ERROR: Plugin installation failed"
+  return 1
+}
+#+END_SRC
+
+**** Error Handling
+
+#+BEGIN_SRC
+# Binary installation failures
+- npm install failure → check network, disk space
+- sudo apt failure → inform user (deva user has NOPASSWD sudo)
+- go install failure → verify GOPATH/bin in PATH
+
+# Plugin installation failures
+- Claude not authenticated → instruct: run 'claude' first
+- Network timeout → retry logic (3 attempts)
+- Plugin not found → verify plugin name, check Claude version
+#+END_SRC
+
+**** Dockerfile Integration
+
+#+BEGIN_SRC dockerfile
+# In final stage (after USER deva)
+COPY scripts/deva-lsp-setup /usr/local/bin/deva-lsp-setup
+
+RUN chmod +x /usr/local/bin/deva-lsp-setup && \
+    chmod -R +x /usr/local/bin/scripts || true
+#+END_SRC
+
+*** Usage Workflow
+
+#+BEGIN_SRC bash
+# User enters deva container
+deva.sh --yolo
+
+# Inside container - install Python LSP
+deva-lsp-setup python
+
+# Output:
+# [deva-lsp-setup] Installing Python LSP support...
+# [1/2] Installing pyright binary (npm)...
+# [2/2] Installing pyright-lsp plugin...
+# SUCCESS: Python LSP ready. Restart Claude Code if running.
+
+# Verify
+which pyright                    # /home/deva/.npm-global/bin/pyright
+claude plugin list | grep pyright  # pyright-lsp
+
+# Use in Claude Code
+claude -p "Refactor main.py using LSP go-to-definition"
+#+END_SRC
+
+*** Documentation Requirements
+
+**** AGENTS.md Updates
+New section after "Bridges (privileged)":
+
+#+BEGIN_SRC markdown
+## LSP Support
+
+Claude Code officially supports Language Server Protocol (LSP) for code intelligence (go-to-definition, find-references, hover, diagnostics, auto-complete).
+
+### Architecture
+
+LSP requires TWO components:
+1. LSP plugin (Claude Code integration) - installed via `claude plugin install`
+2. Language server binary (actual LSP) - must be in PATH
+
+### Installation
+
+Inside deva container:
+```bash
+# Install LSP for specific language
+deva-lsp-setup python      # pyright + pyright-lsp plugin
+deva-lsp-setup typescript  # typescript-language-server + typescript-lsp plugin
+deva-lsp-setup rust        # rust-analyzer + rust-analyzer-lsp plugin
+deva-lsp-setup go          # gopls + gopls-lsp plugin
+deva-lsp-setup cpp         # clangd + clangd-lsp plugin
+
+# Install all common LSPs
+deva-lsp-setup all
+
+# Install only binary (plugin from host ~/.claude)
+deva-lsp-setup python --binary-only
+
+# Install only plugin (binary already available)
+deva-lsp-setup python --plugin-only
+```
+
+### Persistence
+
+- Plugin state: `~/.claude/` (mounted from host, survives container restarts)
+- Binaries: Container filesystem (reinstall after image rebuild)
+
+### Verification
+
+```bash
+# Check binary
+which pyright  # Should show path in container
+
+# Check plugin
+claude plugin list | grep pyright-lsp
+
+# Test LSP in Claude Code
+claude -p "Use LSP to find all references to foo() in main.py"
+```
+
+### Supported Languages
+
+| Language   | Binary            | Plugin            | Install |
+|------------|-------------------|-------------------|---------|
+| Python     | pyright           | pyright-lsp       | `deva-lsp-setup python` |
+| TypeScript | typescript-language-server | typescript-lsp | `deva-lsp-setup typescript` |
+| Rust       | rust-analyzer     | rust-analyzer-lsp | `deva-lsp-setup rust` |
+| Go         | gopls             | gopls-lsp         | `deva-lsp-setup go` |
+| C/C++      | clangd            | clangd-lsp        | `deva-lsp-setup cpp` |
+
+See: https://code.claude.com/docs/en/discover-plugins for all available LSP plugins.
+#+END_SRC
+
+**** README.md Updates
+Add to "Development Tools Included" section:
+
+#+BEGIN_SRC markdown
+**LSP Support**: Use `deva-lsp-setup <language>` to install Language Server Protocol support for code intelligence (go-to-definition, find-references, hover). Supported: Python (pyright), TypeScript, Rust, Go, C/C++.
+#+END_SRC
+
+** Security Considerations
+
+*** Privilege Requirements
+| Operation | Privilege | Mitigation |
+|-----------+-----------+------------|
+| npm install -g | deva user | $HOME/.npm-global (user-owned) |
+| pip install | deva user | --user flag OR uv |
+| go install | deva user | $GOPATH/bin (user-owned) |
+| apt install clangd | sudo | deva user has NOPASSWD sudo in container |
+| rustup component add | deva user | RUSTUP_HOME=/opt/rustup (deva-owned in deva:rust) |
+
+*** Network Access
+- npm/pip/go install require internet
+- Downloads from: npmjs.com, pypi.org, go.dev, github.com
+- No signature verification (rely on package manager defaults)
+- LSP binaries run user code → already trusted in deva threat model
+
+*** Plugin State Isolation
+- Plugins stored: =~/.claude/= (host-mounted)
+- Container cannot modify host files outside mount
+- Plugin config persists across container recreations
+- Uninstall: =claude plugin uninstall <name>= (from host OR container)
+
+** Open Questions
+
+*** Auto-Installation Triggers
+Q: Should we auto-install LSP on first project open?
+A: NO - explicit user action required. Violates least surprise principle.
+
+*** Plugin State Management
+Q: How to handle plugin state across container recreations?
+A: =~/.claude/= is host-mounted → plugins persist. Binaries must be reinstalled (or pre-baked in image for common stacks).
+
+*** Pre-Installation in deva:rust
+Q: Should deva:rust pre-install rust-analyzer-lsp plugin?
+A: NO - plugins live in host =~/.claude/=, can't pre-install at build time. But rust-analyzer BINARY is already in deva:rust (line 48 of Dockerfile.rust).
+
+*** Version Pinning
+Q: Should we pin LSP binary versions?
+A: Phase 1: =@latest= for simplicity. Phase 2: ARG-based pinning if version drift causes issues. Use container image tags for reproducibility.
+
+*** Multi-Toolchain Support
+Q: How to handle rust-analyzer for multiple Rust toolchains (stable, nightly)?
+A: rust-analyzer is toolchain-agnostic proxy. Single binary works with rustup-managed toolchains. Current deva:rust defaults to stable.
+
+*** Image Size Impact
+Q: Should we pre-install common LSPs to reduce first-time latency?
+A: NO for base deva:latest. MAYBE for specialized images (deva:python, deva:rust) if user feedback indicates UX pain. Current tradeoff: lean base image (800MB) vs 30s-2min first-time setup per language.
+
+** Implementation Plan
+
+*** Phase 1: Core Script (Week 1)
+1. Create =scripts/deva-lsp-setup= - POSIX shell, following =deva-bridge-tmux= patterns
+2. Support 5 languages: python, typescript, rust, go, cpp
+3. Handle binary installation (npm, apt, rustup, go install)
+4. Handle plugin installation (claude plugin install)
+5. Add --plugin-only, --binary-only, --help, --version flags
+6. Error handling: network failures, missing dependencies, auth failures
+
+*** Phase 2: Dockerfile Integration (Week 1)
+1. Copy script to =/usr/local/bin/= in Dockerfile
+2. Set executable permissions
+3. Test in both deva:latest and deva:rust images
+4. Verify script works with non-root deva user
+
+*** Phase 3: Documentation (Week 2)
+1. Add "LSP Support" section to AGENTS.md
+2. Update README.md "Development Tools" section
+3. Create examples in docs/examples/ (if dir exists)
+4. Document troubleshooting: plugin install failures, binary not in PATH
+
+*** Phase 4: Validation (Week 2)
+1. Test each language LSP end-to-end
+2. Verify plugin persistence across container restarts
+3. Test --plugin-only, --binary-only modes
+4. Test 'all' language (install all 5 LSPs)
+5. Measure installation times (for documentation)
+
+*** Phase 5: Advanced Features (Future)
+1. Support additional languages: java (jdtls), lua, php, swift
+2. Add --version pinning support (ARG in script)
+3. Create pre-baked images: deva:python-lsp, deva:rust-lsp
+4. Auto-detection helper: =deva-lsp-suggest= (scans project, suggests LSPs)
+
+** Metrics (Projected)
+
+| Metric | Before | After | Window | Source |
+|--------+--------+-------+--------+--------|
+| Base image size | 800MB | 800MB | N/A | No change (on-demand install) |
+| deva:python-lsp image | N/A | 850MB | Future | If pre-baked image created |
+| First LSP install time | N/A | 30s-2min | Per language | npm/pip/apt download speed |
+| Plugin install time | N/A | 5-10s | Per plugin | claude plugin install latency |
+
+** Rollback
+
+*** Trigger
+User reports LSP installation failures, broken plugin state, or excessive container bloat.
+
+*** Procedure
+1. Remove script from container: =rm /usr/local/bin/deva-lsp-setup=
+2. Revert Dockerfile changes (remove COPY line)
+3. Uninstall plugins: =claude plugin uninstall <name>= (from host)
+4. Data impact: REVERSIBLE - plugins in =~/.claude/= can be uninstalled, binaries in container are ephemeral
+
+** Links
+
+*** Official Documentation
+- Claude Code Plugins: https://code.claude.com/docs/en/plugins
+- LSP Plugin Reference: https://code.claude.com/docs/en/plugins-reference#lsp-servers
+- Discover Plugins: https://code.claude.com/docs/en/discover-plugins
+
+*** Repository Files
+- Base Dockerfile: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/Dockerfile
+- Rust Dockerfile: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/Dockerfile.rust
+- AGENTS.md: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/AGENTS.md
+- Bridge script pattern: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/scripts/deva-bridge-tmux
+
+*** Related Commits
+- Current HEAD: 5807889 (refactor: extract version management to scripts and add --trace/--dry-run flags)
+- Gemini support: 1190dee (feat: add gemini agent support and Docker-in-Docker auto-mount)
+
+** Notes
+
+*** Assumptions
+- Claude Code LSP plugin architecture remains stable (two-component design)
+- Official LSP plugins continue to be maintained by Anthropic
+- Language server binaries are publicly available (npm, apt, PyPI, etc.)
+- Users have internet access for initial LSP installation
+- =~/.claude/= mount persists plugin state across container lifecycles
+
+*** Constraints
+- Base image size target: <1GB (current: ~800MB)
+- First-time LSP install latency: acceptable if <2min per language
+- Plugin installation requires Claude Code authentication (cannot pre-install at build time)
+- Container as sandbox model: LSP binaries run with full deva user permissions
+
+*** Gotchas
+- Plugin state in =~/.claude/= (host) survives container deletion, but binaries do NOT
+- rust-analyzer binary exists in deva:rust (line 48), but plugin must be installed separately
+- clangd requires sudo apt install (only LSP needing elevated privileges)
+- go install puts gopls in =$GOPATH/bin= (must be in =$PATH= - already configured in deva)
+- npm global installs use =~/.npm-global= for deva user (configured in Dockerfile line 167-168)
+- Plugin install requires authentication: user must run =claude= at least once before =deva-lsp-setup=
+- TypeScript LSP requires TWO npm packages: typescript-language-server AND typescript
+- pyright available via both npm and pip - prefer npm for consistency with other LSPs
+- LSP binary versions will drift over time - container image tagging provides reproducibility
+
+*** Design Rationale
+- POSIX shell (not bash) for maximum portability (follows =deva-bridge-tmux= pattern)
+- On-demand install (not pre-baked) to keep base image lean, support varied stacks
+- Support top 5 languages first (python, ts, rust, go, cpp) - cover 90% of deva usage
+- =--plugin-only= flag for hosts with custom LSP binaries already installed
+- =--binary-only= flag for users managing plugins from host =~/.claude/=
+- Follow script patterns from =scripts/deva-bridge-tmux= (version, usage, error handling)
+
+*** Future Enhancements
+- Language detection: =deva-lsp-suggest= scans project, recommends LSPs
+- Pre-baked images: =deva:python-lsp=, =deva:fullstack-lsp= (all 5 LSPs)
+- Version pinning: ARG-based version control for reproducible builds
+- Health check: =deva-lsp-verify= tests LSP binaries + plugins
+- Auto-update: =deva-lsp-update= pulls latest LSP binaries
+- Multi-version support: Install multiple versions of same LSP (e.g., pyright stable + nightly)
+
+*** References to Existing Patterns
+All script patterns derived from:
+- =scripts/deva-bridge-tmux= (POSIX shell, getopts, usage, version)
+- =scripts/deva-bridge-tmux-host= (error handling, dependency checks)
+- =docker-entrypoint.sh= (environment reporting, user switching)
+- Dockerfile layering strategy (stable layers first, volatile last)
+
+** Timestamp
+Created: 2026-01-08T07:45:22Z
+Author: @ericc-ch
+Commit: 5807889 (worktree: deva)

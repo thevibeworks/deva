@@ -14,6 +14,19 @@
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
 
+# [2026-01-07] Dev Log: Fix version-upgrade build resilience
+- Why: `make versions-up` exited 56 during GitHub API changelog fetch - GitHub API 403 rate limit (60/hour) from unauthenticated curl
+- What:
+  - Changed `fetch_github_releases()` and `fetch_recent_github_releases()` in `scripts/release-utils.sh` from `curl` to `gh api` for authenticated requests
+  - All changelog fetch functions now fail gracefully with `{ echo "(fetch failed)"; return 0; }` instead of `|| return` (was causing `set -e` script abort)
+  - Added fallback in `load_versions()` - network fetch failure uses current image version instead of empty string
+  - Added pre-build version check in `scripts/version-upgrade.sh` - warns about missing versions but proceeds with build
+- Result: Build script resilient to transient network failures and GitHub rate limits. Changelog display is best-effort, won't block builds.
+
+**Files changed**:
+- `scripts/release-utils.sh` (lines 175, 221, 452, 480)
+- `scripts/version-upgrade.sh` (lines 82-95)
+
 # [2025-11-27] Dev Log: Docker-in-Docker auto-mount support
 - Why: Common dev workflow need - testing containers, building images, CI/CD simulation inside deva environments
 - What: Auto-mount Docker socket (`/var/run/docker.sock`) by default with graceful detection, opt-out via `--no-docker` flag or `DEVA_NO_DOCKER=1`, quick permission fix (chmod 666) for deva user access

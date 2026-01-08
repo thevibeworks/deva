@@ -79,6 +79,21 @@ main() {
     local atlas_ver=$(get_latest "atlas-cli")
     local copilot_ver=$(get_latest "copilot-api")
 
+    # Verify all required versions are set
+    local missing=()
+    [[ -z $claude_ver ]] && missing+=("CLAUDE_CODE_VERSION")
+    [[ -z $codex_ver ]] && missing+=("CODEX_VERSION")
+    [[ -z $gemini_ver ]] && missing+=("GEMINI_CLI_VERSION")
+    [[ -z $atlas_ver ]] && missing+=("ATLAS_CLI_VERSION")
+    [[ -z $copilot_ver ]] && missing+=("COPILOT_API_VERSION")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${YELLOW}Warning: Could not determine versions for: ${missing[*]}${RESET}"
+        echo -e "${DIM}Set them manually: ${missing[*]/%/=x.x.x} make versions-up${RESET}"
+        echo -e "${DIM}Proceeding with build anyway...${RESET}"
+        echo ""
+    fi
+
     section "Building Main Image"
     docker build -f "$DOCKERFILE" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
