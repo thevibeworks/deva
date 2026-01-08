@@ -1,0 +1,151 @@
+#!/bin/sh
+# shellcheck shell=sh
+# Version: 0.3.0
+#
+# deva-bridge-tmux - Container-side tmux bridge for deva
+#
+# Connect container tmux client to host tmux server via TCP bridge.
+# Requires deva-bridge-tmux-host running on the macOS host.
+#
+# SECURITY WARNING:
+#   This is a PRIVILEGED HOST BRIDGE. Container gains full tmux control.
+#   Effectively a sandbox escape - container can run commands on host.
+
+set -eu
+umask 077
+
+prog=${0##*/}
+VERSION=0.3.0
+
+EXIT_OK=0
+EXIT_ERROR=1
+EXIT_NOTFOUND=3
+
+QUIET=0
+HOST="${DEVA_BRIDGE_HOST:-host.docker.internal}"
+PORT="${DEVA_BRIDGE_PORT:-41555}"
+LOCAL_SOCK="${DEVA_BRIDGE_SOCK:-/tmp/host-tmux.sock}"
+
+# --- util ---
+
+log() { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
+warn() { printf '%s\n' "$*" >&2; }
+err() { printf '%s\n' "$*" >&2; }
+die() { err "$prog: error: $*"; exit "$EXIT_ERROR"; }
+
+usage() {
+  cat <<EOF
+$prog - container-side tmux bridge for deva
+
+USAGE:
+  $prog [OPTIONS]
+
+OPTIONS:
+  -H, --host HOST   host address (default: host.docker.internal)
+  -p, --port PORT   TCP port (default: 41555)
+  -s, --socket PATH local socket path (default: /tmp/host-tmux.sock)
+  -q, --quiet       suppress non-error output
+  -h, --help        show this help
+  -V, --version     show version
+
+ENV:
+  DEVA_BRIDGE_HOST  host address (default: host.docker.internal)
+  DEVA_BRIDGE_PORT  TCP port (default: 41555)
+  DEVA_BRIDGE_SOCK  local socket (default: /tmp/host-tmux.sock)
+
+SECURITY:
+  This is a PRIVILEGED HOST BRIDGE. Container gains full tmux control.
+  You can send-keys, run-shell, read scrollback on host tmux sessions.
+
+PREREQUISITES:
+  On macOS host, run: deva-bridge-tmux-host
+
+EXAMPLES:
+  $prog
+  tmux -S /tmp/host-tmux.sock list-sessions
+  tmux -S /tmp/host-tmux.sock attach -t WIP
+
+TIP:
+  alias htmux='tmux -S /tmp/host-tmux.sock'
+EOF
+}
+
+version() { printf '%s %s\n' "$prog" "$VERSION"; }
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"
+}
+
+check_host_reachable() {
+  # Try nc first, fall back to socat probe
+  if command -v nc >/dev/null 2>&1; then
+    nc -z -w2 "$HOST" "$PORT" 2>/dev/null && return 0
+  fi
+  # Fallback: socat probe (timeout 1s)
+  socat -T1 /dev/null "TCP:$HOST:$PORT" 2>/dev/null && return 0
+  return 1
+}
+
+# --- parse options ---
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    -h|--help) usage; exit "$EXIT_OK" ;;
+    -V|--version) version; exit "$EXIT_OK" ;;
+    -q|--quiet) QUIET=1 ;;
+    -H|--host)
+      [ $# -ge 2 ] || die "missing value for $1"
+      HOST="$2"; shift ;;
+    -p|--port)
+      [ $# -ge 2 ] || die "missing value for $1"
+      PORT="$2"; shift ;;
+    -s|--socket)
+      [ $# -ge 2 ] || die "missing value for $1"
+      LOCAL_SOCK="$2"; shift ;;
+    --) shift; break ;;
+    -*) die "unknown option: $1" ;;
+    *) break ;;
+  esac
+  shift
+done
+
+# --- main ---
+
+main() {
+  require socat
+  require tmux
+
+  # Verify host reachable
+  if ! check_host_reachable; then
+    err "$prog: cannot reach $HOST:$PORT"
+    err ""
+    err "on macOS host, run:"
+    err "  deva-bridge-tmux-host"
+    err ""
+    err "if host.docker.internal can't reach 127.0.0.1, try:"
+    err "  deva-bridge-tmux-host --bind 0.0.0.0"
+    exit "$EXIT_NOTFOUND"
+  fi
+
+  # Remove stale socket; socat uses unlink-early so no cleanup needed after exec
+  rm -f "$LOCAL_SOCK"
+
+  warn "============================================"
+  warn "WARNING: PRIVILEGED HOST BRIDGE (tmux)"
+  warn "============================================"
+  warn "Container can execute commands on host via tmux."
+  warn ""
+
+  log "deva bridge: tmux (container-side)"
+  log "  host: $HOST:$PORT"
+  log "  sock: $LOCAL_SOCK"
+  log ""
+  log "usage: tmux -S $LOCAL_SOCK list-sessions"
+  log "tip:   alias htmux='tmux -S $LOCAL_SOCK'"
+
+  exec socat \
+    "UNIX-LISTEN:$LOCAL_SOCK,fork,unlink-early" \
+    "TCP:$HOST:$PORT"
+}
+
+main "$@"

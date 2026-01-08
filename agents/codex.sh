@@ -1,10 +1,7 @@
 # shellcheck shell=bash
 
-# Load shared auth utilities
 # shellcheck disable=SC1091
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
 
 agent_prepare() {
     local -a args
@@ -85,7 +82,6 @@ setup_codex_auth() {
                 DOCKER_ARGS+=("-e" "OPENAI_MODEL=$main_model")
             fi
 
-            # Configure proxy settings for container
             local no_proxy="$COPILOT_HOST_MAPPING,$COPILOT_LOCALHOST_MAPPING,127.0.0.1"
             DOCKER_ARGS+=("-e" "NO_PROXY=${NO_PROXY:+$NO_PROXY,}$no_proxy")
             DOCKER_ARGS+=("-e" "no_grpc_proxy=${NO_GRPC_PROXY:+$NO_GRPC_PROXY,}$no_proxy")
@@ -95,7 +91,6 @@ setup_codex_auth() {
                 auth_error "CUSTOM_CREDENTIALS_FILE not set for credentials-file auth"
             fi
             AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
-            backup_credentials "codex" "${CONFIG_ROOT:-}" "$CUSTOM_CREDENTIALS_FILE"
             DOCKER_ARGS+=("-v" "$CUSTOM_CREDENTIALS_FILE:/home/deva/.codex/auth.json")
             echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.codex/auth.json" >&2
             ;;

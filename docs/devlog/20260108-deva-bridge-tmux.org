@@ -1,0 +1,308 @@
+* [2026-01-08] Dev Log: deva-bridge-tmux                        :FEATURE:BRIDGE:
+
+** Context
+Deva runs AI agents (claude, codex, gemini) in isolated Docker containers. Need tmux integration for container to control host tmux sessions.
+
+** Why
+Unix socket mount across macOS<->Linux kernel boundary fails - socket file visible but connect() returns ECONNREFUSED due to kernel incompatibility. Direct socket mount not viable.
+
+** What
+- TCP bridge for tmux socket communication                              @deva
+- Build tmux 3.6a from source with SHA256 verification            @Dockerfile
+- Host-side TCP proxy: deva-bridge-tmux-host          @scripts @privileged
+- Container-side Unix socket proxy: deva-bridge-tmux  @scripts @privileged
+- Documentation of security implications                          @AGENTS.md
+=BREAKING= Introduces privileged host bridge (container escape vector)
+=SECURITY= Container gains full tmux control (send-keys, run-shell, scrollback)
+
+** How
+*** Steps
+1. Install socat in Dockerfile base layer
+2. Install libevent-dev, libncurses-dev, bison for tmux build dependencies
+3. Download, verify SHA256, build tmux 3.6a from source
+4. Create deva-bridge-tmux-host (macOS host-side TCP listener)
+5. Create deva-bridge-tmux (container-side Unix socket forwarder)
+6. Copy bridge scripts to /usr/local/bin with 755 permissions
+7. Document bridge architecture and security model in AGENTS.md
+
+*** Commands
+#+BEGIN_SRC bash
+# Build tmux from source
+cd /tmp
+wget https://github.com/tmux/tmux/releases/download/3.6a/tmux-3.6a.tar.gz
+echo "b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759  tmux-3.6a.tar.gz" | sha256sum -c -
+tar -xzf tmux-3.6a.tar.gz
+cd tmux-3.6a
+./configure --prefix=/usr/local
+make -j$(nproc)
+make install
+tmux -V  # tmux 3.6a
+
+# Host-side bridge (macOS)
+./scripts/deva-bridge-tmux-host
+# Listen: 127.0.0.1:41555 -> /private/tmp/tmux-$(id -u)/default
+
+# Container-side bridge
+deva-bridge-tmux
+# TCP: host.docker.internal:41555 -> Unix: /tmp/host-tmux.sock
+
+# Usage from container
+tmux -S /tmp/host-tmux.sock list-sessions
+tmux -S /tmp/host-tmux.sock attach -t WIP
+alias htmux='tmux -S /tmp/host-tmux.sock'
+#+END_SRC
+
+*** Diffs
+#+BEGIN_SRC diff
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -30,7 +30,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+         openssh-client rsync \
+         shellcheck bat fd-find silversearcher-ag \
+         vim \
+-        procps psmisc zsh
++        procps psmisc zsh socat \
++        libevent-dev libncurses-dev bison
+
++# Install tmux from source (protocol version must match host for socket bridge)
++# Same major.minor usually works; exact match is pragmatic, not required.
++ARG TMUX_VERSION=3.6a
++ARG TMUX_SHA256=b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759
++RUN --mount=type=cache,target=/tmp/tmux-cache,sharing=locked \
++    set -eu && \
++    cd /tmp/tmux-cache && \
++    TARBALL="tmux-${TMUX_VERSION}.tar.gz" && \
++    wget -q "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/${TARBALL}" && \
++    echo "${TMUX_SHA256}  ${TARBALL}" | sha256sum -c - && \
++    tar -xzf "${TARBALL}" && \
++    cd "tmux-${TMUX_VERSION}" && \
++    ./configure --prefix=/usr/local && \
++    make -j"$(nproc)" && \
++    make install && \
++    rm -rf /tmp/tmux-cache/tmux-* && \
++    hash -r && \
++    tmux -V
+
++COPY scripts/deva-bridge-tmux /usr/local/bin/deva-bridge-tmux
++RUN chmod +x /usr/local/bin/deva-bridge-tmux
+#+END_SRC
+
+*** Architecture Notes                                           :BRIDGE:SECURITY:
+| Component | Location | Protocol | Socket Path | Risk Level |
+|-----------+----------+----------+-------------+------------|
+| deva-bridge-tmux-host | macOS host | TCP listener | /private/tmp/tmux-$(id -u)/default | Medium (localhost only) |
+| socat TCP proxy | host | TCP:41555 | host.docker.internal:41555 | High (container escape) |
+| socat Unix forwarder | container | Unix socket | /tmp/host-tmux.sock | High (full tmux control) |
+
+*** API Contract                                                     :BRIDGE:
+**** Host-side Environment Variables
+| Variable | Default | Purpose |
+|----------+---------+---------|
+| DEVA_BRIDGE_BIND | 127.0.0.1 | TCP bind address (0.0.0.0 dangerous) |
+| DEVA_BRIDGE_PORT | 41555 | TCP port for bridge |
+| DEVA_BRIDGE_SOCKET | auto-detect | Host tmux socket path |
+
+**** Container-side Environment Variables
+| Variable | Default | Purpose |
+|----------+---------+---------|
+| DEVA_BRIDGE_HOST | host.docker.internal | Docker Desktop special hostname |
+| DEVA_BRIDGE_PORT | 41555 | TCP port (must match host) |
+| DEVA_BRIDGE_SOCK | /tmp/host-tmux.sock | Container-local Unix socket |
+
+**** Bridge Lifecycle
+1. Host: deva-bridge-tmux-host starts socat TCP-LISTEN
+2. Container: deva-bridge-tmux connects via TCP, creates Unix socket
+3. Container: tmux client uses -S /tmp/host-tmux.sock
+4. Packets: tmux client -> Unix -> socat -> TCP -> socat -> Unix -> tmux server
+
+** Result
+*** Outcome
+Container tmux client successfully connects to host tmux server via TCP bridge. Verified with:
+- tmux -S /tmp/host-tmux.sock list-sessions (lists host sessions)
+- tmux -S /tmp/host-tmux.sock attach -t WIP (attaches to host session)
+- No permission errors, no protocol version mismatches
+
+*** Tests
+- Manual: Start host bridge, start container bridge, list sessions
+- Manual: Attach to existing host session from container
+- Manual: Send-keys from container to host session
+- Manual: Verify scrollback access from container
+
+*** Observability
+No metrics - this is a development tool. Errors logged to stderr by both bridge scripts.
+
+** Debugging Session: Container Permission Issues
+
+*** Initial Symptoms
+After adding deva-bridge-tmux script, new containers failed to start with two errors:
+#+BEGIN_EXAMPLE
+usermod: Failed to change ownership of the home directory
+env: 'claude': Permission denied
+#+END_EXAMPLE
+
+*** Investigation Timeline (2026-01-08)
+**** Hypothesis 1: Image configuration broken
+- Checked Dockerfile: ENTRYPOINT correct, runs as root, CMD ["claude"]
+- Result: Configuration valid
+
+**** Hypothesis 2: Entrypoint script broken
+- Test: docker run --rm ghcr.io/thevibeworks/deva:latest /bin/bash -c 'whoami'
+- Result: Works, prints 'deva' (non-root user switching works)
+- Test: docker run --rm --entrypoint /usr/local/bin/docker-entrypoint.sh ghcr.io/thevibeworks/deva:latest
+- Result: Works, starts normally
+- Conclusion: Entrypoint script itself is functional
+
+**** Hypothesis 3: Gosu user switching broken
+- Test: docker run --rm ghcr.io/thevibeworks/deva:latest gosu deva whoami
+- Result: Works, prints 'deva'
+- Test: docker run --rm ghcr.io/thevibeworks/deva:latest gosu deva claude --version
+- Result: Works when bypassing entrypoint
+- Conclusion: gosu works, claude binary accessible
+
+**** Hypothesis 4: Stale cached containers
+- Observation: deva.sh reuses persistent containers (docker start)
+- Containers created from old image versions have stale filesystem state
+- Test: Stop and remove old containers, docker run fresh
+- Result: Fresh containers work
+
+**** Hypothesis 5: Stale Docker build cache
+- Observation: BuildKit caches COPY layers
+- Old cache preserved incorrect file permissions
+- Test: docker build --no-cache
+- Result: Fixes permission issues
+
+**** Root Cause: Script file permissions
+#+BEGIN_SRC bash
+# Before fix
+-rwx--x--x  deva-bridge-tmux      # 711 (no read permission)
+
+# After fix
+-rwxr-xr-x  deva-bridge-tmux      # 755 (read+execute)
+#+END_SRC
+
+Shell scripts need read permission for interpreter to parse. Execute-only (711) fails with "Permission denied" when shell tries to read script contents.
+
+*** Resolution Steps
+1. chmod 755 scripts/deva-bridge-tmux scripts/deva-bridge-tmux-host
+2. docker build --no-cache -f Dockerfile -t ghcr.io/thevibeworks/deva:latest .
+3. docker ps -a --filter "name=deva-" --format "{{.Names}}" | xargs docker rm -f
+4. Test with fresh container: docker run --rm ghcr.io/thevibeworks/deva:latest claude --version
+
+*** Lessons Learned
+| Issue | Learning | Prevention |
+|-------+----------+------------|
+| Persistent containers | deva.sh docker start reuses old state | Always test fresh containers after image rebuild |
+| Docker layer cache | COPY preserves source file permissions | Use --no-cache when fixing permission issues |
+| Script permissions | Shells need read+execute (755), not just execute (711) | Verify with stat -f "%Sp %N" before COPY |
+| usermod errors | "Failed to change ownership" is FATAL under set -e, needed explicit error handling | Suppress usermod stderr but verify UID change succeeded |
+| Testing methodology | docker run vs docker exec vs docker start have different failure modes | Test all three when debugging container startup |
+
+*** Known Issues
+**** usermod error about home directory
+#+BEGIN_EXAMPLE
+usermod: Failed to change ownership of the home directory
+#+END_EXAMPLE
+
+usermod internally tries to chown home directory when changing UID. With mounted volumes, this fails because container can't change ownership of host-owned files.
+
+*Problem*: Under `set -e`, this error aborts the entrypoint script, preventing container startup.
+
+*Fix applied to docker-entrypoint.sh*:
+#+BEGIN_SRC bash
+# usermod may fail with rc=12 when it can't chown home directory (mounted volumes)
+# The UID change itself usually succeeds even when chown fails
+if ! usermod -u "$DEVA_UID" -g "$DEVA_GID" "$DEVA_USER" 2>/dev/null; then
+    local actual_uid
+    actual_uid=$(id -u "$DEVA_USER" 2>/dev/null)
+    # Fail hard if we can't even determine the UID
+    if [ -z "$actual_uid" ]; then
+        echo "[entrypoint] ERROR: cannot determine UID for $DEVA_USER" >&2
+        exit 1
+    fi
+    # UID mismatch: warn and adapt (degrade gracefully for dev containers)
+    if [ "$actual_uid" != "$DEVA_UID" ]; then
+        echo "[entrypoint] WARNING: UID change failed ..." >&2
+        DEVA_UID="$actual_uid"  # Use actual UID for subsequent ops
+    fi
+fi
+#+END_SRC
+
+*Policy decision*: Empty UID = hard fail (bug). UID mismatch = warn + adapt (dev container should try to work).
+
+Key insight: usermod rc=12 usually means UID change succeeded but post-change chown failed on mounted volumes. We verify actual UID, fail if unknown, adapt if mismatched.
+
+** Decisions
+| Decision | Alternatives | Rationale | DRI | Timestamp (UTC) |
+|----------+--------------+-----------+-----+-----------------|
+| TCP bridge via socat | 1) Direct socket mount (fails macOS->Linux) 2) SSH tunneling (complex) 3) tmux -CC protocol (no scrollback) | socat: simple, reliable, minimal dependencies | @deva | 2026-01-08T00:00:00Z |
+| Build tmux from source | 1) Use distro tmux (version mismatch likely) 2) Static binary (no distro available) | Exact version match guarantees protocol compatibility | @deva | 2026-01-08T00:00:00Z |
+| Version 3.6a | 1) Latest 3.5 (older) 2) Latest 3.6b (not released) | Host runs macOS with tmux 3.6a from Homebrew | @deva | 2026-01-08T00:00:00Z |
+| SHA256 verification | Trust download | Security best practice for build-time downloads | @deva | 2026-01-08T00:00:00Z |
+| 127.0.0.1 bind default | 0.0.0.0 bind | Minimize attack surface - localhost-only by default | @deva | 2026-01-08T00:00:00Z |
+| Script permissions 755 | 711 (execute-only) | Shell interpreter needs read permission to parse script | @deva | 2026-01-08T01:30:00Z |
+
+** Risks                                                            :SECURITY:
+| Risk | Mitigation | Owner | Status |
+|------+------------+-------+--------|
+| Container escape via tmux send-keys | Document clearly, bind=127.0.0.1 default, user must explicitly enable | @deva | Documented |
+| Scrollback leakage (sensitive data) | No automatic mitigation - user awareness required | @deva | Documented |
+| Bind=0.0.0.0 exposes to network | Default=127.0.0.1, warning in script output, docs emphasize danger | @deva | Mitigated |
+| Protocol version mismatch | Build exact tmux version, SHA256 verify, document version requirement | @deva | Mitigated |
+| Port conflict (41555 in use) | User can override via DEVA_BRIDGE_PORT | @deva | Configurable |
+| Stale Docker layer cache | Document --no-cache requirement after permission fixes | @deva | Documented |
+| Persistent container state | Document container cleanup requirement after image rebuild | @deva | Documented |
+
+** Rollback
+*** Trigger
+- tmux protocol incompatibility errors
+- Container escape incidents attributed to tmux bridge
+- Performance degradation from TCP overhead
+
+*** Procedure
+1. Stop host bridge: pkill -f deva-bridge-tmux-host
+2. Stop container bridge: docker exec <container> pkill -f deva-bridge-tmux
+3. Remove bridge scripts from Dockerfile:
+   #+BEGIN_SRC bash
+   git revert <commit-sha>
+   docker build --no-cache -f Dockerfile -t ghcr.io/thevibeworks/deva:latest .
+   #+END_SRC
+4. Data impact: none (bridge is stateless, no data persistence)
+
+** Links
+- Bridges documentation: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/AGENTS.md
+- Dockerfile: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/Dockerfile
+- Host bridge: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/scripts/deva-bridge-tmux-host
+- Container bridge: /Users/eric/wrk/src/github.com/claude-code/WIP/260107_deva-tmux-bridge/worktree/deva/scripts/deva-bridge-tmux
+- tmux releases: https://github.com/tmux/tmux/releases
+- socat docs: http://www.dest-unreach.org/socat/doc/socat.html
+
+** Notes
+*** Assumptions
+- Host runs macOS with Docker Desktop (provides host.docker.internal)
+- Host tmux server already running with active session
+- User understands security implications of privileged bridge
+- Same tmux major.minor version sufficient for protocol compatibility
+- Container has network access to host.docker.internal
+
+*** Constraints
+- TCP overhead adds ~1-2ms latency vs direct Unix socket
+- Bridge scripts require socat installed on both host and container
+- SHA256 hash hardcoded - must update for different tmux versions
+- Protocol compatibility not guaranteed across major tmux versions
+
+*** Open Questions
+- Q: Support Linux host without host.docker.internal?
+  A: Use --bind 0.0.0.0 and DEVA_BRIDGE_HOST=<host-ip>
+- Q: Support multiple tmux servers?
+  A: Override DEVA_BRIDGE_SOCKET to specific socket path
+- Q: Performance impact of TCP vs Unix socket?
+  A: Negligible for interactive use (<1ms added latency)
+
+*** Gotchas
+- Shell scripts with 711 permissions (x without r) fail with "Permission denied"
+- Docker layer cache preserves old file permissions from COPY
+- Persistent containers (docker start) retain old filesystem state after image rebuild
+- usermod errors about home directory are FATAL under set -e - need explicit error handling
+- host.docker.internal only works on Docker Desktop (macOS/Windows), not Linux
+- tmux -S path MUST be absolute, relative paths fail silently
+- chmod +x only adds execute bit, doesn't help if umask removed read - use explicit 755

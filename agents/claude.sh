@@ -1,9 +1,7 @@
 # shellcheck shell=bash
 
 # shellcheck disable=SC1091
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
 
 agent_prepare() {
     local -a args
@@ -12,26 +10,60 @@ agent_prepare() {
     else
         args=()
     fi
-    AGENT_COMMAND=("claude")
 
     parse_auth_args "claude" "${args[@]+"${args[@]}"}"
     AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
-    local has_dangerously=false
+    # Detect --trace flag and extract trace options
+    local use_trace=false
+    local -a trace_args=()
+    local -a claude_args=()
+
     if [ ${#remaining_args[@]} -gt 0 ]; then
-        for arg in "${remaining_args[@]}"; do
-            if [ "$arg" = "--dangerously-skip-permissions" ]; then
-                has_dangerously=true
-                break
-            fi
+        local i=0
+        while [ $i -lt ${#remaining_args[@]} ]; do
+            local arg="${remaining_args[$i]}"
+            case "$arg" in
+                --trace)
+                    use_trace=true
+                    # Default trace options - include all requests for visibility
+                    trace_args+=("--include-all-requests")
+                    ;;
+                *)
+                    claude_args+=("$arg")
+                    ;;
+            esac
+            i=$((i + 1))
         done
     fi
-    if [ "$has_dangerously" = false ]; then
-        AGENT_COMMAND+=("--dangerously-skip-permissions")
-    fi
 
-    AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
+    # Check if --dangerously-skip-permissions already in claude_args
+    local has_dangerously=false
+    for arg in "${claude_args[@]+"${claude_args[@]}"}"; do
+        if [ "$arg" = "--dangerously-skip-permissions" ]; then
+            has_dangerously=true
+            break
+        fi
+    done
+
+    if [ "$use_trace" = true ]; then
+        # Use claude-trace wrapper
+        AGENT_COMMAND=("claude-trace")
+        AGENT_COMMAND+=("${trace_args[@]}")
+        AGENT_COMMAND+=("--run-with")
+        if [ "$has_dangerously" = false ]; then
+            AGENT_COMMAND+=("--dangerously-skip-permissions")
+        fi
+        AGENT_COMMAND+=("${claude_args[@]+"${claude_args[@]}"}")
+    else
+        # Direct claude invocation
+        AGENT_COMMAND=("claude")
+        if [ "$has_dangerously" = false ]; then
+            AGENT_COMMAND+=("--dangerously-skip-permissions")
+        fi
+        AGENT_COMMAND+=("${claude_args[@]+"${claude_args[@]}"}")
+    fi
 
     setup_claude_auth "$AUTH_METHOD"
 }
@@ -44,7 +76,6 @@ setup_claude_auth() {
             AUTH_DETAILS="claude-app-oauth (~/.claude)"
             ;;
         api-key)
-            # Auto-detect OAuth token vs regular API key
             if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
                 DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
                 AUTH_DETAILS="oauth-token (CLAUDE_CODE_OAUTH_TOKEN)"
@@ -127,7 +158,6 @@ setup_claude_auth() {
                 auth_error "CUSTOM_CREDENTIALS_FILE not set for credentials-file auth"
             fi
             AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
-            backup_credentials "claude" "${CONFIG_ROOT:-}" "$CUSTOM_CREDENTIALS_FILE"
             DOCKER_ARGS+=("-v" "$CUSTOM_CREDENTIALS_FILE:/home/deva/.claude/.credentials.json")
             echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.claude/.credentials.json" >&2
             ;;

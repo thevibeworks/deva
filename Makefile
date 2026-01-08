@@ -7,8 +7,22 @@ RUST_DOCKERFILE := Dockerfile.rust
 MAIN_IMAGE := $(IMAGE_NAME):$(TAG)
 RUST_IMAGE := $(IMAGE_NAME):$(RUST_TAG)
 CONTAINER_NAME := deva-$(shell basename $(PWD))-$(shell date +%s)
+
+# Smart image detection: auto-detect available image for version checking
+# Prefers rust (superset of base) then falls back to latest
+DETECTED_IMAGE := $(shell \
+	if docker image inspect $(IMAGE_NAME):$(RUST_TAG) >/dev/null 2>&1; then \
+		echo "$(IMAGE_NAME):$(RUST_TAG)"; \
+	elif docker image inspect $(IMAGE_NAME):$(TAG) >/dev/null 2>&1; then \
+		echo "$(IMAGE_NAME):$(TAG)"; \
+	else \
+		echo "$(IMAGE_NAME):$(TAG)"; \
+	fi)
 CLAUDE_CODE_VERSION := $(shell npm view @anthropic-ai/claude-code version 2>/dev/null || echo "2.0.1")
 CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.42.0")
+GEMINI_CLI_VERSION := $(shell npm view @google/gemini-cli version 2>/dev/null || echo "latest")
+ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.1")
+COPILOT_API_VERSION := $(shell gh api repos/ericc-ch/copilot-api/branches/master --jq '.commit.sha' 2>/dev/null || echo "83cdfde17d7d3be36bd2493cc7592ff13be4928d")
 
 export DOCKER_BUILDKIT := 1
 
@@ -28,12 +42,14 @@ build-main:
 	@# Inspect existing image labels; print direct diff lines
 	@prev_claude=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.claude_code_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 prev_codex=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.codex_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
+	 prev_gemini=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.gemini_cli_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 fmt() { v="$$1"; if [ -z "$$v" ] || [ "$$v" = "<no value>" ]; then echo "-"; else case "$$v" in v*) echo "$$v";; *) echo "v$$v";; esac; fi; }; \
-	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); \
-	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); \
-		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ]; then \
+	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); curG=$$(fmt "$$prev_gemini"); \
+	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); tgtG=$$(fmt "$(GEMINI_CLI_VERSION)"); \
+		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ] && [ "$$curG" = "$$tgtG" ]; then \
 		   echo "Claude: $$tgtC (no change)"; \
 		   echo "Codex:  $$tgtX (no change)"; \
+		   echo "Gemini: $$tgtG (no change)"; \
 		   echo "Already up-to-date"; \
 		 else \
 		   if [ "$$curC" = "$$tgtC" ]; then \
@@ -46,15 +62,20 @@ build-main:
 		   else \
 		     echo "Codex:  $$curX -> $$tgtX"; \
 		   fi; \
+		   if [ "$$curG" = "$$tgtG" ]; then \
+		     echo "Gemini: $$tgtG (no change)"; \
+		   else \
+		     echo "Gemini: $$curG -> $$tgtG"; \
+		   fi; \
 		 fi
-	@echo "Hint: override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... or run 'make bump-versions' to pin"
-	docker build -f $(DOCKERFILE) --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) -t $(MAIN_IMAGE) .
+	@echo "Hint: override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... GEMINI_CLI_VERSION=... ATLAS_CLI_VERSION=... COPILOT_API_VERSION=... or run 'make bump-versions' to pin"
+	docker build -f $(DOCKERFILE) --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Build completed: $(MAIN_IMAGE)"
 
 .PHONY: rebuild
 rebuild:
 	@echo "🔨 Rebuilding Docker image (no cache) with $(DOCKERFILE)..."
-	docker build -f $(DOCKERFILE) --no-cache --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) -t $(MAIN_IMAGE) .
+	docker build -f $(DOCKERFILE) --no-cache --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Rebuild completed: $(MAIN_IMAGE)"
 
 
@@ -66,15 +87,15 @@ build-rust:
 
 .PHONY: build-all
 build-all:
-	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION)..."
-	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION)
+	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION), Gemini $(GEMINI_CLI_VERSION), Atlas $(ATLAS_CLI_VERSION), Copilot-API $(COPILOT_API_VERSION)..."
+	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
 	@$(MAKE) build-rust BASE_IMAGE=$(MAIN_IMAGE)
 	@echo "✅ All images built successfully"
 
 .PHONY: buildx
 buildx:
 	@echo "🔨 Building with docker buildx..."
-	docker buildx build -f $(DOCKERFILE) --load --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) -t $(MAIN_IMAGE) .
+	docker buildx build -f $(DOCKERFILE) --load --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Buildx completed: $(MAIN_IMAGE)"
 
 .PHONY: buildx-multi
@@ -83,6 +104,9 @@ buildx-multi:
 	docker buildx build -f $(DOCKERFILE) --platform linux/amd64,linux/arm64 \
 		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
 		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
+		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
 		--push -t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed and pushed: $(MAIN_IMAGE)"
 
@@ -100,42 +124,75 @@ buildx-multi-local:
 	docker buildx build --platform linux/amd64,linux/arm64 \
 		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
 		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
+		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
 		-t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed locally: $(MAIN_IMAGE)"
 
 .PHONY: versions-up
 versions-up:
-	@echo "🔄 Upgrading to latest versions from npm..."
-	@echo "Claude Code: $(CLAUDE_CODE_VERSION)"
-	@echo "Codex: $(CODEX_VERSION)"
-	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION)
-	@echo "🔨 Rebuilding Rust image..."
-	@docker build -f $(RUST_DOCKERFILE) --build-arg BASE_IMAGE=$(MAIN_IMAGE) -t $(RUST_IMAGE) .
-	@echo "✅ All images upgraded to latest versions"
+	@MAIN_IMAGE=$(DETECTED_IMAGE) \
+	 BUILD_IMAGE=$(MAIN_IMAGE) \
+	 RUST_IMAGE=$(RUST_IMAGE) \
+	 DOCKERFILE=$(DOCKERFILE) \
+	 RUST_DOCKERFILE=$(RUST_DOCKERFILE) \
+	 CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+	 CODEX_VERSION=$(CODEX_VERSION) \
+	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	 ./scripts/version-upgrade.sh
 
 .PHONY: versions
 versions:
 	@CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
 	 CODEX_VERSION=$(CODEX_VERSION) \
-	 MAIN_IMAGE=$(MAIN_IMAGE) \
+	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	 MAIN_IMAGE=$(DETECTED_IMAGE) \
 	 ./scripts/version-report.sh
 
 .PHONY: clean
 clean:
-	@echo "🧹 Cleaning up Docker artifacts..."
+	@echo "🧹 Aggressive Docker cleanup..."
+	@echo "Removing project images..."
 	-docker rmi $(MAIN_IMAGE) 2>/dev/null || true
 	-docker rmi $(RUST_IMAGE) 2>/dev/null || true
-	-docker system prune -f
+	@echo "Pruning stopped containers..."
+	-docker container prune -f
+	@echo "Pruning unused images..."
+	-docker image prune -f
+	@echo "Pruning unused networks..."
+	-docker network prune -f
+	@echo "Pruning build cache..."
+	-docker builder prune -f
 	@echo "✅ Cleanup completed"
 
 .PHONY: clean-all
 clean-all:
-	@echo "🧹 Deep cleaning Docker artifacts and build cache..."
+	@echo "🧹 NUCLEAR: Removing ALL unused Docker resources..."
+	@echo "WARNING: This will remove ALL unused containers, images, networks, and volumes"
+	@echo "Press Ctrl+C within 3 seconds to cancel..."
+	@sleep 3
+	@echo "Removing project images..."
 	-docker rmi $(MAIN_IMAGE) 2>/dev/null || true
 	-docker rmi $(RUST_IMAGE) 2>/dev/null || true
+	@echo "Removing ALL stopped containers..."
+	-docker container prune -af
+	@echo "Removing ALL dangling and unused images..."
+	-docker image prune -af
+	@echo "Removing ALL unused networks..."
+	-docker network prune -f
+	@echo "Removing ALL unused volumes..."
+	-docker volume prune -af
+	@echo "Removing ALL build cache..."
 	-docker builder prune -af
+	@echo "Final system prune..."
 	-docker system prune -af --volumes
-	@echo "✅ Deep cleanup completed"
+	@df -h | grep -E '(Filesystem|/var/lib/docker|overlay)' 2>/dev/null || echo "Docker storage info not available"
+	@echo "✅ Nuclear cleanup completed"
 
 .PHONY: shell
 shell:
@@ -252,8 +309,8 @@ help:
 	@echo "  test                 Test main image"
 	@echo "  test-rust            Test Rust image"
 	@echo "  shell                Open shell in container"
-	@echo "  clean                Clean up Docker artifacts"
-	@echo "  clean-all            Deep clean with build cache"
+	@echo "  clean                Aggressive cleanup (unused containers/images/networks/cache)"
+	@echo "  clean-all            NUCLEAR cleanup (ALL unused Docker resources + volumes)"
 	@echo "  push                 Push image to registry"
 	@echo "  pull                 Pull image from registry"
 	@echo "  info                 Show image information"
@@ -267,6 +324,8 @@ help:
 	@echo "  RUST_DOCKERFILE      Rust Dockerfile path (default: $(RUST_DOCKERFILE))"
 	@echo "  CLAUDE_CODE_VERSION  Claude CLI version (default: $(CLAUDE_CODE_VERSION))"
 	@echo "  CODEX_VERSION        Codex CLI version (default: $(CODEX_VERSION))"
+	@echo "  GEMINI_CLI_VERSION   Gemini CLI version (default: $(GEMINI_CLI_VERSION))"
+	@echo "  ATLAS_CLI_VERSION    Atlas CLI version (default: $(ATLAS_CLI_VERSION))"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build                                    # Build all images with latest versions"
@@ -274,4 +333,7 @@ help:
 	@echo "  make build-rust                               # Build Rust image only"
 	@echo "  make TAG=dev build                            # Build all with custom tag"
 	@echo "  make CLAUDE_CODE_VERSION=2.0.5 build          # Override with specific version"
+	@echo "  make GEMINI_CLI_VERSION=0.18.0 build          # Override gemini version"
+	@echo "  make ATLAS_CLI_VERSION=5f6a20c build          # Pin atlas-cli to specific commit"
 	@echo "  make versions                                 # Check current versions"
+	@echo "  make versions-up                              # Upgrade to latest (includes atlas-cli)"

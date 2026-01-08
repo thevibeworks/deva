@@ -202,8 +202,24 @@ setup_nonroot_user() {
 
     if [ "$DEVA_UID" != "$current_uid" ]; then
         [ "$VERBOSE" = "true" ] && echo "[entrypoint] updating $DEVA_USER UID: $current_uid -> $DEVA_UID"
-        usermod -u "$DEVA_UID" -g "$DEVA_GID" "$DEVA_USER"
-        chown -R "$DEVA_UID:$DEVA_GID" "$DEVA_HOME" 2>/dev/null || true
+        # usermod may fail with rc=12 when it can't chown home directory (mounted volumes)
+        # The UID change itself usually succeeds even when chown fails
+        if ! usermod -u "$DEVA_UID" -g "$DEVA_GID" "$DEVA_USER" 2>/dev/null; then
+            # Verify what UID we actually got
+            local actual_uid
+            actual_uid=$(id -u "$DEVA_USER" 2>/dev/null)
+            if [ -z "$actual_uid" ]; then
+                echo "[entrypoint] ERROR: cannot determine UID for $DEVA_USER" >&2
+                exit 1
+            fi
+            if [ "$actual_uid" != "$DEVA_UID" ]; then
+                echo "[entrypoint] WARNING: UID change failed ($DEVA_USER is UID $actual_uid, wanted $DEVA_UID)" >&2
+                # Adapt to reality so subsequent operations use correct UID
+                DEVA_UID="$actual_uid"
+            fi
+        fi
+        # Only chown files owned by container, skip mounted volumes
+        find "$DEVA_HOME" -maxdepth 1 ! -type l -user root -exec chown "$DEVA_UID:$DEVA_GID" {} \; 2>/dev/null || true
     fi
 
     chmod 755 /root 2>/dev/null || true
@@ -216,6 +232,12 @@ fix_rust_permissions() {
     if [ -d "$ch" ]; then chown -R "$DEVA_UID:$DEVA_GID" "$ch" 2>/dev/null || true; fi
     [ -d "$rh" ] || mkdir -p "$rh"
     [ -d "$ch" ] || mkdir -p "$ch"
+}
+
+fix_docker_socket_permissions() {
+    if [ -S /var/run/docker.sock ]; then
+        chmod 666 /var/run/docker.sock 2>/dev/null || true
+    fi
 }
 
 build_gosu_env_cmd() {
@@ -269,6 +291,7 @@ main() {
     ensure_agent_binaries
     setup_nonroot_user
     fix_rust_permissions
+    fix_docker_socket_permissions
 
     if [ $# -eq 0 ]; then
         if [ "$DEVA_AGENT" = "codex" ]; then
@@ -284,18 +307,44 @@ main() {
 
     if [ "$DEVA_AGENT" = "claude" ]; then
         if [ "$cmd" = "claude" ] || [ "$cmd" = "$(command -v claude 2>/dev/null)" ]; then
-            build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@" --dangerously-skip-permissions
-        elif [ "$cmd" = "claude-trace" ]; then
-            args=("$@")
-            new_args=()
-            for arg in "${args[@]}"; do
-                if [ "$arg" = "--run-with" ]; then
-                    new_args+=("--run-with" "--dangerously-skip-permissions")
-                else
-                    new_args+=("$arg")
+            # Add --dangerously-skip-permissions if not already present
+            local has_dsp=false
+            for arg in "$@"; do
+                if [ "$arg" = "--dangerously-skip-permissions" ]; then
+                    has_dsp=true
+                    break
                 fi
             done
-            build_gosu_env_cmd "$DEVA_USER" "$cmd" "${new_args[@]}"
+            if [ "$has_dsp" = true ]; then
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
+            else
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@" --dangerously-skip-permissions
+            fi
+        elif [ "$cmd" = "claude-trace" ]; then
+            # claude-trace: ensure --dangerously-skip-permissions follows --run-with
+            local has_dsp=false
+            for arg in "$@"; do
+                if [ "$arg" = "--dangerously-skip-permissions" ]; then
+                    has_dsp=true
+                    break
+                fi
+            done
+            if [ "$has_dsp" = true ]; then
+                # Already has --dangerously-skip-permissions, pass through
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
+            else
+                # Insert --dangerously-skip-permissions after --run-with
+                args=("$@")
+                new_args=()
+                for arg in "${args[@]}"; do
+                    if [ "$arg" = "--run-with" ]; then
+                        new_args+=("--run-with" "--dangerously-skip-permissions")
+                    else
+                        new_args+=("$arg")
+                    fi
+                done
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "${new_args[@]}"
+            fi
         else
             build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
         fi

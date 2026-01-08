@@ -29,7 +29,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libpng-dev libjpeg-dev \
         libudev-dev \
         libproc2-dev \
-        libzmq3-dev libzmq5 libczmq-dev
+        libzmq3-dev libzmq5 libczmq-dev && \
+    curl -fsSL 'https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key' | gpg --dearmor -o /usr/share/keyrings/clickhouse-keyring.gpg && \
+    ARCH=$(dpkg --print-architecture) && \
+    echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg arch=${ARCH}] https://packages.clickhouse.com/deb stable main" > /etc/apt/sources.list.d/clickhouse.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends clickhouse-client
 
 RUN --mount=type=cache,target=/tmp/rust-cache,sharing=locked \
     set -euxo pipefail && \
