@@ -82,7 +82,7 @@ check_consistency() {
 
 main() {
     if [[ ! -f "deva.sh" ]] || [[ ! -f "CHANGELOG.md" ]]; then
-        error "Must be run from claude-code-yolo root directory"
+        error "Must be run from deva root directory"
         exit 1
     fi
     

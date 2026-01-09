@@ -7,7 +7,7 @@ SCRIPT_NAME="claude.sh"
 YOLO_WRAPPER="claude-yolo"
 DEVA_LAUNCHER="deva.sh"
 DOCKER_IMAGE="ghcr.io/thevibeworks/deva:latest"
-GITHUB_RAW="https://raw.githubusercontent.com/thevibeworks/claude-code-yolo/main"
+GITHUB_RAW="https://raw.githubusercontent.com/thevibeworks/deva/main"
 
 echo "deva Multi-Agent Environment Installer"
 echo "=========================="
