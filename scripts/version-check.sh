@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Claude Code YOLO Version Consistency Checker
+# deva Version Consistency Checker
 # Validates that all version references are consistent
 
 RED='\033[0;31m'
@@ -21,8 +21,8 @@ warning() {
     echo -e "${YELLOW}⚠️ $1${NC}"
 }
 
-get_claude_version() {
-    grep 'VERSION=' claude.sh | head -1 | sed 's/.*VERSION="\([^"]*\)".*/\1/'
+get_deva_version() {
+    grep 'VERSION=' deva.sh | head -1 | sed 's/.*VERSION="\([^"]*\)".*/\1/'
 }
 
 get_changelog_version() {
@@ -34,35 +34,35 @@ get_git_latest_tag() {
 }
 
 check_consistency() {
-    local claude_version=$(get_claude_version)
+    local deva_version=$(get_deva_version)
     local changelog_version=$(get_changelog_version)
     local git_version=$(get_git_latest_tag)
     
     echo "Version Consistency Check"
     echo "========================="
-    echo "claude.sh:      $claude_version"
+    echo "deva.sh:      $deva_version"
     echo "CHANGELOG.md:   $changelog_version"
     echo "Latest git tag: $git_version"
     echo ""
     
     local issues=0
     
-    if [[ "$claude_version" != "$changelog_version" ]]; then
-        error "Version mismatch: claude.sh ($claude_version) != CHANGELOG.md ($changelog_version)"
+    if [[ "$deva_version" != "$changelog_version" ]]; then
+        error "Version mismatch: deva.sh ($deva_version) != CHANGELOG.md ($changelog_version)"
         issues=$((issues + 1))
     else
-        success "claude.sh and CHANGELOG.md versions match"
+        success "deva.sh and CHANGELOG.md versions match"
     fi
     
-    if [[ "$claude_version" != "$git_version" ]]; then
-        if [[ "$claude_version" > "$git_version" ]]; then
-            warning "claude.sh version ($claude_version) is newer than latest tag ($git_version) - this is expected for unreleased versions"
+    if [[ "$deva_version" != "$git_version" ]]; then
+        if [[ "$deva_version" > "$git_version" ]]; then
+            warning "deva.sh version ($deva_version) is newer than latest tag ($git_version) - this is expected for unreleased versions"
         else
-            error "claude.sh version ($claude_version) is older than latest tag ($git_version)"
+            error "deva.sh version ($deva_version) is older than latest tag ($git_version)"
             issues=$((issues + 1))
         fi
     else
-        success "claude.sh version matches latest git tag"
+        success "deva.sh version matches latest git tag"
     fi
     
     echo ""
@@ -75,14 +75,14 @@ check_consistency() {
         echo ""
         echo "To fix:"
         echo "  1. Use ./scripts/release.sh <version> for new releases"
-        echo "  2. Or manually update claude.sh and CHANGELOG.md to match"
+        echo "  2. Or manually update deva.sh and CHANGELOG.md to match"
         return 1
     fi
 }
 
 main() {
-    if [[ ! -f "claude.sh" ]] || [[ ! -f "CHANGELOG.md" ]]; then
-        error "Must be run from claude-code-yolo root directory"
+    if [[ ! -f "deva.sh" ]] || [[ ! -f "CHANGELOG.md" ]]; then
+        error "Must be run from deva root directory"
         exit 1
     fi
     

@@ -5,7 +5,34 @@ All notable changes to Claude Code YOLO will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.1] - 2026-01-09
+
+### Fixed
+- **CRITICAL**: docker-entrypoint.sh UID/GID remapping broken since commit 5807889 (2025-12-29)
+  - Fixed selective `find -maxdepth 1 -user root` approach that skipped `.npm-global`, `.local`, etc.
+  - Implemented explicit whitelist approach for container-managed directories
+  - Prevents "env: 'claude': Permission denied" errors on container startup
+  - See docs/UID-GID-HANDLING-RESEARCH.md for industry patterns analysis
+- GitHub workflows updated for deva rebrand
+  - release.yml: Fixed IMAGE_NAME from `ccyolo` to `deva`
+  - release.yml: Updated to modify `deva.sh` instead of `claude.sh`
+  - release.yml: Added rust profile build and push
+  - ci.yml: Updated tests to use `deva.sh` instead of `claude.sh`
+  - scripts/version-check.sh: Updated to check `deva.sh` version
+- install.sh: Updated branding to "deva Multi-Agent Environment"
+
+### Added
+- Comprehensive UID/GID handling research document (docs/UID-GID-HANDLING-RESEARCH.md)
+  - Industry patterns from VS Code DevContainers, Jupyter, fixuid, and production best practices
+  - Comparison matrix of 6 different UID/GID handling approaches
+  - Validation that runtime UID fixing is legitimate for dev containers
+- Developer log documenting the UID/GID fix investigation (docs/devlog/20260108-docker-uid-permission-fix.org)
+- docker-entrypoint.sh: Improved execution order (setup_nonroot_user before ensure_agent_binaries)
+- `.deva.example` - Reference config file demonstrating all supported directives (VOLUME, ENV, PROFILE, etc.)
+
+### Changed
+- GitHub release workflow now builds both base and rust profile images
+- Release notes now document both image profiles (base and rust)
 
 ## [0.9.0] - 2026-01-08
 

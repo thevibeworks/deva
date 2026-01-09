@@ -31,12 +31,12 @@ jobs:
 
       - name: Test help output
         run: |
-          ./claude.sh --help
+          ./deva.sh --help
           ./claude-yolo --help
 
       - name: Test version output
         run: |
-          ./claude.sh --version
+          ./deva.sh --version
           ./claude-yolo --version
 
       - name: Check version consistency
