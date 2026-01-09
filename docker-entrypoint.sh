@@ -218,8 +218,17 @@ setup_nonroot_user() {
                 DEVA_UID="$actual_uid"
             fi
         fi
-        # Only chown files owned by container, skip mounted volumes
-        find "$DEVA_HOME" -maxdepth 1 ! -type l -user root -exec chown "$DEVA_UID:$DEVA_GID" {} \; 2>/dev/null || true
+        # Fix container-managed directories (whitelist approach - safe for mounted volumes)
+        # These directories are created at image build time and must be chowned to match host UID
+        for dir in .npm-global .local .oh-my-zsh .skills .config .cache go; do
+            if [ -d "$DEVA_HOME/$dir" ] && [ ! -L "$DEVA_HOME/$dir" ]; then
+                chown -R "$DEVA_UID:$DEVA_GID" "$DEVA_HOME/$dir" 2>/dev/null || true
+            fi
+        done
+        # Fix container-created dotfiles
+        find "$DEVA_HOME" -maxdepth 1 \( -type f -o -type d \) -name '.*' \
+            ! -name '..' ! -name '.' \
+            -exec chown "$DEVA_UID:$DEVA_GID" {} \; 2>/dev/null || true
     fi
 
     chmod 755 /root 2>/dev/null || true
@@ -288,10 +297,10 @@ main() {
         cd "$WORKDIR"
     fi
 
-    ensure_agent_binaries
     setup_nonroot_user
     fix_rust_permissions
     fix_docker_socket_permissions
+    ensure_agent_binaries
 
     if [ $# -eq 0 ]; then
         if [ "$DEVA_AGENT" = "codex" ]; then
