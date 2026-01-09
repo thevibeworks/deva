@@ -5,7 +5,7 @@ All notable changes to Claude Code YOLO will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.1] - 2026-01-09
 
 ### Fixed
 - **CRITICAL**: docker-entrypoint.sh UID/GID remapping broken since commit 5807889 (2025-12-29)
