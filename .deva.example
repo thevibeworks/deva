@@ -1,0 +1,62 @@
+# deva Configuration File Example
+#
+# This file demonstrates the .deva config file format.
+# Config files are loaded in this order:
+#   1. $XDG_CONFIG_HOME/deva/.deva  (usually ~/.config/deva/.deva)
+#   2. $HOME/.deva
+#   3. ./.deva                       (project-specific)
+#   4. ./.deva.local                 (gitignored overrides)
+#
+# Lines starting with # are comments.
+# Blank lines are ignored.
+
+# VOLUME Directives
+# Mount host directories into container
+# Format: VOLUME=<host-path>:<container-path>:<mode>
+# Modes: ro (read-only), rw (read-write)
+VOLUME=$HOME/.ssh:/home/deva/.ssh:ro
+VOLUME=$HOME/projects/shared:/home/deva/shared:ro
+
+# ENV Directives
+# Set environment variables in container
+# Format: ENV=<VAR_NAME>=<value>
+ENV=EDITOR=vim
+ENV=LANG=en_US.UTF-8
+
+# Variable Assignments
+# Set deva.sh behavior variables
+# These control wrapper behavior, not container environment
+AUTH_METHOD=claude
+PROFILE=rust
+EPHEMERAL=false
+
+# Common Use Cases:
+#
+# 1. Mount read-only SSH keys:
+#    VOLUME=$HOME/.ssh:/home/deva/.ssh:ro
+#
+# 2. Mount project dependencies:
+#    VOLUME=$HOME/shared-libs:/home/deva/libs:ro
+#
+# 3. Set default editor:
+#    ENV=EDITOR=nvim
+#
+# 4. Enable Docker-in-Docker:
+#    ENV=DOCKER_IN_DOCKER=true
+#
+# 5. Set default profile:
+#    PROFILE=rust
+#
+# 6. Disable ephemeral containers (persistent):
+#    EPHEMERAL=false
+
+# Project-Specific Config (.deva in project root):
+#
+# VOLUME=./vendor:/home/deva/project/vendor:ro
+# ENV=DATABASE_URL=postgres://localhost/dev
+# PROFILE=rust
+
+# Personal Overrides (.deva.local - add to .gitignore):
+#
+# VOLUME=$HOME/personal-keys:/home/deva/keys:ro
+# ENV=API_KEY=secret-key-here

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Claude Code YOLO Quick Installer
+# deva Multi-Agent Development Environment Installer
 
 SCRIPT_NAME="claude.sh"
 YOLO_WRAPPER="claude-yolo"
@@ -9,7 +9,7 @@ DEVA_LAUNCHER="deva.sh"
 DOCKER_IMAGE="ghcr.io/thevibeworks/deva:latest"
 GITHUB_RAW="https://raw.githubusercontent.com/thevibeworks/claude-code-yolo/main"
 
-echo "Claude Code YOLO Installer"
+echo "deva Multi-Agent Environment Installer"
 echo "=========================="
 echo ""
 
