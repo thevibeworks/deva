@@ -31,12 +31,16 @@ setup_gemini_auth() {
     case "$method" in
         gemini-app-oauth|oauth)
             AUTH_DETAILS="gemini-app-oauth (~/.gemini)"
-            if [ -d "$HOME/.gemini" ]; then
-                DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
-            else
-                echo "Warning: ~/.gemini directory not found, creating it" >&2
-                mkdir -p "$HOME/.gemini"
-                DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
+            # Only mount host ~/.gemini directly when no config-home mechanism is active.
+            # -Q bare mode: no mounts at all. Explicit/auto config-home: centralized mount handles it.
+            if [ "${QUICK_MODE:-false}" = false ] && [ "${CONFIG_HOME_FROM_CLI:-false}" = false ] && [ "${CONFIG_HOME_AUTO:-false}" = false ]; then
+                if [ -d "$HOME/.gemini" ]; then
+                    DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
+                else
+                    echo "Warning: ~/.gemini directory not found, creating it" >&2
+                    mkdir -p "$HOME/.gemini"
+                    DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
+                fi
             fi
             ;;
         api-key|gemini-api-key)
@@ -49,7 +53,9 @@ setup_gemini_auth() {
             DOCKER_ARGS+=("-e" "GEMINI_API_KEY=$GEMINI_API_KEY")
 
             local gemini_config_dir
-            if [ -n "${CONFIG_ROOT:-}" ]; then
+            if [ -n "${CONFIG_HOME:-}" ] && [ "${CONFIG_HOME_FROM_CLI:-false}" = true ]; then
+                gemini_config_dir="$CONFIG_HOME/.gemini"
+            elif [ -n "${CONFIG_ROOT:-}" ]; then
                 case "$CONFIG_ROOT" in
                     /*) ;;
                     *) auth_error "CONFIG_ROOT must be absolute path: $CONFIG_ROOT" ;;
@@ -72,12 +78,13 @@ setup_gemini_auth() {
                 gemini_config_dir="$HOME/.gemini"
             fi
 
-            mkdir -p "$gemini_config_dir"
-            rm -f "$gemini_config_dir/mcp-oauth-tokens-v2.json"
+            if [ "${DRY_RUN:-false}" != true ]; then
+                mkdir -p "$gemini_config_dir"
+                rm -f "$gemini_config_dir/mcp-oauth-tokens-v2.json"
 
-            local settings_file="$gemini_config_dir/settings.json"
-            if [ ! -f "$settings_file" ] || ! grep -q '"selectedType"' "$settings_file" 2>/dev/null; then
-                cat > "$settings_file" <<'EOF'
+                local settings_file="$gemini_config_dir/settings.json"
+                if [ ! -f "$settings_file" ] || ! grep -q '"selectedType"' "$settings_file" 2>/dev/null; then
+                    cat > "$settings_file" <<'EOF'
 {
   "security": {
     "auth": {
@@ -86,9 +93,10 @@ setup_gemini_auth() {
   }
 }
 EOF
-                echo "Created gemini settings with API key auth: $settings_file" >&2
-            else
-                echo "Using existing gemini settings: $settings_file" >&2
+                    echo "Created gemini settings with API key auth: $settings_file" >&2
+                else
+                    echo "Using existing gemini settings: $settings_file" >&2
+                fi
             fi
             ;;
         vertex)
