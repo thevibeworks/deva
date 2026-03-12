@@ -79,7 +79,8 @@ jobs:
           export HOME="$(mktemp -d)"
           export PATH="$HOME/.local/bin:$PATH"
           export DEVA_INSTALL_BASE_URL="file://$PWD"
-          export DEVA_DOCKER_IMAGE="deva-smoke:ci"
+          export DEVA_DOCKER_IMAGE="deva-smoke"
+          export DEVA_DOCKER_TAG="ci"
           export DEVA_DOCKER_IMAGE_FALLBACK=""
           export DEVA_NO_DOCKER=1
 
