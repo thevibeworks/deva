@@ -150,3 +150,6 @@ claude-yolo-pro/
 
 # Claude YOLO Config Files - Local overrides
 .claude-yolo.local
+
+# MkDocs output
+site/

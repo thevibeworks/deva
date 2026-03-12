@@ -13,7 +13,7 @@ if [ -n "${DEVA_DOCKER_TAG+x}" ]; then
     DEVA_DOCKER_TAG_ENV_SET=true
 fi
 
-VERSION="0.9.1"
+VERSION="0.9.2"
 DEVA_DOCKER_IMAGE="${DEVA_DOCKER_IMAGE:-ghcr.io/thevibeworks/deva}"
 DEVA_DOCKER_TAG="${DEVA_DOCKER_TAG:-latest}"
 DEVA_CONTAINER_PREFIX="${DEVA_CONTAINER_PREFIX:-deva}"
@@ -39,6 +39,7 @@ AGENT_ARGS=()
 AGENT_EXPLICIT=false
 
 EPHEMERAL_MODE=false
+QUICK_MODE=false
 GLOBAL_MODE=false
 DEBUG_MODE=false
 DRY_RUN=false
@@ -72,22 +73,25 @@ Deva flags:
   -e VAR[=VALUE]          Pass environment variable into the container (pulls from host when VALUE omitted)
   -p NAME, --profile      NAME
                           Select profile: base (default), rust. Pulls tag, falls back to Dockerfile.<profile>
+  -Q, --quick             Bare mode: no host config mounts, no .deva loading, no autolink,
+                          implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
   --no-docker             Disable auto-mount of Docker socket (default: auto-mount if present)
-  --dry-run               Show docker command without executing (implies --debug)
+  --dry-run               Show docker command without executing the container (implies --debug)
   --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
 Container Behavior (NEW in v0.8.0):
-  Default (persistent):   One container per project, reused across runs.
+  Default (persistent):   Shared per project by default, but split when container shape changes
+                          (extra volumes, explicit config-home, auth mode).
                           Preserves state (npm packages, builds, etc).
-                          Faster startup, run any agent (claude/codex/gemini).
+                          Faster startup, and default-auth runs can share one warm container.
 
   With --rm (ephemeral):  Create new container, auto-remove after exit.
                           Agent-specific naming for parallel runs.
 
 Container Naming (NEW):
-  Persistent:  deva-<parent>-<project>              # One per project
+  Persistent:  deva-<parent>-<project>[..shape]     # shape may encode volumes/config/auth
   Ephemeral:   deva-<parent>-<project>-<agent>-<pid>  # Agent-specific
 
   Example:
@@ -98,8 +102,8 @@ Examples:
   # Launch agents (persistent by default)
   deva.sh                             # Launch claude in persistent container
   deva.sh claude                      # Same
-  deva.sh codex                       # Launch codex in same container
-  deva.sh gemini                      # Launch gemini in same container
+  deva.sh codex                       # Launch codex in the same default container shape
+  deva.sh gemini                      # Launch gemini in the same default container shape
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -612,19 +616,36 @@ prepare_base_docker_args() {
         volume_hash=$(compute_volume_hash)
     fi
 
-    if [ "$EPHEMERAL_MODE" = true ]; then
-        if [ -n "$volume_hash" ]; then
-            container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}-${ACTIVE_AGENT}-$$"
-        else
-            container_name="${DEVA_CONTAINER_PREFIX}-${slug}-${ACTIVE_AGENT}-$$"
+    # Include config-home in container identity when explicit.
+    # Use CONFIG_HOME if set, else CONFIG_ROOT (root mode clears CONFIG_HOME).
+    local config_hash=""
+    local config_hash_source=""
+    if [ "$CONFIG_HOME_FROM_CLI" = true ]; then
+        if [ -n "$CONFIG_HOME" ]; then
+            config_hash_source="$CONFIG_HOME"
+        elif [ -n "$CONFIG_ROOT" ]; then
+            config_hash_source="$CONFIG_ROOT"
         fi
+    fi
+    if [ -n "$config_hash_source" ]; then
+        if command -v md5sum >/dev/null 2>&1; then
+            config_hash=$(printf '%s' "$config_hash_source" | md5sum | cut -c1-6)
+        elif command -v shasum >/dev/null 2>&1; then
+            config_hash=$(printf '%s' "$config_hash_source" | shasum | cut -c1-6)
+        else
+            config_hash=$(printf '%s' "$config_hash_source" | cksum | cut -d' ' -f1 | cut -c1-6)
+        fi
+    fi
+
+    local suffix=""
+    [ -n "$volume_hash" ] && suffix="..v${volume_hash}"
+    [ -n "$config_hash" ] && suffix="${suffix}..c${config_hash}"
+
+    if [ "$EPHEMERAL_MODE" = true ]; then
+        container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}-${ACTIVE_AGENT}-$$"
         DOCKER_ARGS=(run --rm -it)
     else
-        if [ -n "$volume_hash" ]; then
-            container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}"
-        else
-            container_name="${DEVA_CONTAINER_PREFIX}-${slug}"
-        fi
+        container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}"
         DOCKER_ARGS=(run -d)
     fi
 
@@ -764,28 +785,28 @@ should_skip_env_for_auth() {
         case "${AUTH_METHOD:-claude}" in
         claude)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
                 return 0
                 ;;
             esac
             ;;
         api-key | oat)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
                 return 0
                 ;;
             esac
             ;;
         copilot)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN)
                 return 0
                 ;;
             esac
             ;;
         bedrock | vertex | credentials-file)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
                 return 0
                 ;;
             esac
@@ -918,11 +939,162 @@ mount_config_home() {
         [ -e "$item" ] || continue
         local name
         name="$(basename "$item")"
-        if [ "$name" = "." ] || [ "$name" = ".." ]; then
+        if ! should_mount_home_item "$item" "$name"; then
             continue
         fi
         DOCKER_ARGS+=(-v "$item:/home/deva/$name")
     done
+}
+
+should_mount_home_item() {
+    local item="$1"
+    local name="$2"
+
+    case "$name" in
+    . | .. | .DS_Store | .git | .gitignore)
+        return 1
+        ;;
+    .claude.json.backup | .claude.json.backup.* | .claude.json.bak.after-corrupted.*)
+        return 1
+        ;;
+    *.credentials.json | auth.json | mcp-oauth-tokens-v2.json)
+        # Loose credential files should only enter the container through explicit auth mounts.
+        [ -f "$item" ] && return 1
+        ;;
+    esac
+
+    if [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ] && [ "$item" = "$CUSTOM_CREDENTIALS_FILE" ]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# Effective config base: where agent config dirs (.claude/, .codex/, .gemini/) live.
+resolve_config_base() {
+    if [ -n "$CONFIG_HOME" ]; then
+        printf '%s' "$CONFIG_HOME"
+    elif [ -n "$CONFIG_ROOT" ]; then
+        printf '%s' "$CONFIG_ROOT/$ACTIVE_AGENT"
+    else
+        printf '%s' "$HOME"
+    fi
+}
+
+user_envs_has() {
+    local name="$1" spec
+    for spec in "${USER_ENVS[@]+"${USER_ENVS[@]}"}"; do
+        [ "$spec" = "$name" ] || [[ "$spec" == "$name="* ]] && return 0
+    done
+    return 1
+}
+
+# Detect auth override: non-default --auth-with OR auth env vars reaching container.
+# Claude Code auth priority: env vars > .credentials.json (file is lowest priority).
+# When env-var auth is active, mounting credential files is a leak + corruption risk.
+# Only counts env vars that survive should_skip_env_for_auth filtering.
+has_auth_override() {
+    # Non-default --auth-with
+    if [ -n "${AUTH_METHOD:-}" ]; then
+        case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth) ;;
+            *) return 0 ;;
+        esac
+    fi
+
+    # Auth env vars that override file-based credentials.
+    local auth_vars=""
+    case "$ACTIVE_AGENT" in
+        claude) auth_vars="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN" ;;
+        codex)  auth_vars="OPENAI_API_KEY" ;;
+        gemini) auth_vars="GEMINI_API_KEY" ;;
+    esac
+
+    local var
+    for var in $auth_vars; do
+        # Skip vars that would be blocked by auth-env filtering
+        should_skip_env_for_auth "$var" && continue
+        docker_args_has_env "$var" && return 0
+        user_envs_has "$var" && return 0
+    done
+
+    return 1
+}
+
+backup_claude_json() {
+    local config_base
+    config_base=$(resolve_config_base)
+
+    # .claude.json corruption backup: persistent, outside container mount tree.
+    if [ "$ACTIVE_AGENT" = "claude" ]; then
+        local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deva/backups"
+        local claude_json="$config_base/.claude.json"
+        if [ -f "$claude_json" ]; then
+            mkdir -p "$state_dir"
+            cp "$claude_json" "$state_dir/.claude.json.bak"
+        fi
+    fi
+
+}
+
+default_credential_target_path() {
+    case "$ACTIVE_AGENT" in
+    claude)
+        printf '%s' "/home/deva/.claude/.credentials.json"
+        ;;
+    codex)
+        printf '%s' "/home/deva/.codex/auth.json"
+        ;;
+    gemini)
+        printf '%s' "/home/deva/.gemini/mcp-oauth-tokens-v2.json"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
+append_auth_credential_overlay() {
+    if ! has_auth_override; then
+        return
+    fi
+
+    case "$ACTIVE_AGENT:$AUTH_METHOD" in
+    claude:credentials-file | codex:credentials-file)
+        # Explicit file mount already overlays the default auth file path.
+        return
+        ;;
+    esac
+
+    local target_path
+    if ! target_path=$(default_credential_target_path); then
+        return
+    fi
+
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deva/auth-overlays/$ACTIVE_AGENT"
+    local overlay_key="${AUTH_METHOD:-default}"
+    case "$ACTIVE_AGENT:$AUTH_METHOD" in
+    claude:claude | codex:chatgpt | gemini:oauth | gemini:gemini-app-oauth)
+        overlay_key="env"
+        ;;
+    esac
+    local overlay_file
+    overlay_file="$state_dir/$(workspace_hash).${overlay_key}.blank"
+    if [ "$DRY_RUN" != true ]; then
+        mkdir -p "$state_dir"
+        printf '{}\n' > "$overlay_file"
+    fi
+    DOCKER_ARGS+=("-v" "$overlay_file:$target_path")
+}
+
+mount_loose_home_item() {
+    local item="$1"
+    local name
+    name="$(basename "$item")"
+    if ! should_mount_home_item "$item" "$name"; then
+        return
+    fi
+    DOCKER_ARGS+=(-v "$item:/home/deva/$name")
 }
 
 mount_dir_contents_into_home() {
@@ -931,12 +1103,7 @@ mount_dir_contents_into_home() {
     local item
     for item in "$base"/.* "$base"/*; do
         [ -e "$item" ] || continue
-        local name
-        name="$(basename "$item")"
-        if [ "$name" = "." ] || [ "$name" = ".." ]; then
-            continue
-        fi
-        DOCKER_ARGS+=(-v "$item:/home/deva/$name")
+        mount_loose_home_item "$item"
     done
 }
 
@@ -1418,6 +1585,14 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        -Q | --quick)
+            QUICK_MODE=true
+            SKIP_CONFIG=true
+            AUTOLINK=false
+            EPHEMERAL_MODE=true
+            i=$((i + 1))
+            continue
+            ;;
         -g | --global)
             GLOBAL_MODE=true
             i=$((i + 1))
@@ -1869,7 +2044,18 @@ if [ "$AGENT_EXPLICIT" = false ]; then
     ACTIVE_AGENT="$DEFAULT_AGENT"
 fi
 
-if [ -z "$CONFIG_HOME" ]; then
+# -Q and -c are mutually exclusive
+if [ "$QUICK_MODE" = true ] && [ "$CONFIG_HOME_FROM_CLI" = true ]; then
+    echo "error: -Q/--quick and -c/--config-home are mutually exclusive" >&2
+    exit 1
+fi
+
+# -Q bare mode: skip all config-home resolution and scaffolding
+if [ "$QUICK_MODE" = true ]; then
+    CONFIG_HOME=""
+    CONFIG_ROOT=""
+    CONFIG_HOME_AUTO=false
+elif [ -z "$CONFIG_HOME" ]; then
     set_config_home_value "$(default_config_home_for_agent "$ACTIVE_AGENT")"
     CONFIG_HOME_AUTO=true
 fi
@@ -1888,6 +2074,7 @@ fi
 
 autolink_legacy_into_deva_root() {
     [ "$AUTOLINK" = true ] || return 0
+    [ "$DRY_RUN" != true ] || return 0
     [ "$CONFIG_HOME_FROM_CLI" = false ] || return 0
     [ -n "${CONFIG_ROOT:-}" ] || return 0
     [ -d "$CONFIG_ROOT" ] || mkdir -p "$CONFIG_ROOT"
@@ -1933,16 +2120,53 @@ autolink_legacy_into_deva_root() {
 
 check_agent "$ACTIVE_AGENT"
 
-if [ -n "$CONFIG_HOME" ]; then
+if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
     if [ ! -d "$CONFIG_HOME" ]; then
         mkdir -p "$CONFIG_HOME"
     fi
-    if [ "$ACTIVE_AGENT" = "claude" ] && [ ! -f "$CONFIG_HOME/.claude.json" ]; then
-        echo '{}' >"$CONFIG_HOME/.claude.json"
+    case "$ACTIVE_AGENT" in
+    claude)
+        [ -d "$CONFIG_HOME/.claude" ] || mkdir -p "$CONFIG_HOME/.claude"
+        [ -f "$CONFIG_HOME/.claude.json" ] || echo '{}' >"$CONFIG_HOME/.claude.json"
+        ;;
+    codex)
+        [ -d "$CONFIG_HOME/.codex" ] || mkdir -p "$CONFIG_HOME/.codex"
+        ;;
+    gemini)
+        [ -d "$CONFIG_HOME/.gemini" ] || mkdir -p "$CONFIG_HOME/.gemini"
+        [ -f "$CONFIG_HOME/.gemini/settings.json" ] || echo '{}' >"$CONFIG_HOME/.gemini/settings.json"
+        ;;
+    esac
+fi
+
+# Warn if explicit --config-home is missing the agent's auth directory.
+# Only warn for default OAuth flows — api-key/bedrock/vertex/copilot don't need local auth dirs.
+# Peek at AGENT_ARGV + AGENT_ARGS to detect --auth-with before agent_prepare() runs.
+_config_home_uses_default_auth=true
+for _arg in "${AGENT_ARGV[@]+"${AGENT_ARGV[@]}"}" "${AGENT_ARGS[@]+"${AGENT_ARGS[@]}"}"; do
+    if [ "$_arg" = "--auth-with" ]; then
+        _config_home_uses_default_auth=false
+        break
     fi
-    if [ "$ACTIVE_AGENT" = "gemini" ] && [ ! -f "$CONFIG_HOME/settings.json" ]; then
-        echo '{}' >"$CONFIG_HOME/settings.json"
-    fi
+done
+if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ] && [ "$_config_home_uses_default_auth" = true ]; then
+    case "$ACTIVE_AGENT" in
+    claude)
+        if [ ! -d "$CONFIG_HOME/.claude" ] || [ -z "$(ls -A "$CONFIG_HOME/.claude" 2>/dev/null)" ]; then
+            echo "warning: $CONFIG_HOME/.claude is empty; OAuth credentials will need to be set up" >&2
+        fi
+        ;;
+    codex)
+        if [ ! -d "$CONFIG_HOME/.codex" ] || [ -z "$(ls -A "$CONFIG_HOME/.codex" 2>/dev/null)" ]; then
+            echo "warning: $CONFIG_HOME/.codex is empty; authentication will need to be set up" >&2
+        fi
+        ;;
+    gemini)
+        if [ ! -d "$CONFIG_HOME/.gemini" ] || [ -z "$(ls -A "$CONFIG_HOME/.gemini" 2>/dev/null)" ]; then
+            echo "warning: $CONFIG_HOME/.gemini is empty; authentication will need to be set up" >&2
+        fi
+        ;;
+    esac
 fi
 
 if dangerous_directory; then
@@ -1968,10 +2192,20 @@ fi
 if [ -n "${AUTH_METHOD:-}" ]; then
     # Determine if we need auth suffix
     needs_auth_suffix=false
+    _env_auth_override=false
     if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" != "claude" ]; then
         needs_auth_suffix=true
     elif [ "$ACTIVE_AGENT" = "codex" ] && [ "$AUTH_METHOD" != "chatgpt" ]; then
         needs_auth_suffix=true
+    elif [ "$ACTIVE_AGENT" = "gemini" ] && [ "$AUTH_METHOD" != "oauth" ] && [ "$AUTH_METHOD" != "gemini-app-oauth" ]; then
+        needs_auth_suffix=true
+    fi
+
+    # Env-var auth override: default method but auth env vars reaching container.
+    # Container name must change when effective auth source changes.
+    if [ "$needs_auth_suffix" = false ] && has_auth_override; then
+        needs_auth_suffix=true
+        _env_auth_override=true
     fi
 
     if [ "$needs_auth_suffix" = true ]; then
@@ -1979,6 +2213,26 @@ if [ -n "${AUTH_METHOD:-}" ]; then
         volume_hash=""
         if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
             volume_hash=$(compute_volume_hash)
+        fi
+
+        # Recompute config hash to preserve in auth-rewritten name
+        auth_config_hash=""
+        auth_config_src=""
+        if [ "$CONFIG_HOME_FROM_CLI" = true ]; then
+            if [ -n "$CONFIG_HOME" ]; then
+                auth_config_src="$CONFIG_HOME"
+            elif [ -n "$CONFIG_ROOT" ]; then
+                auth_config_src="$CONFIG_ROOT"
+            fi
+        fi
+        if [ -n "$auth_config_src" ]; then
+            if command -v md5sum >/dev/null 2>&1; then
+                auth_config_hash=$(printf '%s' "$auth_config_src" | md5sum | cut -c1-6)
+            elif command -v shasum >/dev/null 2>&1; then
+                auth_config_hash=$(printf '%s' "$auth_config_src" | shasum | cut -c1-6)
+            else
+                auth_config_hash=$(printf '%s' "$auth_config_src" | cksum | cut -d' ' -f1 | cut -c1-6)
+            fi
         fi
 
         # Hash credential file path for credentials-file auth
@@ -1994,21 +2248,24 @@ if [ -n "${AUTH_METHOD:-}" ]; then
         fi
 
         new_container_name=""
-        auth_suffix="${AUTH_METHOD}"
+        if [ "$_env_auth_override" = true ]; then
+            auth_suffix="env"
+        else
+            auth_suffix="${AUTH_METHOD}"
+        fi
         [ -n "$creds_hash" ] && auth_suffix="${AUTH_METHOD}-${creds_hash}"
+        auth_suffix="${auth_suffix}-${ACTIVE_AGENT}"
+
+        # Build suffix chain: volume + config + auth
+        name_suffix=""
+        [ -n "$volume_hash" ] && name_suffix="..v${volume_hash}"
+        [ -n "$auth_config_hash" ] && name_suffix="${name_suffix}..c${auth_config_hash}"
+        name_suffix="${name_suffix}..${auth_suffix}"
 
         if [ "$EPHEMERAL_MODE" = true ]; then
-            if [ -n "$volume_hash" ]; then
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${auth_suffix}-${ACTIVE_AGENT}-$$"
-            else
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${auth_suffix}-${ACTIVE_AGENT}-$$"
-            fi
+            new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}${name_suffix}-${ACTIVE_AGENT}-$$"
         else
-            if [ -n "$volume_hash" ]; then
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..v${volume_hash}..${auth_suffix}"
-            else
-                new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}..${auth_suffix}"
-            fi
+            new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}${name_suffix}"
         fi
 
         # Update container name in DOCKER_ARGS
@@ -2038,130 +2295,41 @@ for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
 done
 
 # Always export container context (regardless of auth method)
+# Note: DEVA_AGENT already set in prepare_base_docker_args (line 636)
 DOCKER_ARGS+=(-e "DEVA_CONTAINER_NAME=${CONTAINER_NAME}")
-DOCKER_ARGS+=(-e "DEVA_AGENT=${ACTIVE_AGENT}")
 DOCKER_ARGS+=(-e "DEVA_WORKSPACE=$(pwd)")
 DOCKER_ARGS+=(-e "DEVA_EPHEMERAL=${EPHEMERAL_MODE}")
 
-# Centralized mounting logic based on auth method
-# If --config-home is set, use it exclusively and skip auth-based mounting
-if [ -n "$CONFIG_HOME" ]; then
+# Back up .claude.json before mounting, without touching live credential files.
+if [ "$QUICK_MODE" != true ] && [ "$DRY_RUN" != true ]; then
+    backup_claude_json
+fi
+
+# Centralized mounting logic.
+# -Q bare mode: skip all config/auth mounts entirely.
+if [ "$QUICK_MODE" = true ]; then
+    : # bare mode: no config mounts
+elif [ -n "$CONFIG_HOME" ]; then
     mount_config_home
-elif [ -n "${AUTH_METHOD:-}" ]; then
-    is_default_auth=false
-    if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" = "claude" ]; then
-        is_default_auth=true
-    elif [ "$ACTIVE_AGENT" = "codex" ] && [ "$AUTH_METHOD" = "chatgpt" ]; then
-        is_default_auth=true
-    fi
-
-    if [ "$is_default_auth" = true ]; then
-        # Default auth: mount all OAuth credentials for shared container
-        if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
-            # CONFIG_ROOT mode: mount all agent dirs (includes OAuth via symlinks)
-            for d in "$CONFIG_ROOT"/*; do
-                [ -d "$d" ] || continue
-                [ "$(basename "$d")" = "_shared" ] && continue
-                mount_dir_contents_into_home "$d"
-            done
-        else
-            # Direct mode: mount both ~/.claude and ~/.codex
-            if [ -d "$HOME/.claude" ]; then
-                DOCKER_ARGS+=("-v" "$HOME/.claude:/home/deva/.claude")
-            fi
-            if [ -f "$HOME/.claude.json" ]; then
-                DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
-            fi
-            if [ -d "$HOME/.codex" ]; then
-                DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
-            fi
-        fi
+else
+    if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
+        for d in "$CONFIG_ROOT"/*; do
+            [ -d "$d" ] || continue
+            [ "$(basename "$d")" = "_shared" ] && continue
+            mount_dir_contents_into_home "$d"
+        done
     else
-        # Non-default auth: exclude OAuth credential files
-        if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
-            # CONFIG_ROOT mode: selectively mount, excluding credentials
-            for agent_dir in "$CONFIG_ROOT"/*; do
-                [ -d "$agent_dir" ] || continue
-                agent_name=$(basename "$agent_dir")
-                [ "$agent_name" = "_shared" ] && continue
-
-                # Determine credential file to exclude
-                exclude_file=""
-                case "$agent_name" in
-                claude) exclude_file=".credentials.json" ;;
-                codex) exclude_file="auth.json" ;;
-                esac
-
-                # Mount agent dir contents, excluding OAuth credentials
-                for item in "$agent_dir"/.* "$agent_dir"/*; do
-                    [ -e "$item" ] || continue
-                    name=$(basename "$item")
-                    case "$name" in
-                    . | ..) continue ;;
-                    esac
-
-                    # Skip OAuth credential files
-                    if [ -n "$exclude_file" ]; then
-                        # Check if item is the credential file or contains it
-                        if [ "$name" = "$exclude_file" ]; then
-                            continue
-                        elif [ -d "$item" ] && [ -f "$item/$exclude_file" ]; then
-                            # It's a .claude or .codex directory containing credentials
-                            # Mount contents individually, excluding credential
-                            for subitem in "$item"/* "$item"/.*; do
-                                [ -e "$subitem" ] || continue
-                                subname=$(basename "$subitem") || {
-                                    echo "warning: failed to get basename for $subitem" >&2
-                                    continue
-                                }
-                                [ -n "$subname" ] || continue
-                                case "$subname" in
-                                . | .. | "$exclude_file") continue ;;
-                                esac
-                                DOCKER_ARGS+=("-v" "$subitem:/home/deva/$name/$subname")
-                            done
-                            continue
-                        fi
-                    fi
-
-                    DOCKER_ARGS+=("-v" "$item:/home/deva/$name")
-                done
-            done
-        else
-            # Direct mode: mount ~/.claude and ~/.codex, excluding credentials
-            if [ -d "$HOME/.claude" ]; then
-                for item in "$HOME/.claude"/* "$HOME/.claude"/.*; do
-                    [ -e "$item" ] || continue
-                    name=$(basename "$item") || {
-                        echo "warning: failed to get basename for $item" >&2
-                        continue
-                    }
-                    [ -n "$name" ] || continue
-                    case "$name" in
-                    . | .. | .credentials.json) continue ;;
-                    esac
-                    DOCKER_ARGS+=("-v" "$item:/home/deva/.claude/$name")
-                done
-            fi
-            if [ -f "$HOME/.claude.json" ]; then
-                DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
-            fi
-            if [ -d "$HOME/.codex" ]; then
-                for item in "$HOME/.codex"/* "$HOME/.codex"/.*; do
-                    [ -e "$item" ] || continue
-                    name=$(basename "$item") || {
-                        echo "warning: failed to get basename for $item" >&2
-                        continue
-                    }
-                    [ -n "$name" ] || continue
-                    case "$name" in
-                    . | .. | auth.json) continue ;;
-                    esac
-                    DOCKER_ARGS+=("-v" "$item:/home/deva/.codex/$name")
-                done
-            fi
-        fi
+        # Fallback: direct mount from $HOME (CONFIG_ROOT should always be set)
+        [ -d "$HOME/.claude" ] && DOCKER_ARGS+=("-v" "$HOME/.claude:/home/deva/.claude")
+        [ -f "$HOME/.claude.json" ] && DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
+        [ -d "$HOME/.codex" ] && DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
     fi
+fi
+
+# Hide default OAuth credential files for non-default auth modes.
+# For credentials-file auth on Claude/Codex, the agent-specific file mount already overlays the path.
+if [ "$QUICK_MODE" = false ]; then
+    append_auth_credential_overlay
 fi
 
 # Set statusline log paths via env vars (XDG-compliant)
@@ -2169,16 +2337,19 @@ DOCKER_ARGS+=("-e" "CLAUDE_DATA_DIR=/home/deva/.config/deva/claude")
 DOCKER_ARGS+=("-e" "CLAUDE_CACHE_DIR=/home/deva/.cache/deva/claude/sessions")
 
 # Mount deva config and cache directories for statusline usage tracking
-if [ -d "$HOME/.config/deva" ]; then
-    DOCKER_ARGS+=("-v" "$HOME/.config/deva:/home/deva/.config/deva")
-fi
-if [ -d "$HOME/.cache/deva" ]; then
-    DOCKER_ARGS+=("-v" "$HOME/.cache/deva:/home/deva/.cache/deva")
+# Skip when --config-home is explicit or -Q bare mode to preserve isolation
+if [ "$CONFIG_HOME_FROM_CLI" = false ] && [ "$QUICK_MODE" = false ]; then
+    if [ -d "$HOME/.config/deva" ]; then
+        DOCKER_ARGS+=("-v" "$HOME/.config/deva:/home/deva/.config/deva")
+    fi
+    if [ -d "$HOME/.cache/deva" ]; then
+        DOCKER_ARGS+=("-v" "$HOME/.cache/deva:/home/deva/.cache/deva")
+    fi
 fi
 
-# Mount project-local .claude directory if exists
+# Mount project-local .claude directory if exists (skip in bare mode)
 append_user_envs
-if [ -d "$(pwd)/.claude" ]; then
+if [ "$QUICK_MODE" = false ] && [ -d "$(pwd)/.claude" ]; then
     DOCKER_ARGS+=("-v" "$(pwd)/.claude:$(pwd)/.claude")
 fi
 
@@ -2201,6 +2372,28 @@ for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
     fi
 done
 
+mask_secrets_in_args() {
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^-e$ ]]; then
+            printf '%s ' "$arg"
+        elif [[ "$arg" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*) ]]; then
+            local name="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            case "$name" in
+                *TOKEN*|*KEY*|*SECRET*|*PASSWORD*|*CREDENTIALS*)
+                    printf '%s=<redacted> ' "$name"
+                    ;;
+                *)
+                    printf '%s ' "$arg"
+                    ;;
+            esac
+        else
+            printf '%s ' "$arg"
+        fi
+    done
+}
+
 if [ "$DEBUG_MODE" = true ]; then
     echo "=== DEBUG: Docker command ===" >&2
     echo "Container name: $CONTAINER_NAME" >&2
@@ -2208,10 +2401,10 @@ if [ "$DEBUG_MODE" = true ]; then
     echo "Ephemeral mode: $EPHEMERAL_MODE" >&2
     echo "" >&2
     if [ "$EPHEMERAL_MODE" = false ]; then
-        echo "docker run -d ${DOCKER_ARGS[*]:2} tail -f /dev/null" >&2
+        echo "docker run -d $(mask_secrets_in_args "${DOCKER_ARGS[@]:2}") tail -f /dev/null" >&2
         echo "docker exec -it $CONTAINER_NAME /usr/local/bin/docker-entrypoint.sh ${AGENT_COMMAND[*]}" >&2
     else
-        echo "docker ${DOCKER_ARGS[*]} ${AGENT_COMMAND[*]}" >&2
+        echo "docker $(mask_secrets_in_args "${DOCKER_ARGS[@]}") ${AGENT_COMMAND[*]}" >&2
     fi
     echo "===========================" >&2
     echo "" >&2

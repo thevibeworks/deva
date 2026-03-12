@@ -33,6 +33,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         procps psmisc zsh socat \
         libevent-dev libncurses-dev bison
 
+# Prevent noisy setlocale warnings at shell startup
+RUN sed -i 's/^# *en_US\.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
+    locale-gen en_US.UTF-8 && \
+    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
 RUN git lfs install --system
 
 # Install language runtimes in parallel-friendly layers
@@ -72,7 +77,20 @@ ARG COPILOT_API_VERSION
 LABEL org.opencontainers.image.copilot_api_version=${COPILOT_API_VERSION}
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g npm@latest pnpm && \
+    set -eu && \
+    i=0 && \
+    while :; do \
+        i=$((i + 1)) && \
+        if npm install -g npm@latest pnpm; then \
+            break; \
+        fi; \
+        if [ "$i" -ge 5 ]; then \
+            echo "npm install failed after $i attempts" >&2; \
+            exit 1; \
+        fi; \
+        echo "npm install failed (attempt $i), retrying..." >&2; \
+        sleep $((i * 5)); \
+    done && \
     git clone --branch "${COPILOT_API_BRANCH}" "${COPILOT_API_REPO}" /tmp/copilot-api && \
     cd /tmp/copilot-api && \
     git checkout "${COPILOT_API_COMMIT}" && \
@@ -202,6 +220,7 @@ LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 
 # Install CLI tools via npm
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    set -eux && \
     npm config set prefix "$DEVA_HOME/.npm-global" && \
     npm install -g --no-audit --no-fund \
         @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -209,7 +228,11 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
         @openai/codex@${CODEX_VERSION} \
         @google/gemini-cli@${GEMINI_CLI_VERSION} && \
     npm cache clean --force && \
-    npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true
+    "$DEVA_HOME/.npm-global/bin/claude" --version && \
+    "$DEVA_HOME/.npm-global/bin/codex" --version && \
+    "$DEVA_HOME/.npm-global/bin/gemini" --version && \
+    "$DEVA_HOME/.npm-global/bin/claude-trace" --help >/dev/null && \
+    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true)
 
 # Volatile packages: Install at the end to avoid cascading rebuilds
 ARG ATLAS_CLI_VERSION=main

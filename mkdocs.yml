@@ -1,0 +1,38 @@
+site_name: deva.sh docs
+site_description: Docker-based multi-agent launcher for Claude, Codex, and Gemini
+site_url: https://docs.deva.sh
+repo_url: https://github.com/thevibeworks/deva
+repo_name: thevibeworks/deva
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: black
+      accent: blue grey
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Quick Start: quick-start.md
+  - How It Works: how-it-works.md
+  - Authentication: authentication.md
+  - Philosophy: philosophy.md
+  - Advanced Usage: advanced-usage.md
+  - Troubleshooting: troubleshooting.md
+  - Research:
+      - UID/GID Handling: UID-GID-HANDLING-RESEARCH.md

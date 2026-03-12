@@ -1,0 +1,175 @@
+name: Nightly Images
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: thevibeworks/deva
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: nightly-images
+  cancel-in-progress: true
+
+jobs:
+  resolve-versions:
+    name: Resolve Latest Tool Versions
+    runs-on: ubuntu-latest
+    outputs:
+      stamp: ${{ steps.versions.outputs.stamp }}
+      claude_code_version: ${{ steps.versions.outputs.claude_code_version }}
+      codex_version: ${{ steps.versions.outputs.codex_version }}
+      gemini_cli_version: ${{ steps.versions.outputs.gemini_cli_version }}
+      atlas_cli_version: ${{ steps.versions.outputs.atlas_cli_version }}
+      copilot_api_version: ${{ steps.versions.outputs.copilot_api_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve versions
+        id: versions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ./scripts/resolve-tool-versions.sh
+
+      - name: Summary
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Nightly Tool Versions
+
+          - Claude Code: \`${{ steps.versions.outputs.claude_code_version }}\`
+          - Codex: \`${{ steps.versions.outputs.codex_version }}\`
+          - Gemini CLI: \`${{ steps.versions.outputs.gemini_cli_version }}\`
+          - Atlas CLI: \`${{ steps.versions.outputs.atlas_cli_version }}\`
+          - Copilot API: \`${{ steps.versions.outputs.copilot_api_version }}\`
+          - Stamp: \`${{ steps.versions.outputs.stamp }}\`
+          EOF
+
+  build-base:
+    name: Build Nightly Base Image
+    needs: resolve-versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=nightly
+            type=raw,value=nightly-${{ needs.resolve-versions.outputs.stamp }}
+          labels: |
+            org.opencontainers.image.title=deva-nightly
+            org.opencontainers.image.description=Nightly deva image with latest upstream CLI versions
+
+      - name: Build and push base image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-base
+          cache-to: type=gha,mode=max,scope=nightly-base
+          build-args: |
+            CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
+            CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
+            GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
+            ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
+            COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
+
+  build-rust:
+    name: Build Nightly Rust Image
+    needs: [resolve-versions, build-base]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=nightly-rust
+            type=raw,value=nightly-${{ needs.resolve-versions.outputs.stamp }}-rust
+          labels: |
+            org.opencontainers.image.title=deva-nightly-rust
+            org.opencontainers.image.description=Nightly deva rust image with latest upstream CLI versions
+
+      - name: Build and push rust image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.rust
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-rust
+          cache-to: type=gha,mode=max,scope=nightly-rust
+          build-args: |
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ needs.resolve-versions.outputs.stamp }}
+
+  summary:
+    name: Nightly Summary
+    needs: [resolve-versions, build-base, build-rust]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish summary
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Published Nightly Images
+
+          - \`ghcr.io/thevibeworks/deva:nightly\`
+          - \`ghcr.io/thevibeworks/deva:nightly-${{ needs.resolve-versions.outputs.stamp }}\`
+          - \`ghcr.io/thevibeworks/deva:nightly-rust\`
+          - \`ghcr.io/thevibeworks/deva:nightly-${{ needs.resolve-versions.outputs.stamp }}-rust\`
+
+          This workflow refreshes nightly image tags only.
+          Semver releases and GitHub Releases remain manual.
+          EOF
