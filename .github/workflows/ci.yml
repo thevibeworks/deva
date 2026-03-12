@@ -51,8 +51,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve tool versions
+        id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ./scripts/resolve-tool-versions.sh
+
       - name: Build local smoke image
-        run: docker build -t deva-smoke:ci .
+        run: |
+          docker build -t deva-smoke:ci \
+            --build-arg CLAUDE_CODE_VERSION="${{ steps.versions.outputs.claude_code_version }}" \
+            --build-arg CODEX_VERSION="${{ steps.versions.outputs.codex_version }}" \
+            --build-arg GEMINI_CLI_VERSION="${{ steps.versions.outputs.gemini_cli_version }}" \
+            --build-arg ATLAS_CLI_VERSION="${{ steps.versions.outputs.atlas_cli_version }}" \
+            --build-arg COPILOT_API_VERSION="${{ steps.versions.outputs.copilot_api_version }}" \
+            .
 
       - name: Install and launch each agent without a TTY
         shell: bash
