@@ -1,0 +1,3 @@
+VOLUME=$HOME/.ssh:/home/deva/.ssh:ro
+VOLUME=$HOME/.config/git:/home/deva/.config/git:ro
+ENV=EDITOR=nvim

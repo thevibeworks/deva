@@ -44,6 +44,38 @@ jobs:
           chmod +x scripts/version-check.sh
           ./scripts/version-check.sh
 
+  smoke:
+    name: Installer Smoke Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install and launch each agent without a TTY
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$(mktemp -d)"
+          export PATH="$HOME/.local/bin:$PATH"
+          export DEVA_INSTALL_BASE_URL="file://$PWD"
+          export DEVA_NO_DOCKER=1
+
+          bash ./install.sh
+
+          deva.sh claude -Q -- --version
+          deva.sh codex -Q -- --version
+          deva.sh gemini -Q -- --version
+
   docs:
     name: Docs Build
     runs-on: ubuntu-latest

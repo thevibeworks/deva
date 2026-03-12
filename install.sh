@@ -6,7 +6,7 @@ LEGACY_WRAPPER="claude.sh"
 YOLO_WRAPPER="claude-yolo"
 DOCKER_IMAGE="ghcr.io/thevibeworks/deva:latest"
 DOCKER_IMAGE_FALLBACK="thevibeworks/deva:latest"
-GITHUB_RAW="https://raw.githubusercontent.com/thevibeworks/deva/main"
+INSTALL_BASE_URL="${DEVA_INSTALL_BASE_URL:-https://raw.githubusercontent.com/thevibeworks/deva/main}"
 
 agent_files=(
     "claude.sh"
@@ -39,7 +39,7 @@ echo "Installing to: $INSTALL_DIR"
 download() {
     local path="$1"
     local dest="$2"
-    curl -fsSL "$GITHUB_RAW/$path" -o "$dest"
+    curl -fsSL "$INSTALL_BASE_URL/$path" -o "$dest"
     chmod +x "$dest"
 }
 
@@ -81,8 +81,8 @@ echo "Quick start:"
 echo "  1. Make sure Docker is running"
 echo "  2. cd into a project"
 echo "  3. Run one of:"
-echo "     deva.sh claude"
-echo "     deva.sh codex -- --help"
+echo "     deva.sh codex"
+echo "     deva.sh claude -- --help"
 echo "     deva.sh gemini -- --help"
 echo "     deva.sh shell"
 echo ""

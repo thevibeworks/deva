@@ -278,15 +278,15 @@ version-check:
 
 .PHONY: release-patch
 release-patch:
-	@./claude-yolo "Execute release workflow from @workflows/RELEASE.md for a **patch** release"
+	@./deva.sh claude -Q -- -p "Execute release workflow from @workflows/RELEASE.md for a **patch** release"
 
 .PHONY: release-minor
 release-minor:
-	@./claude-yolo "Execute release workflow from @workflows/RELEASE.md for a **minor** release"
+	@./deva.sh claude -Q -- -p "Execute release workflow from @workflows/RELEASE.md for a **minor** release"
 
 .PHONY: release-major
 release-major:
-	@./claude-yolo "Execute release workflow from @workflows/RELEASE.md for a **major** release"
+	@./deva.sh claude -Q -- -p "Execute release workflow from @workflows/RELEASE.md for a **major** release"
 
 .PHONY: help
 help:
