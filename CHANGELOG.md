@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SECURITY.md` with private vulnerability reporting guidance
 - `CONTRIBUTING.md` with the repo workflow, local checks, and release rules
 - `docs/` guide set for quick start, internals, philosophy, authentication, advanced usage, and troubleshooting
-- `mkdocs.yml`, `docs/index.md`, and GitHub Pages workflow for publishing the docs site
+- `mkdocs.yml`, `docs/index.md`, and GitHub Pages workflow for publishing the docs site at `docs.deva.sh`
+- scheduled `nightly-images.yml` workflow that publishes fresh nightly container tags without minting semver releases
 
 ### Fixed
 - Claude `--auth-with api-key` now forwards `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config-home fan-out skips loose credential files, backup files, VCS junk, and `.DS_Store`
 - Auth-specific persistent containers now include the agent in the name suffix, avoiding cross-agent reuse with the wrong env or mounts
 - `install.sh` now installs the full current agent set, including Gemini and `shared_auth.sh`
+- release and nightly container workflows now resolve tool versions through the same script, and release no longer invents a local commit inside Actions
 
 ### Changed
 - Rewrote `README.md` into a deva.sh front page with a real docs index and sharper OSS positioning

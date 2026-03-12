@@ -21,9 +21,11 @@
   - revalidated the docs against real `--dry-run` output instead of just `--help`
   - corrected the docs and CLI help to describe persistent containers as project-scoped shapes, not a naive single-container story
   - fixed auth-specific persistent naming to include the agent and fixed Copilot `--dry-run` so it no longer starts the proxy
-  - added MkDocs config, a GitHub Pages deploy workflow, a dedicated docs site home page, and CI docs-build validation
+  - retargeted the docs site config to `docs.deva.sh`, added a GitHub Pages workflow path for the docs subdomain, and kept CI docs-build validation
+  - added a nightly image workflow that resolves latest upstream tool versions and publishes `nightly` and dated nightly container tags without creating fake semver releases
+  - factored version resolution into a shared script so nightly and tagged release images stop drifting, and removed the fake "commit during release workflow" step
   - aligned `CHANGELOG.md` and contribution guidance with the new docs split
-- Result: the repo now has an actual docs spine for onboarding, internals, auth, and advanced workflows, the documented behavior matches the observed runtime shape, and the repo is ready to publish docs through GitHub Pages
+- Result: the repo now has an actual docs spine for onboarding, internals, auth, and advanced workflows, the documented behavior matches the observed runtime shape, docs can live on `docs.deva.sh`, and both nightly and tagged image builds use one consistent version-resolution path instead of hand-wavy workflow divergence
 
 # [2026-03-11] Dev Log: OSS repo polish and auth mount cleanup
 - Why: the repo still looked half-finished in public, the installer lagged behind the actual agent set, and recent auth switching work exposed ugly mount behavior

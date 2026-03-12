@@ -1,6 +1,6 @@
-site_name: deva.sh
+site_name: deva.sh docs
 site_description: Docker-based multi-agent launcher for Claude, Codex, and Gemini
-site_url: https://deva.sh
+site_url: https://docs.deva.sh
 repo_url: https://github.com/thevibeworks/deva
 repo_name: thevibeworks/deva
 edit_uri: ""

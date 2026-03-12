@@ -38,6 +38,9 @@ jobs:
       - name: Build site
         run: mkdocs build --strict
 
+      - name: Set docs domain marker
+        run: printf 'docs.deva.sh\n' > site/CNAME
+
       - name: Remove unpublished artifacts
         run: rm -rf site/devlog
 

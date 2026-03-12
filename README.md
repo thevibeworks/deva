@@ -1,6 +1,7 @@
 # deva.sh
 
 [![CI](https://img.shields.io/github/actions/workflow/status/thevibeworks/deva/ci.yml?branch=main&label=ci)](https://github.com/thevibeworks/deva/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-docs.deva.sh-111111)](https://docs.deva.sh)
 [![Release](https://img.shields.io/github/v/release/thevibeworks/deva?sort=semver)](https://github.com/thevibeworks/deva/releases)
 [![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-thevibeworks%2Fdeva-blue)](https://github.com/thevibeworks/deva/pkgs/container/deva)
@@ -74,6 +75,7 @@ Project policy and OSS housekeeping:
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [MIT License](LICENSE)
+- [Live Docs](https://docs.deva.sh)
 
 Deep research note:
 
@@ -153,6 +155,18 @@ Basic checks:
 ```
 
 If you changed auth, mounts, or container lifecycle, run the real path. Do not ship "should work".
+
+## Images
+
+Stable release tags:
+
+- `ghcr.io/thevibeworks/deva:latest`
+- `ghcr.io/thevibeworks/deva:rust`
+
+Nightly refresh tags:
+
+- `ghcr.io/thevibeworks/deva:nightly`
+- `ghcr.io/thevibeworks/deva:nightly-rust`
 
 ## License
 
