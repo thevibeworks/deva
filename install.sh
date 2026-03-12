@@ -4,8 +4,8 @@ set -euo pipefail
 DEVA_LAUNCHER="deva.sh"
 LEGACY_WRAPPER="claude.sh"
 YOLO_WRAPPER="claude-yolo"
-DOCKER_IMAGE="ghcr.io/thevibeworks/deva:latest"
-DOCKER_IMAGE_FALLBACK="thevibeworks/deva:latest"
+DOCKER_IMAGE="${DEVA_DOCKER_IMAGE:-ghcr.io/thevibeworks/deva:latest}"
+DOCKER_IMAGE_FALLBACK="${DEVA_DOCKER_IMAGE_FALLBACK:-thevibeworks/deva:latest}"
 INSTALL_BASE_URL="${DEVA_INSTALL_BASE_URL:-https://raw.githubusercontent.com/thevibeworks/deva/main}"
 
 agent_files=(
@@ -55,14 +55,21 @@ for file in "${agent_files[@]}"; do
 done
 
 echo ""
-echo "Pulling Docker image..."
-if ! docker pull "$DOCKER_IMAGE"; then
-    echo "GHCR pull failed. Trying Docker Hub..."
-    docker pull "$DOCKER_IMAGE_FALLBACK"
-    echo ""
-    echo "warning: using Docker Hub fallback image"
-    echo "set this if you want Docker Hub by default:"
-    echo "  export DEVA_DOCKER_IMAGE=thevibeworks/deva"
+if docker image inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
+    echo "Using local Docker image: $DOCKER_IMAGE"
+else
+    echo "Pulling Docker image..."
+    if ! docker pull "$DOCKER_IMAGE"; then
+        if [ -n "$DOCKER_IMAGE_FALLBACK" ] && [ "$DOCKER_IMAGE_FALLBACK" != "$DOCKER_IMAGE" ]; then
+            echo "Primary pull failed. Trying fallback image..."
+            docker pull "$DOCKER_IMAGE_FALLBACK"
+            echo ""
+            echo "warning: using fallback image $DOCKER_IMAGE_FALLBACK"
+        else
+            echo "error: failed to pull Docker image $DOCKER_IMAGE" >&2
+            exit 1
+        fi
+    fi
 fi
 
 echo ""
