@@ -43,7 +43,7 @@ validate_github_token() {
 }
 
 validate_anthropic_key() {
-    [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]
+    [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]
 }
 
 validate_openai_key() {

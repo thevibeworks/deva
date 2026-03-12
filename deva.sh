@@ -784,28 +784,28 @@ should_skip_env_for_auth() {
         case "${AUTH_METHOD:-claude}" in
         claude)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
                 return 0
                 ;;
             esac
             ;;
         api-key | oat)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
                 return 0
                 ;;
             esac
             ;;
         copilot)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN)
                 return 0
                 ;;
             esac
             ;;
         bedrock | vertex | credentials-file)
             case "$name" in
-            ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
+            ANTHROPIC_API_KEY | ANTHROPIC_AUTH_TOKEN | ANTHROPIC_BASE_URL | CLAUDE_CODE_OAUTH_TOKEN | OPENAI_API_KEY | OPENAI_BASE_URL | openai_base_url)
                 return 0
                 ;;
             esac
@@ -938,20 +938,36 @@ mount_config_home() {
         [ -e "$item" ] || continue
         local name
         name="$(basename "$item")"
-        if [ "$name" = "." ] || [ "$name" = ".." ]; then
+        if ! should_mount_home_item "$item" "$name"; then
             continue
         fi
         DOCKER_ARGS+=(-v "$item:/home/deva/$name")
     done
 }
 
-# Credential backup system.
-# - .claude.json: always cp'd to XDG_STATE (outside mount tree, corruption protection).
-# - Credential files: mv'd to tmpdir when auth override is detected.
-# - Auth override = non-default --auth-with OR auth env vars reaching container.
-# Entries are "orig_path:backup_path" pairs for restore.
-BACKED_UP_CREDS=()
-CRED_BACKUP_TMPDIR=""
+should_mount_home_item() {
+    local item="$1"
+    local name="$2"
+
+    case "$name" in
+    . | .. | .DS_Store | .git | .gitignore)
+        return 1
+        ;;
+    .claude.json.backup | .claude.json.backup.* | .claude.json.bak.after-corrupted.*)
+        return 1
+        ;;
+    *.credentials.json | auth.json | mcp-oauth-tokens-v2.json)
+        # Loose credential files should only enter the container through explicit auth mounts.
+        [ -f "$item" ] && return 1
+        ;;
+    esac
+
+    if [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ] && [ "$item" = "$CUSTOM_CREDENTIALS_FILE" ]; then
+        return 1
+    fi
+
+    return 0
+}
 
 # Effective config base: where agent config dirs (.claude/, .codex/, .gemini/) live.
 resolve_config_base() {
@@ -1004,17 +1020,9 @@ has_auth_override() {
     return 1
 }
 
-backup_credentials() {
+backup_claude_json() {
     local config_base
     config_base=$(resolve_config_base)
-
-    local agent_dir cred_file
-    case "$ACTIVE_AGENT" in
-        claude) agent_dir=".claude"; cred_file=".credentials.json" ;;
-        codex)  agent_dir=".codex";  cred_file="auth.json" ;;
-        gemini) agent_dir=".gemini"; cred_file="mcp-oauth-tokens-v2.json" ;;
-        *) return 0 ;;
-    esac
 
     # .claude.json corruption backup: persistent, outside container mount tree.
     if [ "$ACTIVE_AGENT" = "claude" ]; then
@@ -1026,31 +1034,66 @@ backup_credentials() {
         fi
     fi
 
-    # Credential backup: tmpdir outside all mount trees.
-    if has_auth_override; then
-        local cred_path="$config_base/$agent_dir/$cred_file"
-        if [ -f "$cred_path" ]; then
-            CRED_BACKUP_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/deva-cred.XXXXXX")
-            mv "$cred_path" "$CRED_BACKUP_TMPDIR/$cred_file"
-            BACKED_UP_CREDS+=("$cred_path:$CRED_BACKUP_TMPDIR/$cred_file")
-            echo "info: backed up $cred_file -> tmpdir (auth override active)" >&2
-        fi
-    fi
 }
 
-restore_backed_up_credentials() {
-    local entry
-    for entry in "${BACKED_UP_CREDS[@]+"${BACKED_UP_CREDS[@]}"}"; do
-        local orig="${entry%%:*}"
-        local backup="${entry##*:}"
-        if [ -f "$backup" ]; then
-            mv "$backup" "$orig"
-            echo "info: restored $(basename "$orig")" >&2
-        fi
-    done
-    if [ -n "$CRED_BACKUP_TMPDIR" ] && [ -d "$CRED_BACKUP_TMPDIR" ]; then
-        rm -rf "$CRED_BACKUP_TMPDIR"
+default_credential_target_path() {
+    case "$ACTIVE_AGENT" in
+    claude)
+        printf '%s' "/home/deva/.claude/.credentials.json"
+        ;;
+    codex)
+        printf '%s' "/home/deva/.codex/auth.json"
+        ;;
+    gemini)
+        printf '%s' "/home/deva/.gemini/mcp-oauth-tokens-v2.json"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
+append_auth_credential_overlay() {
+    if ! has_auth_override; then
+        return
     fi
+
+    case "$ACTIVE_AGENT:$AUTH_METHOD" in
+    claude:credentials-file | codex:credentials-file)
+        # Explicit file mount already overlays the default auth file path.
+        return
+        ;;
+    esac
+
+    local target_path
+    if ! target_path=$(default_credential_target_path); then
+        return
+    fi
+
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deva/auth-overlays/$ACTIVE_AGENT"
+    local overlay_key="${AUTH_METHOD:-default}"
+    case "$ACTIVE_AGENT:$AUTH_METHOD" in
+    claude:claude | codex:chatgpt | gemini:oauth | gemini:gemini-app-oauth)
+        overlay_key="env"
+        ;;
+    esac
+    local overlay_file
+    overlay_file="$state_dir/$(workspace_hash).${overlay_key}.blank"
+    if [ "$DRY_RUN" != true ]; then
+        mkdir -p "$state_dir"
+        printf '{}\n' > "$overlay_file"
+    fi
+    DOCKER_ARGS+=("-v" "$overlay_file:$target_path")
+}
+
+mount_loose_home_item() {
+    local item="$1"
+    local name
+    name="$(basename "$item")"
+    if ! should_mount_home_item "$item" "$name"; then
+        return
+    fi
+    DOCKER_ARGS+=(-v "$item:/home/deva/$name")
 }
 
 mount_dir_contents_into_home() {
@@ -1059,12 +1102,7 @@ mount_dir_contents_into_home() {
     local item
     for item in "$base"/.* "$base"/*; do
         [ -e "$item" ] || continue
-        local name
-        name="$(basename "$item")"
-        if [ "$name" = "." ] || [ "$name" = ".." ]; then
-            continue
-        fi
-        DOCKER_ARGS+=(-v "$item:/home/deva/$name")
+        mount_loose_home_item "$item"
     done
 }
 
@@ -2035,6 +2073,7 @@ fi
 
 autolink_legacy_into_deva_root() {
     [ "$AUTOLINK" = true ] || return 0
+    [ "$DRY_RUN" != true ] || return 0
     [ "$CONFIG_HOME_FROM_CLI" = false ] || return 0
     [ -n "${CONFIG_ROOT:-}" ] || return 0
     [ -d "$CONFIG_ROOT" ] || mkdir -p "$CONFIG_ROOT"
@@ -2259,10 +2298,9 @@ DOCKER_ARGS+=(-e "DEVA_CONTAINER_NAME=${CONTAINER_NAME}")
 DOCKER_ARGS+=(-e "DEVA_WORKSPACE=$(pwd)")
 DOCKER_ARGS+=(-e "DEVA_EPHEMERAL=${EPHEMERAL_MODE}")
 
-# Credential backup: move credential files to tmpdir before mounting.
-# Skipped during --dry-run to avoid side effects (mkdir, cp, mv).
+# Back up .claude.json before mounting, without touching live credential files.
 if [ "$QUICK_MODE" != true ] && [ "$DRY_RUN" != true ]; then
-    backup_credentials
+    backup_claude_json
 fi
 
 # Centralized mounting logic.
@@ -2284,6 +2322,12 @@ else
         [ -f "$HOME/.claude.json" ] && DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
         [ -d "$HOME/.codex" ] && DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
     fi
+fi
+
+# Hide default OAuth credential files for non-default auth modes.
+# For credentials-file auth on Claude/Codex, the agent-specific file mount already overlays the path.
+if [ "$QUICK_MODE" = false ]; then
+    append_auth_credential_overlay
 fi
 
 # Set statusline log paths via env vars (XDG-compliant)
@@ -2335,7 +2379,7 @@ mask_secrets_in_args() {
             local name="${BASH_REMATCH[1]}"
             local value="${BASH_REMATCH[2]}"
             case "$name" in
-                *TOKEN*|*KEY*|*SECRET*|*PASSWORD*|*CREDENTIALS*|*BARK_KEY*)
+                *TOKEN*|*KEY*|*SECRET*|*PASSWORD*|*CREDENTIALS*)
                     printf '%s=<redacted> ' "$name"
                     ;;
                 *)
@@ -2362,11 +2406,6 @@ if [ "$DEBUG_MODE" = true ]; then
     fi
     echo "===========================" >&2
     echo "" >&2
-fi
-
-# Restore backed-up credential files on exit (covers crashes, signals, normal exit)
-if [ ${#BACKED_UP_CREDS[@]} -gt 0 ]; then
-    trap restore_backed_up_credentials EXIT
 fi
 
 if [ "$DRY_RUN" = true ]; then
@@ -2429,8 +2468,6 @@ if [ "$EPHEMERAL_MODE" = false ]; then
         update_session_file
     fi
 
-    # Restore credentials before exec (exec replaces the process, trap won't fire)
-    restore_backed_up_credentials
     exec docker exec -it "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"

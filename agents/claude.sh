@@ -80,6 +80,10 @@ setup_claude_auth() {
                 DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
                 AUTH_DETAILS="oauth-token (CLAUDE_CODE_OAUTH_TOKEN)"
                 echo "Using OAuth token from CLAUDE_CODE_OAUTH_TOKEN" >&2
+            elif [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+                DOCKER_ARGS+=("-e" "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN")
+                AUTH_DETAILS="auth-token (ANTHROPIC_AUTH_TOKEN)"
+                echo "Using auth token from ANTHROPIC_AUTH_TOKEN" >&2
             elif [ -n "${ANTHROPIC_API_KEY:-}" ] && is_oauth_token_pattern "$ANTHROPIC_API_KEY"; then
                 DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$ANTHROPIC_API_KEY")
                 AUTH_DETAILS="oauth-token (auto-detected from ANTHROPIC_API_KEY)"
@@ -89,7 +93,10 @@ setup_claude_auth() {
                 AUTH_DETAILS="api-key (ANTHROPIC_API_KEY)"
             else
                 auth_error "No API key found for --auth-with api-key" \
-                           "Set: export ANTHROPIC_API_KEY=sk-ant-... or export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..."
+                           "Set: export ANTHROPIC_API_KEY=sk-ant-..., export ANTHROPIC_AUTH_TOKEN=token, or export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..."
+            fi
+            if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+                DOCKER_ARGS+=("-e" "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
             fi
             ;;
         copilot)
@@ -122,6 +129,9 @@ setup_claude_auth() {
             fi
             AUTH_DETAILS="oauth-token (CLAUDE_CODE_OAUTH_TOKEN)"
             DOCKER_ARGS+=("-e" "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+            if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+                DOCKER_ARGS+=("-e" "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
+            fi
             ;;
         bedrock)
             AUTH_DETAILS="aws-bedrock (region: ${AWS_REGION:-default})"
