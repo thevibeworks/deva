@@ -4,8 +4,6 @@ set -euo pipefail
 DEVA_LAUNCHER="deva.sh"
 LEGACY_WRAPPER="claude.sh"
 YOLO_WRAPPER="claude-yolo"
-DOCKER_IMAGE="${DEVA_DOCKER_IMAGE:-ghcr.io/thevibeworks/deva:latest}"
-DOCKER_IMAGE_FALLBACK="${DEVA_DOCKER_IMAGE_FALLBACK:-thevibeworks/deva:latest}"
 INSTALL_BASE_URL="${DEVA_INSTALL_BASE_URL:-https://raw.githubusercontent.com/thevibeworks/deva/main}"
 
 agent_files=(
@@ -14,6 +12,46 @@ agent_files=(
     "gemini.sh"
     "shared_auth.sh"
 )
+
+image_ref() {
+    local repo="$1"
+    local tag="${2:-}"
+    local default_tag="$3"
+    local tail="${repo##*/}"
+
+    if [[ "$repo" == *@* ]]; then
+        printf '%s' "$repo"
+        return
+    fi
+
+    if [ -n "$tag" ]; then
+        printf '%s:%s' "$repo" "$tag"
+        return
+    fi
+
+    if [[ "$tail" == *:* ]]; then
+        printf '%s' "$repo"
+        return
+    fi
+
+    printf '%s:%s' "$repo" "$default_tag"
+}
+
+if [ -n "${DEVA_DOCKER_IMAGE+x}" ]; then
+    DOCKER_IMAGE="$(image_ref "$DEVA_DOCKER_IMAGE" "${DEVA_DOCKER_TAG:-}" "latest")"
+else
+    DOCKER_IMAGE="$(image_ref "ghcr.io/thevibeworks/deva" "${DEVA_DOCKER_TAG:-}" "latest")"
+fi
+
+if [ -n "${DEVA_DOCKER_IMAGE_FALLBACK+x}" ]; then
+    if [ -n "$DEVA_DOCKER_IMAGE_FALLBACK" ]; then
+        DOCKER_IMAGE_FALLBACK="$(image_ref "$DEVA_DOCKER_IMAGE_FALLBACK" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-${DEVA_DOCKER_TAG:-}}" "latest")"
+    else
+        DOCKER_IMAGE_FALLBACK=""
+    fi
+else
+    DOCKER_IMAGE_FALLBACK="$(image_ref "thevibeworks/deva" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-${DEVA_DOCKER_TAG:-}}" "latest")"
+fi
 
 echo "deva installer"
 echo "=============="
