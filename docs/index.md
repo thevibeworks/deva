@@ -19,6 +19,7 @@ If you want the internals instead of vague hand-waving:
 - [How It Works](how-it-works.md)
 - [Philosophy](philosophy.md)
 - [Advanced Usage](advanced-usage.md)
+- [Custom Images](custom-images.md)
 
 ## What This Is
 

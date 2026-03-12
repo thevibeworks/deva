@@ -104,6 +104,9 @@ deva.sh codex -p rust
 
 If the image tag is missing locally, deva pulls it. If that fails and a matching Dockerfile exists, it points you at the build command.
 
+If you want your own image entirely, read [Custom Images](custom-images.md).
+That covers local builds, private tags, per-project overrides, and personal-only setups.
+
 ## Multi-Agent Workflow
 
 One default container shape can serve all supported agents in the same project:

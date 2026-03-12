@@ -68,6 +68,7 @@ Read these if you want to understand the machinery instead of cargo-culting comm
 - [How It Works](docs/how-it-works.md)
 - [Philosophy](docs/philosophy.md)
 - [Advanced Usage](docs/advanced-usage.md)
+- [Custom Images](docs/custom-images.md)
 - [Docs Home](docs/index.md)
 
 Project policy and OSS housekeeping:

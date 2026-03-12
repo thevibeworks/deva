@@ -1,5 +1,5 @@
 site_name: deva.sh docs
-site_description: Docker-based multi-agent launcher for Claude, Codex, and Gemini
+site_description: Docker-based multi-agent launcher for Codex, Claude, and Gemini
 site_url: https://docs.deva.sh
 repo_url: https://github.com/thevibeworks/deva
 repo_name: thevibeworks/deva
@@ -33,6 +33,7 @@ nav:
   - Authentication: authentication.md
   - Philosophy: philosophy.md
   - Advanced Usage: advanced-usage.md
+  - Custom Images: custom-images.md
   - Troubleshooting: troubleshooting.md
   - Research:
       - UID/GID Handling: UID-GID-HANDLING-RESEARCH.md
