@@ -102,13 +102,17 @@ setup_claude_auth() {
         copilot)
             validate_github_token || auth_error "No GitHub token found for copilot auth" \
                                                 "Run: copilot-api auth, or set GH_TOKEN=\$(gh auth token)"
-            start_copilot_proxy
+            if [ "${DRY_RUN:-false}" = true ]; then
+                echo "Skipping copilot proxy start during --dry-run" >&2
+            else
+                start_copilot_proxy
+            fi
 
             AUTH_DETAILS="github-copilot (proxy port $COPILOT_PROXY_PORT)"
             DOCKER_ARGS+=("-e" "ANTHROPIC_BASE_URL=http://$COPILOT_HOST_MAPPING:$COPILOT_PROXY_PORT")
             DOCKER_ARGS+=("-e" "ANTHROPIC_API_KEY=dummy")
 
-            if [ -z "${ANTHROPIC_MODEL:-}" ] || [ -z "${ANTHROPIC_SMALL_FAST_MODEL:-}" ]; then
+            if [ "${DRY_RUN:-false}" != true ] && { [ -z "${ANTHROPIC_MODEL:-}" ] || [ -z "${ANTHROPIC_SMALL_FAST_MODEL:-}" ]; }; then
                 local models
                 models=$(pick_copilot_models "http://$COPILOT_LOCALHOST_MAPPING:$COPILOT_PROXY_PORT")
                 local main_model="${models%% *}"

@@ -77,20 +77,21 @@ Deva flags:
                           implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
   --no-docker             Disable auto-mount of Docker socket (default: auto-mount if present)
-  --dry-run               Show docker command without executing (implies --debug)
+  --dry-run               Show docker command without executing the container (implies --debug)
   --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
 Container Behavior (NEW in v0.8.0):
-  Default (persistent):   One container per project, reused across runs.
+  Default (persistent):   Shared per project by default, but split when container shape changes
+                          (extra volumes, explicit config-home, auth mode).
                           Preserves state (npm packages, builds, etc).
-                          Faster startup, run any agent (claude/codex/gemini).
+                          Faster startup, and default-auth runs can share one warm container.
 
   With --rm (ephemeral):  Create new container, auto-remove after exit.
                           Agent-specific naming for parallel runs.
 
 Container Naming (NEW):
-  Persistent:  deva-<parent>-<project>              # One per project
+  Persistent:  deva-<parent>-<project>[..shape]     # shape may encode volumes/config/auth
   Ephemeral:   deva-<parent>-<project>-<agent>-<pid>  # Agent-specific
 
   Example:
@@ -101,8 +102,8 @@ Examples:
   # Launch agents (persistent by default)
   deva.sh                             # Launch claude in persistent container
   deva.sh claude                      # Same
-  deva.sh codex                       # Launch codex in same container
-  deva.sh gemini                      # Launch gemini in same container
+  deva.sh codex                       # Launch codex in the same default container shape
+  deva.sh gemini                      # Launch gemini in the same default container shape
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -2253,6 +2254,7 @@ if [ -n "${AUTH_METHOD:-}" ]; then
             auth_suffix="${AUTH_METHOD}"
         fi
         [ -n "$creds_hash" ] && auth_suffix="${AUTH_METHOD}-${creds_hash}"
+        auth_suffix="${auth_suffix}-${ACTIVE_AGENT}"
 
         # Build suffix chain: volume + config + auth
         name_suffix=""

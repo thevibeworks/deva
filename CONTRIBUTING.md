@@ -49,7 +49,8 @@ If you change Docker image behavior, auth flows, or release logic, test those pa
 
 Update docs when behavior changes:
 
-- `README.md` for user-facing workflow
+- `README.md` for the front page and project positioning
+- `docs/` for long-form user guides
 - `CHANGELOG.md` for release notes
 - `DEV-LOGS.md` for significant work
 - `SECURITY.md` when the reporting path or threat model changes

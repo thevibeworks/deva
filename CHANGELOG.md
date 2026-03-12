@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Claude Code YOLO will be documented in this file.
+All notable changes to deva.sh will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,16 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LICENSE` with the standard MIT license text
 - `SECURITY.md` with private vulnerability reporting guidance
 - `CONTRIBUTING.md` with the repo workflow, local checks, and release rules
+- `docs/` guide set for quick start, internals, philosophy, authentication, advanced usage, and troubleshooting
+- `mkdocs.yml`, `docs/index.md`, and GitHub Pages workflow for publishing the docs site
 
 ### Fixed
 - Claude `--auth-with api-key` now forwards `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`
 - Non-default auth no longer moves live host credential files out of the way; it overlays the default credential path with a safe placeholder instead
 - `--dry-run` no longer mutates config homes through autolink or scaffold writes
+- Copilot `--dry-run` no longer starts the local proxy as a side effect
 - Config-home fan-out skips loose credential files, backup files, VCS junk, and `.DS_Store`
+- Auth-specific persistent containers now include the agent in the name suffix, avoiding cross-agent reuse with the wrong env or mounts
 - `install.sh` now installs the full current agent set, including Gemini and `shared_auth.sh`
 
 ### Changed
-- Rewrote `README.md` into a cleaner OSS landing page with badges, quick start, auth matrix, and security warnings
+- Rewrote `README.md` into a deva.sh front page with a real docs index and sharper OSS positioning
+- CI now builds the MkDocs site so Pages breakage gets caught before merge
 - Updated `workflows/RELEASE.md` to use `deva.sh` as the source of truth for version bumps
 
 ## [0.9.1] - 2026-01-09

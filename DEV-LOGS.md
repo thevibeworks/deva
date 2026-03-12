@@ -13,6 +13,18 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-03-11] Dev Log: deva.sh docs spine for OSS release
+- Why: the repo had a decent landing page but still dumped too much context into one README and did not read like an organized OSS project
+- What:
+  - rewrote `README.md` as the deva.sh front page instead of a giant mixed-purpose document
+  - added `docs/index.md`, `docs/quick-start.md`, `docs/how-it-works.md`, `docs/philosophy.md`, `docs/authentication.md`, `docs/advanced-usage.md`, and `docs/troubleshooting.md`
+  - revalidated the docs against real `--dry-run` output instead of just `--help`
+  - corrected the docs and CLI help to describe persistent containers as project-scoped shapes, not a naive single-container story
+  - fixed auth-specific persistent naming to include the agent and fixed Copilot `--dry-run` so it no longer starts the proxy
+  - added MkDocs config, a GitHub Pages deploy workflow, a dedicated docs site home page, and CI docs-build validation
+  - aligned `CHANGELOG.md` and contribution guidance with the new docs split
+- Result: the repo now has an actual docs spine for onboarding, internals, auth, and advanced workflows, the documented behavior matches the observed runtime shape, and the repo is ready to publish docs through GitHub Pages
+
 # [2026-03-11] Dev Log: OSS repo polish and auth mount cleanup
 - Why: the repo still looked half-finished in public, the installer lagged behind the actual agent set, and recent auth switching work exposed ugly mount behavior
 - What:
