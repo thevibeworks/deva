@@ -1,350 +1,254 @@
-# deva.sh Multi-Agent Wrapper
+# deva
 
-> **REBRANDED**: Claude Code YOLO → **deva.sh Multi-Agent Wrapper**
-> We've evolved from a Claude-specific wrapper into a unified development environment supporting Claude Code, OpenAI Codex, and future coding agents.
+[![CI](https://img.shields.io/github/actions/workflow/status/thevibeworks/deva/ci.yml?branch=main&label=ci)](https://github.com/thevibeworks/deva/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/thevibeworks/deva?sort=semver)](https://github.com/thevibeworks/deva/releases)
+[![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
+[![Container](https://img.shields.io/badge/ghcr.io-thevibeworks%2Fdeva-blue)](https://github.com/thevibeworks/deva/pkgs/container/deva)
 
-deva.sh launches Claude Code, Codex, and future coding agents inside a Docker container with **full control** over mounts, environments, and authentication contexts.
+Run Claude Code, Codex, and Gemini inside Docker.
 
-**Key Features**:
-- **Advanced Directory Access**: Beyond Claude's `--add-dir` - mount any directories with precise permissions (`-v`)
-- **Multiple Config Homes**: Isolated auth contexts with `--config-home` for different accounts/orgs
-- **Multi-Auth Support**: OAuth, API keys, Bedrock, Vertex, Copilot - all in one wrapper
-- **Safe Dangerous Mode**: Full permissions inside containers, zero host risk
+The container is the sandbox. That is the whole trick.
 
-**What Changed**: `claude.sh` → `deva.sh` as the primary interface. Your existing `claude-yolo` commands still work via compatibility shims.
+## What This Is
+
+`deva.sh` launches coding agents inside a reusable Docker container with:
+
+- explicit volume mounts instead of blind filesystem access
+- isolated auth homes with `--config-home`
+- persistent per-project containers by default
+- support for Claude, Codex, and Gemini in the same wrapper
+
+Legacy commands still exist:
+
+- `deva.sh` is the real entry point
+- `claude.sh` and `claude-yolo` are compatibility wrappers
+
+## What This Is Not
+
+- Not a security boundary if you mount `/var/run/docker.sock`. That is root-equivalent on the host.
+- Not safe for random untrusted repos just because it says "Docker".
+- Not a PaaS, orchestrator, or generic devcontainer manager.
+
+If you point this thing at your real home directory and hand it dangerous permissions, you did not discover a clever workflow. You discovered a foot-gun.
+
+## Why This Exists
+
+Claude Code, Codex, and friends are useful. Their native local security prompts are also annoying in trusted workspaces.
+
+`deva` moves the risk boundary:
+
+- agent gets broad power inside the container
+- you decide exactly what is mounted from the host
+- auth can be swapped per project or per org
+- one warm container can serve multiple agents
+
+That is a better trade when you actually know what you are doing.
 
 ## Quick Start
 
 ```bash
-# install the CLI wrapper
-curl -fsSL https://raw.githubusercontent.com/thevibeworks/claude-code-yolo/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thevibeworks/deva/main/install.sh | bash
 
-# run from a project directory
-cd ~/wrk/my-project
-
-deva.sh               # Claude by default
-
-deva.sh codex -- --help   # Codex CLI passthrough
+cd ~/work/my-project
+deva.sh claude
 ```
 
-`claude-yolo` simply calls `deva.sh claude` for backwards compatibility.
-
-> **Note**
-> The older `claude.sh` / `claudeb.sh` wrappers are deprecated and now print a reminder before forwarding to `deva.sh`.
-
-## Multi-Agent Capabilities
-
-**Supported Agents**:
-- **Claude Code** (`deva.sh claude`) - Anthropic's Claude with Code capabilities, auto-adds `--dangerously-skip-permissions`
-- **OpenAI Codex** (`deva.sh codex`) - OpenAI's Codex CLI, auto-adds `--dangerously-bypass-approvals-and-sandbox`
-
-**Agent-Specific Features**:
-- **Claude**: OAuth/API key auth, mounts `~/.claude`, project-specific `.claude` configs
-- **Codex**: OAuth protection (strips conflicting `OPENAI_*` env vars), exposes port 1455, mounts `~/.codex`
-
-**Shared Infrastructure**:
-- Project-scoped containers (`deva-<agent>-<project>-<pid>`)
-- Unified config system (`.deva*` files)
-- Container management (`--ps`, `--inspect`, `shell`)
-
-## Safety Checklist
-
-- Always `cd` into the project root before launching; deva.sh mounts the working directory recursively.
-- Never aim `--config-home` at your real `$HOME`; use a dedicated auth directory.
-- Use `deva.sh --ps` to confirm which containers are running before attaching.
-
-## Advanced Directory Access (Beyond `--add-dir`)
-
-**Claude's `--add-dir` vs deva.sh's Military-Grade Control**:
+A few more sane first commands:
 
 ```bash
-# Claude built-in: Dangerous direct filesystem access
-claude --add-dir ~/projects/backend --add-dir ~/shared-libs
-# ❌ Claude can read/write EVERYTHING in those directories
-# ❌ No permission control
-# ❌ Direct access to your real files
-# ❌ Can accidentally modify/delete host files
-
-# deva.sh: Fortress-level security with surgical precision
-deva.sh claude \
-  -v ~/projects/backend:/home/deva/backend:ro \      # READ-ONLY
-  -v ~/shared-libs:/home/deva/libs:ro \              # READ-ONLY
-  -v ~/api-keys:/home/deva/secrets:ro \              # READ-ONLY SECRETS
-  -v /tmp/build-output:/home/deva/output:rw          # ONLY writable area
-# ✅ Granular per-directory permissions
-# ✅ Container isolation = zero host risk
-# ✅ Secrets are read-only, impossible to leak
-# ✅ Only designated output dir is writable
+deva.sh codex -- --help
+deva.sh gemini -- --help
+deva.sh shell
+deva.sh --ps
 ```
 
-**Why deva.sh's Volume Mounting is Vastly More Secure & Controllable**:
-- **Granular Permissions**: Per-directory read-only (`ro`) vs read-write (`rw`) vs no access
-- **Complete Isolation**: Claude never touches your real filesystem - only container copies
-- **Selective Exposure**: Choose exactly which files/dirs are visible, hide everything else
-- **Path Remapping**: Control exactly where files appear in container (`/home/deva/project` vs `~/my-secret-project`)
-- **Zero Host Risk**: Even with `--dangerously-skip-permissions`, your host filesystem is protected
-- **Credential Sandboxing**: Mount secrets read-only, impossible for Claude to modify/leak them
-- **Audit Trail**: Docker logs every file access, unlike native `--add-dir`
-- **Performance**: Docker volume caching + no host filesystem traversal
+## Install
 
-**Real-World Security Scenarios**:
+Requirements:
+
+- Docker
+- a supported agent auth method
+- a trusted workspace
+
+The installer drops these into your PATH:
+
+- `deva.sh`
+- `claude.sh`
+- `claude-yolo`
+- `agents/claude.sh`
+- `agents/codex.sh`
+- `agents/gemini.sh`
+- `agents/shared_auth.sh`
+
+If Docker pull from GHCR fails, the installer falls back to Docker Hub.
+
+## Common Commands
+
 ```bash
-# MAXIMUM SECURITY: Code review with zero risk
-deva.sh claude \
-  -v ~/client-project:/home/deva/code:ro \          # REVIEW ONLY
-  -v ~/api-keys:/home/deva/keys:ro \                # SECRETS READ-ONLY
-  -v /tmp/review-output:/home/deva/output:rw        # SAFE OUTPUT AREA
-# Claude can analyze code but CANNOT modify source or leak secrets
+# Claude in the persistent project container
+deva.sh claude
 
-# SURGICAL ACCESS: Database migration with controlled risk
-deva.sh claude \
-  -v ~/migrations:/home/deva/migrations:ro \        # SCRIPTS READ-ONLY
-  -v ~/.db-config:/home/deva/config:ro \            # CONFIG READ-ONLY
-  -v /tmp/migration-logs:/home/deva/logs:rw         # LOGS ONLY
-# Claude can read configs but CANNOT modify production scripts
+# One-shot run, auto-remove container
+deva.sh claude --rm
 
-# CREDENTIAL FORTRESS: API development with bulletproof secrets
-deva.sh claude \
-  -v ~/project/src:/home/deva/src:rw \              # CODE ACCESS
-  -v ~/.aws:/home/deva/.aws:ro \                    # AWS CREDS READ-ONLY
-  -v ~/api-keys:/home/deva/keys:ro \                # API KEYS READ-ONLY
-  -v /tmp/build:/home/deva/build:rw                 # BUILD OUTPUT ONLY
-# Impossible for Claude to accidentally commit secrets or modify credentials
+# Add a read-only mount
+deva.sh claude -v ~/.ssh:/home/deva/.ssh:ro
 
-# Compare with dangerous --add-dir approach:
-# claude --add-dir ~/project --add-dir ~/.aws --add-dir ~/api-keys
-# ❌ Claude has FULL WRITE ACCESS to ALL your secrets!
+# Use a separate auth home
+deva.sh claude -c ~/auth-homes/work
+
+# Claude with API or token-based auth
+deva.sh claude --auth-with api-key -- -p "say hi"
+
+# Claude with Bedrock
+deva.sh claude -c ~/auth-homes/aws --auth-with bedrock
+
+# Codex with explicit model
+deva.sh codex -- -m gpt-5-codex
+
+# Gemini in the same project container
+deva.sh gemini
 ```
 
-**XDG Config Home (Per-Agent)**:
+## Auth Modes
+
+| Agent | Default auth | Other auth modes |
+| --- | --- | --- |
+| Claude | `claude` | `api-key`, `oat`, `bedrock`, `vertex`, `copilot`, credentials file path |
+| Codex | `chatgpt` | `api-key`, `copilot`, credentials file path |
+| Gemini | `oauth` | `api-key`, `gemini-api-key`, `vertex`, `compute-adc`, credentials file path |
+
+Examples:
+
 ```bash
-$XDG_CONFIG_HOME defaults to ~/.config
+# Claude OAuth from config home
+deva.sh claude -c ~/auth-homes/personal
 
-# Default layout (each agent directory under ~/.config/deva mounts into /home/deva):
+# Claude via custom HTTP endpoint + token
+export ANTHROPIC_BASE_URL=https://example.net/api
+export ANTHROPIC_AUTH_TOKEN=token
+deva.sh claude --auth-with api-key
 
+# Codex via OpenAI API key
+export OPENAI_API_KEY=sk-...
+deva.sh codex --auth-with api-key
+
+# Gemini via service account file
+deva.sh gemini --auth-with ~/keys/gcp-service-account.json
+```
+
+## Config Homes
+
+By default, deva uses per-agent homes under `~/.config/deva/`.
+
+```text
 ~/.config/deva/
-├── claude/                  # Claude-only auth/config
+├── claude/
 │   ├── .claude/
 │   ├── .claude.json
-│   ├── .aws/                # optional: Bedrock creds
-│   └── .config/gcloud/      # optional: Vertex AI creds
-└── codex/                   # Codex-only auth/config
-    └── .codex/              # contains auth.json
-
-# Mount destinations inside container:
-# - claude/*  → /home/deva/*
-# - codex/*   → /home/deva/*
-
-# Override per invocation
-deva.sh claude -c ~/auth-homes/personal
-deva.sh codex  -c ~/auth-homes/codex-prod -- -m gpt-5-codex
-deva.sh claude -c ~/auth-homes/client-aws --auth-with bedrock
+│   ├── .aws/              # optional
+│   └── .config/gcloud/    # optional
+├── codex/
+│   └── .codex/
+└── gemini/
+    └── .gemini/
 ```
 
-Notes:
-- By default, we mount all agent homes found under `~/.config/deva/` so you can run multiple agents in the same container.
-- If you pass `-c` to a directory that contains `claude/` and/or `codex/`, we treat it as a DEVA ROOT and mount all agent homes found there.
-- If `-c` points to a leaf directory with dotfiles directly (e.g., only `.claude*`), we mount only that directory.
+`--config-home DIR` supports two layouts:
 
-Migration from legacy dotfiles:
-```bash
-# 1) Create the new XDG tree
-mkdir -p ~/.config/deva/{claude,codex}
+- leaf home: `DIR` contains `.claude`, `.claude.json`, `.aws`, `.config`, and so on
+- deva root: `DIR` contains `claude/`, `codex/`, `gemini/`
 
-# 2) Move Claude Code OAuth files
-if [ -d ~/.claude ]; then mv ~/.claude ~/.config/deva/claude/.claude; fi
-if [ -f ~/.claude.json ]; then mv ~/.claude.json ~/.config/deva/claude/.claude.json; fi
+Default runs also auto-link legacy auth dirs into `~/.config/deva/` unless you disable that with `--no-autolink`, `AUTOLINK=false`, or `DEVA_NO_AUTOLINK=1`.
 
-# 3) Move Codex OAuth directory
-if [ -d ~/.codex ]; then mv ~/.codex ~/.config/deva/codex/.codex; fi
+## Container Model
 
-# 4) Optional: Bedrock / Vertex creds (choose one spot)
-#    Either keep per-agent:
-if [ -d ~/.aws ]; then cp -a ~/.aws ~/.config/deva/claude/.aws; fi
-if [ -d ~/.config/gcloud ]; then mkdir -p ~/.config/deva/claude/.config && \
-  cp -a ~/.config/gcloud ~/.config/deva/claude/.config/; fi
+Persistent is the default.
 
-# 5) Verify
-tree -a ~/.config/deva | sed -n '1,200p'
+- one container per project
+- reused across runs
+- faster warm starts
+- one workspace can host Claude, Codex, and Gemini together
 
-# Done. Now just run
-deva.sh claude
-deva.sh codex
-```
+Ephemeral mode:
 
-**Symlink Setup**
+- `--rm` creates a throwaway container
+- `-Q` is the bare mode: no config loading, no autolink, no host config mounts
 
-Prefer links if you don’t want to move files. Docker resolves symlinks at start and binds the target.
+Useful management commands:
 
 ```bash
-# Link specific files/dirs into deva root
-ln -s ~/.claude         ~/.config/deva/claude/.claude
-ln -s ~/.claude.json    ~/.config/deva/claude/.claude.json
-ln -s ~/.codex          ~/.config/deva/codex/.codex
-
-# Or link whole agent directories (cleaner)
-ln -s ~/auth-homes/claude ~/.config/deva/claude
-ln -s ~/auth-homes/codex  ~/.config/deva/codex
-
-# Verify symlinks resolve
-ls -l ~/.config/deva/claude
-readlink -f ~/.config/deva/claude/.claude
+deva.sh --ps
+deva.sh shell
+deva.sh stop
+deva.sh rm
+deva.sh clean
 ```
 
-Notes:
-- Use absolute paths for links. Relative is fine if it resolves correctly from the link’s parent.
-- The symlink’s target must exist, or the container mount will fail.
-- Changing the link after the container starts won’t retarget the running bind; restart to pick up changes.
-- macOS: ensure the target paths are allowed under Docker Desktop File Sharing.
+## Profiles
 
-Auto-linking (default)
-- On first run with the default XDG root (`~/.config/deva`) and no explicit `-c`, we auto-link legacy creds if the deva root is missing them:
-  - `~/.claude` → `~/.config/deva/claude/.claude`
-  - `~/.claude.json` → `~/.config/deva/claude/.claude.json`
-  - `~/.codex` → `~/.config/deva/codex/.codex`
-- Disable with any of:
-  - CLI: `--no-autolink`
-  - Config: add `AUTOLINK=false` to `.deva`
-  - Env: `DEVA_NO_AUTOLINK=1` (export and run)
+Profiles choose the image tag:
 
-**Container Management**:
-```bash
-# List all running containers for this project
-% deva.sh --ps
-NAME                                  AGENT  STATUS         CREATED AT
-deva-claude-my-project-12345          claude Up 2 minutes   2025-09-18 18:10:02 +0000 UTC
-deva-codex-my-project-67890           codex  Up 5 minutes   2025-09-18 18:07:15 +0000 UTC
+- `base` -> `ghcr.io/thevibeworks/deva:latest`
+- `rust` -> `ghcr.io/thevibeworks/deva:rust`
 
-# Attach to any container (fzf picker if multiple)
-deva.sh --inspect
-deva.sh shell        # alias for --inspect
-```
-
-## Multi-Account Auth Architecture
-
-**Config Home Structure** (`--config-home DIR` / `-c DIR`):
-
-deva.sh mounts entire auth directories into `/home/deva`, enabling **isolated authentication contexts** for different accounts, organizations, or projects.
+Examples:
 
 ```bash
-# Organize by account type
-~/auth-homes/
-├── personal/           # Personal accounts
-│   ├── .claude/
-│   ├── .claude.json
-│   └── .config/gcloud/
-├── work-corp/          # Corporate accounts
-│   ├── .claude/        # Work Claude Pro
-│   ├── .aws/           # AWS Bedrock access
-│   └── .codex/         # OpenAI org license
-└── client-proj/        # Client-specific
-    ├── .claude/        # Client Claude account
-    └── .aws/           # Client AWS Bedrock
-
-# Use different auth contexts seamlessly
-deva.sh claude -c ~/auth-homes/personal
-deva.sh claude -c ~/auth-homes/work-corp --auth-with bedrock
-deva.sh codex -c ~/auth-homes/work-corp
+deva.sh claude -p rust
+make build
+make build-rust
 ```
 
-**Auth Protection**: When `.codex/auth.json` is mounted, deva.sh strips conflicting `OPENAI_*` env vars to ensure OAuth sessions aren't shadowed by stale API credentials.
+## Security Model
 
-## Container Management
+Be honest about the sharp edges:
 
-- `deva.sh --ps` – list `deva-*` containers scoped to the current project (includes inferred agent column).
-- `deva.sh --inspect` / `deva.sh shell` – attach to a running container (`fzf` picker if more than one, otherwise auto-attach).
+- mounting `docker.sock` is host root by another name
+- `--host-net` gives broad network visibility
+- `--dangerously-skip-permissions` is still dangerous; Docker just changes where the blast radius lands
+- `--config-home` should point to a dedicated auth home, not your real `$HOME`
 
-Container naming pattern: `deva-<agent>-<project>-<pid>`.
-
-## Config Files
-
-We load configuration in this order (later wins):
-
-1. `$XDG_CONFIG_HOME/deva/.deva`
-2. `$HOME/.deva`
-3. `.deva`
-4. `.deva.local`
-5. Legacy `.claude-yolo*` files (still honoured for compatibility)
-
-Example `.deva` file:
+If you need locked-down review mode, use explicit read-only mounts:
 
 ```bash
-VOLUME=~/.ssh:/home/deva/.ssh:ro
-VOLUME=~/.gitconfig:/home/deva/.gitconfig:ro
-ENV=DEBUG=${DEBUG:-development}
-ENV=GH_TOKEN
-CONFIG_HOME=~/auth-homes/claude-max
-DEFAULT_AGENT=claude
-PROFILE=rust                  # pick a dev profile (same as -p rust)
-HOST_NET=false
+deva.sh claude \
+  -v ~/src/project:/home/deva/project:ro \
+  -v ~/.ssh:/home/deva/.ssh:ro \
+  -v /tmp/deva-out:/home/deva/out
 ```
 
-Supported keys: `VOLUME`, `ENV`, `CONFIG_HOME`, `DEFAULT_AGENT`, `HOST_NET`, plus any valid shell variable names you want exported.
+Security policy lives in [SECURITY.md](SECURITY.md).
 
-## Flexible Authentication Matrix
+## Repo Layout
 
-**All Authentication Methods Supported**:
-
-| Agent | Auth Method | Command Example | Auth Context |
-|-------|-------------|-----------------|--------------|
-| **Claude** | OAuth | `deva.sh claude -c ~/auth-homes/personal` | `.claude/`, `.claude.json` |
-| **Claude** | API Key | `deva.sh claude --auth-with api-key` | `ANTHROPIC_API_KEY` |
-| **Claude** | Bedrock | `deva.sh claude -c ~/auth-homes/aws --auth-with bedrock` | `.aws/` credentials |
-| **Claude** | Vertex AI | `deva.sh claude -c ~/auth-homes/gcp --auth-with vertex` | `.config/gcloud/` |
-| **Claude** | Copilot | `deva.sh claude --auth-with copilot` | GitHub token via copilot-api |
-| **Claude** | OAuth Token | `deva.sh claude -- --auth-with oat -p "task"` | `CLAUDE_CODE_OAUTH_TOKEN` |
-| **Codex** | OAuth | `deva.sh codex -c ~/auth-homes/openai` | `.codex/auth.json` |
-
-**Multi-Org Support Examples**:
-```bash
-# Personal dev work
-deva.sh claude -c ~/auth-homes/personal
-
-# Corporate Bedrock account
-deva.sh claude -c ~/auth-homes/corp-aws --auth-with bedrock
-
-# Client project with their OpenAI license
-deva.sh codex -c ~/auth-homes/client-openai
-
-# Quick API key for testing
-ANTHROPIC_API_KEY=sk-... deva.sh claude -- --auth-with api-key -p "test this"
+```text
+deva.sh              main launcher
+agents/              agent-specific auth and command wiring
+Dockerfile*          container images
+workflows/           issue, commit, PR, release conventions
+.github/workflows/   CI and release automation
+scripts/             release and helper scripts
 ```
 
-## Image Contents
+## Development
 
-- Languages: Python 3.12, Node.js 22, Go 1.22, Rust.
-- Tooling: git, gh, docker CLI, awscli, bun, uv, ripgrep, shellcheck, claude-trace, codex CLI, etc.
-- User: non-root `deva` with host UID/GID mirroring.
-- Networking: `localhost` → `host.docker.internal` rewrites for HTTP/HTTPS/gRPC.
-
-## Developer Notes
+Local sanity checks:
 
 ```bash
-make build           # build the deva image locally
-make shell           # open an interactive shell inside the image
-./deva.sh --help     # list all options
+./deva.sh --help
+./deva.sh --version
+./claude-yolo --help
+./scripts/version-check.sh
+shellcheck deva.sh agents/*.sh docker-entrypoint.sh install.sh scripts/*.sh
 ```
 
-See `CHANGELOG.md` and `DEV-LOGS.md` in this directory for history and daily notes.
+Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-## Image Profiles and Local Dockerfiles
+Changelog: [CHANGELOG.md](CHANGELOG.md)
 
-Select a development image profile (deva flags can appear before or after the agent):
+Dev notes: [DEV-LOGS.md](DEV-LOGS.md)
 
-```bash
-# Use base image (default)
-deva.sh claude
+## License
 
-# Use rust toolchain image (tries pull, then local Dockerfile.rust if present)
-deva.sh -p rust claude
-deva.sh claude -p rust   # equivalent
-
-# If the tag isn't available locally and pull fails, build it
-make build-rust   # or: docker build -f Dockerfile.rust -t ghcr.io/thevibeworks/deva:rust .
-```
-
-Profiles map to images:
-- base → `ghcr.io/thevibeworks/deva:latest`
-- rust → `ghcr.io/thevibeworks/deva:rust` (falls back to local `Dockerfile.rust` when available)
-
-You can also pin a custom image via env: `DEVA_DOCKER_IMAGE`, `DEVA_DOCKER_TAG`.
+MIT. See [LICENSE](LICENSE).

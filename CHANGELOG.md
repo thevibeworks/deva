@@ -5,6 +5,24 @@ All notable changes to Claude Code YOLO will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-03-11
+
+### Added
+- `LICENSE` with the standard MIT license text
+- `SECURITY.md` with private vulnerability reporting guidance
+- `CONTRIBUTING.md` with the repo workflow, local checks, and release rules
+
+### Fixed
+- Claude `--auth-with api-key` now forwards `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`
+- Non-default auth no longer moves live host credential files out of the way; it overlays the default credential path with a safe placeholder instead
+- `--dry-run` no longer mutates config homes through autolink or scaffold writes
+- Config-home fan-out skips loose credential files, backup files, VCS junk, and `.DS_Store`
+- `install.sh` now installs the full current agent set, including Gemini and `shared_auth.sh`
+
+### Changed
+- Rewrote `README.md` into a cleaner OSS landing page with badges, quick start, auth matrix, and security warnings
+- Updated `workflows/RELEASE.md` to use `deva.sh` as the source of truth for version bumps
+
 ## [0.9.1] - 2026-01-09
 
 ### Fixed

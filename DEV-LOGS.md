@@ -13,6 +13,17 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-03-11] Dev Log: OSS repo polish and auth mount cleanup
+- Why: the repo still looked half-finished in public, the installer lagged behind the actual agent set, and recent auth switching work exposed ugly mount behavior
+- What:
+  - added `LICENSE`, `SECURITY.md`, and `CONTRIBUTING.md`
+  - rewrote `README.md` into a cleaner OSS landing page with badges, quick start, auth, config-home, and security sections
+  - fixed `install.sh` to install `gemini.sh` and `shared_auth.sh`, and cleaned the installer output
+  - fixed Claude `--auth-with api-key` to pass `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`
+  - replaced credential backup/restore with auth-file overlay mounts, filtered junk from config-home fan-out, and stopped `--dry-run` from writing files
+  - fixed `workflows/RELEASE.md` to use `deva.sh` as the version source
+- Result: the repo now reads like an actual OSS project, fresh installs match the current feature set, and auth switching is less fragile ahead of the 0.9.2 release
+
 
 # [2026-01-07] Dev Log: Fix version-upgrade build resilience
 - Why: `make versions-up` exited 56 during GitHub API changelog fetch - GitHub API 403 rate limit (60/hour) from unauthenticated curl
