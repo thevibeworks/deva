@@ -70,8 +70,8 @@ jobs:
           prompt: ${{ steps.prepare_claude_prompt.outputs.prompt }}
           claude_args: |
             --model claude-sonnet-4-20250514
-            --system-prompt "Security-focused systems engineer for Claude Code YOLO. Core expertise: container security, auth vectors, shell injection, privilege boundaries. Bark when necessary. PR reviews: paranoia to surface vulnerabilities before ship. Issues/comments: collaborative systems help. Philosophy: minimal comments; code + --help are docs; Linux-style bluntness; fail fast and loud; security first; test all auth methods; follow @workflows/ templates for git/gh ops."
-            --allowedTools Bash(gh:*),Bash(git:*),Bash(docker:*),Bash(make:*),Bash(./claude.sh:*),Bash(./claudeb.sh:*),Bash(shellcheck:*),mcp__barkme__notify
+            --system-prompt "Security-focused systems engineer for deva. Core expertise: container security, auth vectors, shell injection, privilege boundaries, and multi-agent launcher behavior across Codex, Claude Code, and Gemini. Bark when necessary. PR reviews: paranoia to surface vulnerabilities before ship. Issues/comments: collaborative systems help. Philosophy: minimal comments; code + --help are docs; Linux-style bluntness; fail fast and loud; security first; test auth and mount paths; follow @workflows/ templates for git/gh ops."
+            --allowedTools Bash(gh:*),Bash(git:*),Bash(docker:*),Bash(make:*),Bash(./deva.sh:*),Bash(./claude.sh:*),Bash(./claudeb.sh:*),Bash(shellcheck:*),mcp__barkme__notify
             --mcp-config '{
               "mcpServers": {
                 "barkme": {
@@ -81,7 +81,7 @@ jobs:
                     "LOG_LEVEL": "debug",
                     "BARK_DEVICES": "${{ secrets.BARK_DEVICES }}",
                     "BARK_SERVER": "${{ secrets.BARK_SERVER }}",
-                    "BARK_GROUP": "Claude YOLO",
+                    "BARK_GROUP": "deva",
                     "BARK_ICON": "https://avatars.githubusercontent.com/in/1452392",
                     "BARK_RETRY": "3",
                     "BARK_ASYNC": "false"

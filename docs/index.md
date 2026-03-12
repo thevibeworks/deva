@@ -1,6 +1,6 @@
 # deva.sh
 
-Run Claude Code, Codex, and Gemini inside Docker without pretending the
+Run Codex, Claude Code, and Gemini inside Docker without pretending the
 agent's own sandbox is the thing keeping you safe.
 
 The container is the sandbox. Explicit mounts are the contract.
@@ -22,7 +22,7 @@ If you want the internals instead of vague hand-waving:
 
 ## What This Is
 
-- a Docker-based launcher for Claude, Codex, and Gemini
+- a Docker-based launcher for Codex, Claude, and Gemini
 - one warm default container shape per project by default
 - explicit mount and env wiring instead of mystery behavior
 - per-agent config homes under `~/.config/deva/`
@@ -41,7 +41,7 @@ If you want the internals instead of vague hand-waving:
 curl -fsSL https://raw.githubusercontent.com/thevibeworks/deva/main/install.sh | bash
 
 cd ~/work/my-project
-deva.sh claude
+deva.sh codex
 ```
 
 Then inspect the container if you want:

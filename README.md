@@ -5,9 +5,9 @@
 [![Release](https://img.shields.io/github/v/release/thevibeworks/deva?sort=semver)](https://github.com/thevibeworks/deva/releases)
 [![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-thevibeworks%2Fdeva-blue)](https://github.com/thevibeworks/deva/pkgs/container/deva)
-[![Agents](https://img.shields.io/badge/agents-claude%20%7C%20codex%20%7C%20gemini-222222)](#what-this-is)
+[![Agents](https://img.shields.io/badge/agents-codex%20%7C%20claude%20%7C%20gemini-222222)](#what-this-is)
 
-Run Claude Code, Codex, and Gemini inside Docker without pretending the agent's own sandbox is the thing keeping you safe.
+Run Codex, Claude Code, and Gemini inside Docker without pretending the agent's own sandbox is the thing keeping you safe.
 
 The container is the sandbox. Explicit mounts are the contract. Persistent project containers keep the workflow fast instead of rebuilding the same state every run.
 
@@ -15,7 +15,7 @@ This repo is the source of truth for `deva.sh`.
 
 ## What This Is
 
-- a Docker-based launcher for Claude, Codex, and Gemini
+- a Docker-based launcher for Codex, Claude, and Gemini
 - one warm default container shape per project by default
 - explicit mount and env wiring instead of mystery behavior
 - per-agent config homes under `~/.config/deva/`
@@ -42,7 +42,7 @@ Compatibility wrappers still exist:
 curl -fsSL https://raw.githubusercontent.com/thevibeworks/deva/main/install.sh | bash
 
 cd ~/work/my-project
-deva.sh claude
+deva.sh codex
 ```
 
 Then inspect the container if you want:
@@ -53,7 +53,7 @@ deva.sh ps
 deva.sh stop
 ```
 
-If you already use Claude, Codex, or Gemini locally, deva will auto-link those auth homes into `~/.config/deva/` by default. If not, first run will ask you to authenticate inside the container.
+If you already use Codex, Claude, or Gemini locally, deva will auto-link those auth homes into `~/.config/deva/` by default. If not, first run will ask you to authenticate inside the container.
 
 ## Docs
 
@@ -76,6 +76,10 @@ Project policy and OSS housekeeping:
 - [Security Policy](SECURITY.md)
 - [MIT License](LICENSE)
 - [Live Docs](https://docs.deva.sh)
+
+Examples:
+
+- [Examples](examples/README.md)
 
 Deep research note:
 

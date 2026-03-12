@@ -26,6 +26,7 @@ CONFIG_ROOT=""
 USER_VOLUMES=()
 USER_ENVS=()
 EXTRA_DOCKER_ARGS=()
+DOCKER_TERMINAL_ARGS=()
 CONFIG_HOME=""
 CONFIG_HOME_AUTO=false
 CONFIG_HOME_FROM_CLI=false
@@ -43,6 +44,12 @@ QUICK_MODE=false
 GLOBAL_MODE=false
 DEBUG_MODE=false
 DRY_RUN=false
+
+if [ -t 0 ] && [ -t 1 ]; then
+    DOCKER_TERMINAL_ARGS=(-it)
+elif [ ! -t 0 ]; then
+    DOCKER_TERMINAL_ARGS=(-i)
+fi
 
 usage() {
     cat <<'USAGE'
@@ -643,7 +650,7 @@ prepare_base_docker_args() {
 
     if [ "$EPHEMERAL_MODE" = true ]; then
         container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}-${ACTIVE_AGENT}-$$"
-        DOCKER_ARGS=(run --rm -it)
+        DOCKER_ARGS=(run --rm "${DOCKER_TERMINAL_ARGS[@]}")
     else
         container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}"
         DOCKER_ARGS=(run -d)
@@ -2402,7 +2409,7 @@ if [ "$DEBUG_MODE" = true ]; then
     echo "" >&2
     if [ "$EPHEMERAL_MODE" = false ]; then
         echo "docker run -d $(mask_secrets_in_args "${DOCKER_ARGS[@]:2}") tail -f /dev/null" >&2
-        echo "docker exec -it $CONTAINER_NAME /usr/local/bin/docker-entrypoint.sh ${AGENT_COMMAND[*]}" >&2
+        echo "docker exec ${DOCKER_TERMINAL_ARGS[*]} $CONTAINER_NAME /usr/local/bin/docker-entrypoint.sh ${AGENT_COMMAND[*]}" >&2
     else
         echo "docker $(mask_secrets_in_args "${DOCKER_ARGS[@]}") ${AGENT_COMMAND[*]}" >&2
     fi
@@ -2470,7 +2477,7 @@ if [ "$EPHEMERAL_MODE" = false ]; then
         update_session_file
     fi
 
-    exec docker exec -it "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+    exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
     write_session_file

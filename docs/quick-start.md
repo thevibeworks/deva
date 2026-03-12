@@ -21,8 +21,8 @@ curl -fsSL https://raw.githubusercontent.com/thevibeworks/deva/main/install.sh |
 That installs:
 
 - `deva.sh`
-- `claude.sh`
-- `claude-yolo`
+- `claude.sh` (legacy compatibility wrapper)
+- `claude-yolo` (legacy compatibility wrapper)
 - `agents/claude.sh`
 - `agents/codex.sh`
 - `agents/gemini.sh`
@@ -34,7 +34,7 @@ It also pulls `ghcr.io/thevibeworks/deva:latest`, with Docker Hub as fallback.
 
 ```bash
 cd ~/work/my-project
-deva.sh claude
+deva.sh codex
 ```
 
 By default, deva:
@@ -71,7 +71,7 @@ deva.sh rm
 Same project, same default container shape:
 
 ```bash
-deva.sh codex
+deva.sh claude
 deva.sh gemini
 ```
 
@@ -80,6 +80,13 @@ That is one of the main reasons this wrapper exists. You do not need a separate 
 If you change mounts, explicit config-home, or auth mode, deva will split into a different persistent container shape instead of pretending those runs are equivalent.
 
 ## Quick Auth Examples
+
+Codex with OpenAI API key:
+
+```bash
+export OPENAI_API_KEY=sk-...
+deva.sh codex --auth-with api-key
+```
 
 Claude with a direct Anthropic-style key or token:
 
@@ -94,13 +101,6 @@ Claude with a custom endpoint:
 export ANTHROPIC_BASE_URL=https://example.net/api
 export ANTHROPIC_AUTH_TOKEN=token
 deva.sh claude --auth-with api-key
-```
-
-Codex with OpenAI API key:
-
-```bash
-export OPENAI_API_KEY=sk-...
-deva.sh codex --auth-with api-key
 ```
 
 Gemini with API key:
