@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config-home fan-out skips loose credential files, backup files, VCS junk, and `.DS_Store`
 - Auth-specific persistent containers now include the agent in the name suffix, avoiding cross-agent reuse with the wrong env or mounts
 - `install.sh` now installs the full current agent set, including Gemini and `shared_auth.sh`
+- `install.sh` now reuses a prebuilt local image instead of blindly pulling, so CI smoke no longer depends on registry auth
 - release and nightly container workflows now resolve tool versions through the same script, and release no longer invents a local commit inside Actions
 
 ### Changed
