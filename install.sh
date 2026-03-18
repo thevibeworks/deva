@@ -24,35 +24,54 @@ image_ref() {
         return
     fi
 
-    if [ -n "$tag" ]; then
-        printf '%s:%s' "$repo" "$tag"
+    if [[ "$tail" == *:* ]]; then
+        if [ -n "$tag" ]; then
+            printf '%s:%s' "${repo%:*}" "$tag"
+        else
+            printf '%s' "$repo"
+        fi
         return
     fi
 
-    if [[ "$tail" == *:* ]]; then
-        printf '%s' "$repo"
+    if [ -n "$tag" ]; then
+        printf '%s:%s' "$repo" "$tag"
         return
     fi
 
     printf '%s:%s' "$repo" "$default_tag"
 }
 
+embedded_image_tag() {
+    local repo="$1"
+    local tail="${repo##*/}"
+
+    if [[ "$repo" == *@* ]]; then
+        return
+    fi
+
+    if [[ "$tail" == *:* ]]; then
+        printf '%s' "${tail##*:}"
+    fi
+}
+
+SOURCE_DOCKER_TAG="${DEVA_DOCKER_TAG:-$(embedded_image_tag "${DEVA_DOCKER_IMAGE:-}")}"
+
 if [ -n "${DEVA_DOCKER_IMAGE+x}" ]; then
-    DOCKER_IMAGE="$(image_ref "$DEVA_DOCKER_IMAGE" "${DEVA_DOCKER_TAG:-}" "latest")"
+    DOCKER_IMAGE="$(image_ref "$DEVA_DOCKER_IMAGE" "$SOURCE_DOCKER_TAG" "latest")"
 else
-    DOCKER_IMAGE="$(image_ref "ghcr.io/thevibeworks/deva" "${DEVA_DOCKER_TAG:-}" "latest")"
+    DOCKER_IMAGE="$(image_ref "ghcr.io/thevibeworks/deva" "$SOURCE_DOCKER_TAG" "latest")"
 fi
 
 if [ -n "${DEVA_DOCKER_IMAGE_FALLBACK+x}" ]; then
     if [ -n "$DEVA_DOCKER_IMAGE_FALLBACK" ]; then
-        DOCKER_IMAGE_FALLBACK="$(image_ref "$DEVA_DOCKER_IMAGE_FALLBACK" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-${DEVA_DOCKER_TAG:-}}" "latest")"
+        DOCKER_IMAGE_FALLBACK="$(image_ref "$DEVA_DOCKER_IMAGE_FALLBACK" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-$SOURCE_DOCKER_TAG}" "latest")"
     else
         DOCKER_IMAGE_FALLBACK=""
     fi
 else
-    DOCKER_IMAGE_FALLBACK="$(image_ref "thevibeworks/deva" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-${DEVA_DOCKER_TAG:-}}" "latest")"
+    DOCKER_IMAGE_FALLBACK="$(image_ref "thevibeworks/deva" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-$SOURCE_DOCKER_TAG}" "latest")"
 fi
-
+ 5d3298f (fix(deva): support full docker image refs)
 echo "deva installer"
 echo "=============="
 echo ""

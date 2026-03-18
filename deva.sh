@@ -39,6 +39,37 @@ LOADED_CONFIGS=()
 AGENT_ARGS=()
 AGENT_EXPLICIT=false
 
+normalize_docker_image_parts() {
+    local tail="${DEVA_DOCKER_IMAGE##*/}"
+
+    if [[ "$DEVA_DOCKER_IMAGE" == *@* ]]; then
+        DEVA_DOCKER_TAG=""
+        DEVA_DOCKER_TAG_ENV_SET=true
+        return
+    fi
+
+    if [[ "$tail" == *:* ]]; then
+        local embedded_tag="${tail##*:}"
+        DEVA_DOCKER_IMAGE="${DEVA_DOCKER_IMAGE%:*}"
+        if [ "$DEVA_DOCKER_TAG_ENV_SET" = false ]; then
+            DEVA_DOCKER_TAG="$embedded_tag"
+            DEVA_DOCKER_TAG_ENV_SET=true
+        fi
+    fi
+}
+
+docker_image_ref() {
+    if [[ "$DEVA_DOCKER_IMAGE" == *@* ]]; then
+        printf '%s' "$DEVA_DOCKER_IMAGE"
+    elif [ -n "${DEVA_DOCKER_TAG:-}" ]; then
+        printf '%s:%s' "$DEVA_DOCKER_IMAGE" "$DEVA_DOCKER_TAG"
+    else
+        printf '%s' "$DEVA_DOCKER_IMAGE"
+    fi
+}
+
+normalize_docker_image_parts
+
 EPHEMERAL_MODE=false
 QUICK_MODE=false
 GLOBAL_MODE=false
@@ -90,7 +121,7 @@ Deva flags:
 
 Container Behavior (NEW in v0.8.0):
   Default (persistent):   Shared per project by default, but split when container shape changes
-                          (extra volumes, explicit config-home, auth mode).
+                          (image/profile, extra volumes, explicit config-home, auth mode).
                           Preserves state (npm packages, builds, etc).
                           Faster startup, and default-auth runs can share one warm container.
 
@@ -98,7 +129,7 @@ Container Behavior (NEW in v0.8.0):
                           Agent-specific naming for parallel runs.
 
 Container Naming (NEW):
-  Persistent:  deva-<parent>-<project>[..shape]     # shape may encode volumes/config/auth
+  Persistent:  deva-<parent>-<project>[..shape]     # shape may encode image/volumes/config/auth
   Ephemeral:   deva-<parent>-<project>-<agent>-<pid>  # Agent-specific
 
   Example:
@@ -185,33 +216,37 @@ check_agent() {
 }
 
 check_image() {
-    if docker image inspect "${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >/dev/null 2>&1; then
+    local image_ref
+    image_ref="$(docker_image_ref)"
+
+    if docker image inspect "$image_ref" >/dev/null 2>&1; then
         return
     fi
 
     # Try pulling first
-    if docker pull "${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >/dev/null 2>&1; then
+    if docker pull "$image_ref" >/dev/null 2>&1; then
         return
     fi
 
-    # Smart fallback: check for available profile images locally
+    # Smart fallback: check for available profile images locally.
+    # Digest-pinned refs are exact; tag fallback does not make sense there.
     local available_tags=""
-    local original_tag="$DEVA_DOCKER_TAG"
-
-    # Check common profile tags (prefer rust as it's a superset of base)
-    for tag in rust latest; do
-        if [ "$tag" = "$DEVA_DOCKER_TAG" ]; then
-            continue  # Skip the one we already tried
-        fi
-        if docker image inspect "${DEVA_DOCKER_IMAGE}:${tag}" >/dev/null 2>&1; then
-            available_tags="${available_tags}${tag} "
-        fi
-    done
+    if [[ "$DEVA_DOCKER_IMAGE" != *@* ]]; then
+        # Check common profile tags (prefer rust as it's a superset of base)
+        for tag in rust latest; do
+            if [ "$tag" = "$DEVA_DOCKER_TAG" ]; then
+                continue  # Skip the one we already tried
+            fi
+            if docker image inspect "${DEVA_DOCKER_IMAGE}:${tag}" >/dev/null 2>&1; then
+                available_tags="${available_tags}${tag} "
+            fi
+        done
+    fi
 
     if [ -n "$available_tags" ]; then
         # Found alternative images - use the first one
         local fallback_tag="${available_tags%% *}"  # Get first tag
-        echo "Image ${DEVA_DOCKER_IMAGE}:${original_tag} not found" >&2
+        echo "Image $image_ref not found" >&2
         echo "Using available image: ${DEVA_DOCKER_IMAGE}:${fallback_tag}" >&2
         DEVA_DOCKER_TAG="$fallback_tag"
         return
@@ -225,7 +260,7 @@ check_image() {
         ;;
     esac
 
-    echo "Docker image ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG} not found locally" >&2
+    echo "Docker image $image_ref not found locally" >&2
     if [ -n "$df" ]; then
         echo "A matching Dockerfile exists at: $df" >&2
         case "${PROFILE:-}" in
@@ -242,7 +277,7 @@ check_image() {
             ;;
         esac
     else
-        echo "Pull with: docker pull ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >&2
+        echo "Pull with: docker pull $image_ref" >&2
     fi
     exit 1
 }
@@ -609,7 +644,7 @@ show_config() {
     fi
     echo ""
 
-    echo "Docker image: ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+    echo "Docker image: $(docker_image_ref)"
     echo "Container prefix: $DEVA_CONTAINER_PREFIX"
 }
 
@@ -634,18 +669,14 @@ prepare_base_docker_args() {
             config_hash_source="$CONFIG_ROOT"
         fi
     fi
-    if [ -n "$config_hash_source" ]; then
-        if command -v md5sum >/dev/null 2>&1; then
-            config_hash=$(printf '%s' "$config_hash_source" | md5sum | cut -c1-6)
-        elif command -v shasum >/dev/null 2>&1; then
-            config_hash=$(printf '%s' "$config_hash_source" | shasum | cut -c1-6)
-        else
-            config_hash=$(printf '%s' "$config_hash_source" | cksum | cut -d' ' -f1 | cut -c1-6)
-        fi
-    fi
+    [ -n "$config_hash_source" ] && config_hash=$(short_hash "$config_hash_source" 6)
+
+    local image_hash=""
+    image_hash=$(short_hash "$(docker_image_ref)" 6)
 
     local suffix=""
-    [ -n "$volume_hash" ] && suffix="..v${volume_hash}"
+    [ -n "$image_hash" ] && suffix="..i${image_hash}"
+    [ -n "$volume_hash" ] && suffix="${suffix}..v${volume_hash}"
     [ -n "$config_hash" ] && suffix="${suffix}..c${config_hash}"
 
     if [ "$EPHEMERAL_MODE" = true ]; then
@@ -677,9 +708,13 @@ prepare_base_docker_args() {
         --label "deva.workspace_hash=${ws_hash}"
         --label "deva.agent=${ACTIVE_AGENT}"
         --label "deva.ephemeral=${EPHEMERAL_MODE}"
+        --label "deva.image=$(docker_image_ref)"
     )
     if [ -n "$volume_hash" ]; then
         DOCKER_ARGS+=(--label "deva.volhash=${volume_hash}")
+    fi
+    if [ -n "$image_hash" ]; then
+        DOCKER_ARGS+=(--label "deva.image_hash=${image_hash}")
     fi
 
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
@@ -1139,6 +1174,19 @@ normalize_volume_spec() {
     echo "$src:$remainder"
 }
 
+short_hash() {
+    local input="$1"
+    local length="${2:-8}"
+
+    if command -v md5sum >/dev/null 2>&1; then
+        printf '%s' "$input" | md5sum | cut -c1-"$length"
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$input" | shasum | cut -c1-"$length"
+    else
+        printf '%s' "$input" | cksum | cut -d' ' -f1 | cut -c1-"$length"
+    fi
+}
+
 compute_volume_hash() {
     if [ ${#USER_VOLUMES[@]} -eq 0 ]; then
         return
@@ -1161,15 +1209,7 @@ compute_volume_hash() {
         hash_input="${hash_input}${src}:${vol#*:}|"
     done <<<"$sorted_vols"
 
-    if [ -n "$hash_input" ]; then
-        if command -v md5sum >/dev/null 2>&1; then
-            echo "$hash_input" | md5sum | cut -c1-8
-        elif command -v shasum >/dev/null 2>&1; then
-            echo "$hash_input" | shasum | cut -c1-8
-        else
-            echo "$hash_input" | cksum | cut -d' ' -f1 | cut -c1-8
-        fi
-    fi
+    [ -n "$hash_input" ] && short_hash "$hash_input" 8
 }
 
 workspace_hash() {
@@ -1180,13 +1220,7 @@ workspace_hash() {
 
     local p
     p="$(pwd)"
-    if command -v md5sum >/dev/null 2>&1; then
-        _WS_HASH_CACHE=$(printf '%s' "$p" | md5sum | cut -c1-8)
-    elif command -v shasum >/dev/null 2>&1; then
-        _WS_HASH_CACHE=$(printf '%s' "$p" | shasum | cut -c1-8)
-    else
-        _WS_HASH_CACHE=$(printf '%s' "$p" | cksum | cut -d' ' -f1 | cut -c1-8)
-    fi
+    _WS_HASH_CACHE=$(short_hash "$p" 8)
     printf '%s' "$_WS_HASH_CACHE"
 }
 
@@ -1398,6 +1432,20 @@ process_var_config() {
         if [ "$CONFIG_HOME_FROM_CLI" = false ]; then
             set_config_home_value "$value"
         fi
+        ;;
+    DEVA_DOCKER_IMAGE)
+        DEVA_DOCKER_IMAGE="$value"
+        DEVA_DOCKER_IMAGE_ENV_SET=true
+        normalize_docker_image_parts
+        export DEVA_DOCKER_IMAGE
+        USER_ENVS+=("$name=$value")
+        ;;
+    DEVA_DOCKER_TAG)
+        DEVA_DOCKER_TAG="$value"
+        DEVA_DOCKER_TAG_ENV_SET=true
+        normalize_docker_image_parts
+        export DEVA_DOCKER_TAG
+        USER_ENVS+=("$name=$value")
         ;;
     DEFAULT_AGENT)
         DEFAULT_AGENT="$value"
@@ -1716,7 +1764,7 @@ if [ ${#PRE_ARGS[@]} -gt 0 ]; then
             ;;
         --version)
             echo "deva.sh v${VERSION}"
-            echo "Docker Image: ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+            echo "Docker Image: $(docker_image_ref)"
             exit 0
             ;;
         --show-config)
@@ -1766,6 +1814,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
         if [ -z "$ACTIVE_AGENT" ]; then
             ACTIVE_AGENT="$DEFAULT_AGENT"
         fi
+        resolve_profile
         show_config
         exit 0
     fi
@@ -2232,26 +2281,14 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                 auth_config_src="$CONFIG_ROOT"
             fi
         fi
-        if [ -n "$auth_config_src" ]; then
-            if command -v md5sum >/dev/null 2>&1; then
-                auth_config_hash=$(printf '%s' "$auth_config_src" | md5sum | cut -c1-6)
-            elif command -v shasum >/dev/null 2>&1; then
-                auth_config_hash=$(printf '%s' "$auth_config_src" | shasum | cut -c1-6)
-            else
-                auth_config_hash=$(printf '%s' "$auth_config_src" | cksum | cut -d' ' -f1 | cut -c1-6)
-            fi
-        fi
+        [ -n "$auth_config_src" ] && auth_config_hash=$(short_hash "$auth_config_src" 6)
+
+        image_hash=$(short_hash "$(docker_image_ref)" 6)
 
         # Hash credential file path for credentials-file auth
         creds_hash=""
         if [ "$AUTH_METHOD" = "credentials-file" ] && [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
-            if command -v md5sum >/dev/null 2>&1; then
-                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | md5sum | cut -c1-8)
-            elif command -v shasum >/dev/null 2>&1; then
-                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | shasum | cut -c1-8)
-            else
-                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | cksum | cut -d' ' -f1 | cut -c1-8)
-            fi
+            creds_hash=$(short_hash "$CUSTOM_CREDENTIALS_FILE" 8)
         fi
 
         new_container_name=""
@@ -2265,7 +2302,8 @@ if [ -n "${AUTH_METHOD:-}" ]; then
 
         # Build suffix chain: volume + config + auth
         name_suffix=""
-        [ -n "$volume_hash" ] && name_suffix="..v${volume_hash}"
+        [ -n "$image_hash" ] && name_suffix="..i${image_hash}"
+        [ -n "$volume_hash" ] && name_suffix="${name_suffix}..v${volume_hash}"
         [ -n "$auth_config_hash" ] && name_suffix="${name_suffix}..c${auth_config_hash}"
         name_suffix="${name_suffix}..${auth_suffix}"
 
@@ -2360,7 +2398,7 @@ if [ "$QUICK_MODE" = false ] && [ -d "$(pwd)/.claude" ]; then
     DOCKER_ARGS+=("-v" "$(pwd)/.claude:$(pwd)/.claude")
 fi
 
-DOCKER_ARGS+=("${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}")
+DOCKER_ARGS+=("$(docker_image_ref)")
 
 if [ "$ACTION" = "shell" ]; then
     AGENT_COMMAND=("/bin/zsh")
@@ -2479,7 +2517,7 @@ if [ "$EPHEMERAL_MODE" = false ]; then
 
     exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
 else
-    echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+    echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
     write_session_file
     if ! docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"; then
         echo "error: failed to launch ephemeral container" >&2
