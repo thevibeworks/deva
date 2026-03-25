@@ -72,6 +72,19 @@ jobs:
             --build-arg COPILOT_API_VERSION="${{ steps.versions.outputs.copilot_api_version }}" \
             .
 
+      - name: Build core and rust images via Makefile
+        run: |
+          make build-core build-rust-image \
+            IMAGE_NAME=deva-smoke \
+            TAG=ci \
+            CORE_TAG=ci-core \
+            RUST_TAG=ci-rust \
+            CLAUDE_CODE_VERSION="${{ steps.versions.outputs.claude_code_version }}" \
+            CODEX_VERSION="${{ steps.versions.outputs.codex_version }}" \
+            GEMINI_CLI_VERSION="${{ steps.versions.outputs.gemini_cli_version }}" \
+            ATLAS_CLI_VERSION="${{ steps.versions.outputs.atlas_cli_version }}" \
+            COPILOT_API_VERSION="${{ steps.versions.outputs.copilot_api_version }}"
+
       - name: Install and launch each agent without a TTY
         shell: bash
         run: |
@@ -89,6 +102,50 @@ jobs:
           deva.sh claude -Q -- --version
           deva.sh codex -Q -- --version
           deva.sh gemini -Q -- --version
+
+      - name: Smoke Claude --chrome mount assembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_root="$(mktemp -d)"
+          bridge_dir="$tmp_root/claude-mcp-browser-bridge-$(id -un)"
+          profile_dir="$tmp_root/chrome/Default"
+
+          mkdir -p "$bridge_dir"
+          chmod 700 "$bridge_dir"
+          mkdir -p "$profile_dir/Extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn/1.0.0"
+
+          dry_run="$(
+            DEVA_DOCKER_IMAGE=deva-smoke \
+            DEVA_DOCKER_TAG=ci \
+            DEVA_CHROME_PROFILE_PATH="$profile_dir" \
+            DEVA_HOST_CHROME_BRIDGE_DIR="$bridge_dir" \
+            ./deva.sh claude --debug --dry-run -- --chrome 2>&1
+          )"
+
+          printf '%s\n' "$dry_run"
+          grep -F -- "$bridge_dir:/deva-host-chrome-bridge" <<<"$dry_run"
+          grep -F -- "$profile_dir/Extensions:/home/deva/.config/google-chrome/Default/Extensions:ro" <<<"$dry_run"
+
+      - name: Smoke Chrome bridge entrypoint symlink
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_root="$(mktemp -d)"
+          bridge_dir="$tmp_root/claude-mcp-browser-bridge-$(id -un)"
+
+          mkdir -p "$bridge_dir"
+          chmod 700 "$bridge_dir"
+
+          docker run --rm \
+            -e DEVA_AGENT=claude \
+            -e DEVA_UID="$(id -u)" \
+            -e DEVA_GID="$(id -g)" \
+            -e DEVA_CHROME_HOST_BRIDGE=1 \
+            -e DEVA_CHROME_HOST_BRIDGE_DIR=/deva-host-chrome-bridge \
+            -v "$bridge_dir:/deva-host-chrome-bridge" \
+            deva-smoke:ci \
+            bash -lc 'link="/tmp/claude-mcp-browser-bridge-$(id -un)"; test -L "$link"; test "$(readlink "$link")" = "/deva-host-chrome-bridge"'
 
   docs:
     name: Docs Build

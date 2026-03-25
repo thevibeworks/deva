@@ -37,16 +37,47 @@ Important detail:
 
 ## Build A Local Image
 
-Base image:
+Supported path:
 
 ```bash
-docker build -t deva-local:latest .
+make build-main
+make build-rust
 ```
 
-Rust profile image:
+If you only changed the late agent-install layer and want the fastest rebuild:
 
 ```bash
-docker build -f Dockerfile.rust -t deva-local:rust .
+make build-core
+make build-rust-image
+```
+
+`build-rust-image` uses the local `:core` image as its parent so late
+changes to the agent layer do not force the Rust apt layer to rerun.
+
+Manual `docker build` is still possible, but it is an advanced path now.
+Do not rely on the Dockerfile defaults for release images. Pass explicit
+tool versions, and point the Rust build at the local core image:
+
+```bash
+bash ./scripts/resolve-tool-versions.sh
+
+docker build -t deva-local:latest \
+  --build-arg CLAUDE_CODE_VERSION=<claude_code_version> \
+  --build-arg CODEX_VERSION=<codex_version> \
+  --build-arg GEMINI_CLI_VERSION=<gemini_cli_version> \
+  --build-arg ATLAS_CLI_VERSION=<atlas_cli_version> \
+  --build-arg COPILOT_API_VERSION=<copilot_api_version> \
+  .
+
+docker build -f Dockerfile --target agent-base -t deva-local:core .
+
+docker build -f Dockerfile.rust -t deva-local:rust \
+  --build-arg BASE_IMAGE=deva-local:core \
+  --build-arg CLAUDE_CODE_VERSION=<claude_code_version> \
+  --build-arg CODEX_VERSION=<codex_version> \
+  --build-arg GEMINI_CLI_VERSION=<gemini_cli_version> \
+  --build-arg ATLAS_CLI_VERSION=<atlas_cli_version> \
+  .
 ```
 
 Then run deva against it:

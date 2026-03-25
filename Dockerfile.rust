@@ -8,14 +8,25 @@ FROM ${BASE_IMAGE}
 LABEL org.opencontainers.image.title="deva-rust"
 LABEL org.opencontainers.image.description="Rust development environment with full toolchain"
 
+ARG CLAUDE_CODE_VERSION=2.1.81
+ARG CODEX_VERSION=0.116.0
+ARG GEMINI_CLI_VERSION=0.35.0
+ARG ATLAS_CLI_VERSION=v0.1.4
 ARG RUST_TOOLCHAINS="stable"
 ARG RUST_TARGETS="wasm32-unknown-unknown"
+
+LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
+LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
+LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
+LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ENV RUSTUP_HOME=/opt/rustup \
     CARGO_HOME=/opt/cargo \
     PATH=/opt/cargo/bin:$PATH
+
+USER root
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -67,3 +78,26 @@ RUN echo 'export PATH="/opt/cargo/bin:$PATH"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cw="cargo watch -x check -x test -x run"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cf="cargo fmt"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cl="cargo clippy"' >> "$DEVA_HOME/.zshrc"
+
+USER $DEVA_USER
+
+COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
+
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    bash /tmp/install-agent-tooling.sh && \
+    rm -f /tmp/install-agent-tooling.sh
+
+USER root
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/deva-bridge-tmux /usr/local/bin/deva-bridge-tmux
+
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh && \
+    chmod 755 /usr/local/bin/deva-bridge-tmux && \
+    chmod -R 755 /usr/local/bin/scripts || true
+
+WORKDIR /root
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+
+CMD ["claude"]

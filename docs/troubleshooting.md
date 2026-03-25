@@ -105,6 +105,68 @@ If the agent cannot reach a local proxy:
 
 For Copilot proxy mode, deva also adds `NO_PROXY` and `no_grpc_proxy` entries for the local proxy hostnames.
 
+## Claude `--chrome` Still Cannot See The Extension
+
+Symptom:
+
+- Claude reports Chrome mode enabled
+- extension status still says not detected
+
+What deva now does for `deva.sh claude -- --chrome`:
+
+- mounts either:
+  - one configured Chrome profile `Extensions/` dir read-only at `/home/deva/.config/google-chrome/Profile N/Extensions`, or
+  - every detected `Default`/`Profile *` `Extensions/` dir under a configured user-data root
+- mounts the host Chrome bridge dir at `/deva-host-chrome-bridge`
+- inside the patched container entrypoint, creates the socket Claude expects:
+  - `<container tmpdir>/claude-mcp-browser-bridge-deva`
+  - symlinked to `/deva-host-chrome-bridge`
+
+Check:
+
+```bash
+deva.sh claude --debug --dry-run -- --chrome
+deva.sh shell
+```
+
+Look for:
+
+- `.../Profile 6/Extensions:/home/deva/.config/google-chrome/Profile 6/Extensions:ro`
+- or `.../Default/Extensions:/home/deva/.config/google-chrome/Default/Extensions:ro`
+- `/deva-host-chrome-bridge`
+- inside the container: `ls -l "$(node -p 'require(\"os\").tmpdir()')"/claude-mcp-browser-bridge-deva`
+
+If your extension lives in a non-default Chrome profile, tell deva where it is. Put this in `.deva.local`:
+
+```text
+DEVA_CHROME_PROFILE_PATH=/actual/path/to/Profile 6
+```
+
+If the source directory is not literally named `Profile 6`, also set:
+
+```text
+DEVA_CHROME_PROFILE_NAME=Profile 6
+```
+
+If you prefer pointing deva at the browser user-data root instead:
+
+```text
+DEVA_CHROME_USER_DATA_DIR=/actual/path/to/Chrome
+```
+
+If deva guessed the wrong host bridge directory, override it explicitly:
+
+```text
+DEVA_HOST_CHROME_BRIDGE_DIR=/actual/path/to/claude-mcp-browser-bridge-$USER
+```
+
+Reality check:
+
+- deva does not install the host native messaging manifest for you
+- Chrome on the host still needs a working host-side `claude --chrome-native-host` setup
+- if the host socket file is absent, the extension may be installed but not yet connected
+- the published image still needs to be rebuilt with the patched `docker-entrypoint.sh`; otherwise the socket symlink is never created
+
 ## Dry-Run Looks Fine But Runtime Fails
 
 That is normal in at least three cases:

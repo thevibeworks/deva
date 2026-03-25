@@ -119,6 +119,17 @@ Deva flags:
   --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
+Chrome integration for `claude -- --chrome`:
+  Set one of these in `.deva.local` or pass with `-e`:
+  DEVA_CHROME_PROFILE_PATH=/path/to/Profile 6
+                          Mount that profile's `Extensions/` tree for detection
+  DEVA_CHROME_PROFILE_NAME=Profile 6
+                          Override target profile name when source basename differs
+  DEVA_CHROME_USER_DATA_DIR=/path/to/Chrome user data
+                          Scan `Default`/`Profile *` and mount only `Extensions/`
+  DEVA_HOST_CHROME_BRIDGE_DIR=/path/to/claude-mcp-browser-bridge-$USER
+                          Override the exact host bridge directory if needed
+
 Container Behavior (NEW in v0.8.0):
   Default (persistent):   Shared per project by default, but split when container shape changes
                           (image/profile, extra volumes, explicit config-home, auth mode).
@@ -176,6 +187,13 @@ absolute_path() {
     python3 - "$1" <<'PY'
 import os, sys
 print(os.path.abspath(sys.argv[1]))
+PY
+}
+
+canonical_path() {
+    python3 - "$1" <<'PY'
+import os, sys
+print(os.path.realpath(sys.argv[1]))
 PY
 }
 
@@ -266,11 +284,11 @@ check_image() {
         case "${PROFILE:-}" in
         rust)
             echo "Build with: make build-rust" >&2
-            echo "or: docker build -f $df -t ghcr.io/thevibeworks/deva:rust \"$SCRIPT_DIR\"" >&2
+            echo "Manual docker builds need explicit build args and BASE_IMAGE; see docs/custom-images.md" >&2
             ;;
         "" | base)
             echo "Build with: make build" >&2
-            echo "or: docker build -f Dockerfile -t ghcr.io/thevibeworks/deva:latest \"$SCRIPT_DIR\"" >&2
+            echo "Manual docker builds need explicit build args; see docs/custom-images.md" >&2
             ;;
         *)
             echo "Build with your Dockerfile and tag appropriately (e.g., :${PROFILE})" >&2
@@ -316,6 +334,237 @@ EOF
 
 translate_localhost() {
     echo "$1" | sed 's/127\.0\.0\.1/host.docker.internal/g' | sed 's/localhost/host.docker.internal/g'
+}
+
+claude_args_request_chrome() {
+    local arg
+    local wants_chrome=false
+    local disables_chrome=false
+
+    for arg in "$@"; do
+        case "$arg" in
+        --chrome)
+            wants_chrome=true
+            ;;
+        --no-chrome)
+            disables_chrome=true
+            ;;
+        esac
+    done
+
+    [ "$wants_chrome" = true ] && [ "$disables_chrome" = false ]
+}
+
+get_host_tmpdir() {
+    local tmpdir=""
+
+    if command -v node >/dev/null 2>&1; then
+        tmpdir=$(node -p 'require("os").tmpdir()' 2>/dev/null || true)
+    fi
+
+    if [ -z "$tmpdir" ] && command -v python3 >/dev/null 2>&1; then
+        tmpdir=$(python3 - <<'PY'
+import tempfile
+print(tempfile.gettempdir())
+PY
+        )
+    fi
+
+    if [ -z "$tmpdir" ]; then
+        tmpdir="${TMPDIR:-/tmp}"
+    fi
+
+    printf '%s' "$tmpdir"
+}
+
+normalize_host_bind_path() {
+    local path="$1"
+    path="$(expand_tilde "$path")"
+
+    if [[ "$path" == /* ]]; then
+        printf '%s' "$path"
+        return 0
+    fi
+
+    absolute_path "$path"
+}
+
+configured_env_value() {
+    local name="$1"
+    local spec
+
+    for spec in "${USER_ENVS[@]+"${USER_ENVS[@]}"}"; do
+        if [[ "$spec" == "$name="* ]]; then
+            printf '%s' "${spec#*=}"
+            return 0
+        fi
+        if [ "$spec" = "$name" ] && [ -n "${!name-}" ]; then
+            printf '%s' "${!name}"
+            return 0
+        fi
+    done
+
+    if [ -n "${!name-}" ]; then
+        printf '%s' "${!name}"
+        return 0
+    fi
+
+    return 1
+}
+
+user_volume_mounts_target() {
+    local target="$1"
+    local spec remainder dest
+
+    for spec in "${USER_VOLUMES[@]+"${USER_VOLUMES[@]}"}"; do
+        remainder="${spec#*:}"
+        dest="${remainder%%:*}"
+        if [ "$dest" = "$target" ]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+prepare_claude_chrome_detection_mount() {
+    local profile_path=""
+    local user_data_dir=""
+    local profile_name=""
+    local profile_target=""
+    local extensions_source=""
+    local found_profile=false
+
+    profile_path="$(configured_env_value DEVA_CHROME_PROFILE_PATH || true)"
+    user_data_dir="$(configured_env_value DEVA_CHROME_USER_DATA_DIR || true)"
+
+    if [ -n "$profile_path" ]; then
+        profile_path="$(normalize_host_bind_path "$profile_path")"
+        if [ ! -d "$profile_path" ]; then
+            echo "error: DEVA_CHROME_PROFILE_PATH does not exist: $profile_path" >&2
+            exit 1
+        fi
+
+        profile_name="$(configured_env_value DEVA_CHROME_PROFILE_NAME || true)"
+        if [ -z "$profile_name" ]; then
+            profile_name="$(basename "$profile_path")"
+        fi
+
+        case "$profile_name" in
+        Default | "Profile "*)
+            ;;
+        *)
+            echo "error: Chrome profile name must be 'Default' or 'Profile N'; got: $profile_name" >&2
+            echo "hint: set DEVA_CHROME_PROFILE_NAME='Profile 6' if the source path basename is different" >&2
+            exit 1
+            ;;
+        esac
+
+        extensions_source="$profile_path/Extensions"
+        if [ ! -d "$extensions_source" ]; then
+            echo "error: Chrome profile is missing Extensions directory: $extensions_source" >&2
+            exit 1
+        fi
+
+        profile_target="/home/deva/.config/google-chrome/$profile_name/Extensions"
+        if ! user_volume_mounts_target "$profile_target"; then
+            USER_VOLUMES+=("$extensions_source:$profile_target:ro")
+        fi
+        return 0
+    fi
+
+    if [ -n "$user_data_dir" ]; then
+        user_data_dir="$(normalize_host_bind_path "$user_data_dir")"
+        if [ ! -d "$user_data_dir" ]; then
+            echo "error: DEVA_CHROME_USER_DATA_DIR does not exist: $user_data_dir" >&2
+            exit 1
+        fi
+
+        if [ -d "$user_data_dir/Default" ]; then
+            extensions_source="$user_data_dir/Default/Extensions"
+            if [ -d "$extensions_source" ]; then
+                profile_target="/home/deva/.config/google-chrome/Default/Extensions"
+                if ! user_volume_mounts_target "$profile_target"; then
+                    USER_VOLUMES+=("$extensions_source:$profile_target:ro")
+                fi
+                found_profile=true
+            fi
+        fi
+
+        local candidate
+        for candidate in "$user_data_dir"/Profile\ *; do
+            [ -d "$candidate" ] || continue
+            extensions_source="$candidate/Extensions"
+            [ -d "$extensions_source" ] || continue
+
+            profile_name="$(basename "$candidate")"
+            profile_target="/home/deva/.config/google-chrome/$profile_name/Extensions"
+            if ! user_volume_mounts_target "$profile_target"; then
+                USER_VOLUMES+=("$extensions_source:$profile_target:ro")
+            fi
+            found_profile=true
+        done
+
+        if [ "$found_profile" = false ]; then
+            echo "error: DEVA_CHROME_USER_DATA_DIR has no Default/Profile */Extensions directories: $user_data_dir" >&2
+            exit 1
+        fi
+    fi
+}
+
+resolve_claude_chrome_bridge_dir() {
+    local host_user="$1"
+    local configured_bridge_dir=""
+    local host_tmpdir=""
+    local host_bridge_dir=""
+
+    configured_bridge_dir="$(configured_env_value DEVA_HOST_CHROME_BRIDGE_DIR || true)"
+    if [ -n "$configured_bridge_dir" ]; then
+        host_bridge_dir="$(normalize_host_bind_path "$configured_bridge_dir")"
+    else
+        host_tmpdir="$(get_host_tmpdir)"
+        local tmp_bridge_dir="$host_tmpdir/claude-mcp-browser-bridge-$host_user"
+
+        # Claude's native host currently creates the bridge under /tmp, while the
+        # client also probes os.tmpdir() as an extra lookup path. Keep /tmp as
+        # the default mount target and only prefer os.tmpdir() when it already
+        # exists and /tmp does not.
+        host_bridge_dir="/tmp/claude-mcp-browser-bridge-$host_user"
+
+        if [ ! -d "$host_bridge_dir" ] && [ "$host_tmpdir" != "/tmp" ] && [ -d "$tmp_bridge_dir" ]; then
+            host_bridge_dir="$tmp_bridge_dir"
+        fi
+    fi
+
+    mkdir -p "$host_bridge_dir"
+    chmod 700 "$host_bridge_dir" 2>/dev/null || true
+    canonical_path "$host_bridge_dir"
+}
+
+prepare_claude_chrome_bridge() {
+    [ "$ACTIVE_AGENT" = "claude" ] || return 0
+
+    if ! claude_args_request_chrome "${AGENT_ARGV[@]+"${AGENT_ARGV[@]}"}"; then
+        return 0
+    fi
+
+    local host_user
+    host_user="$(configured_env_value DEVA_CHROME_HOST_USER || true)"
+    if [ -z "$host_user" ]; then
+        host_user="$(id -un)"
+    fi
+    local host_bridge_dir
+    host_bridge_dir="$(resolve_claude_chrome_bridge_dir "$host_user")"
+
+    prepare_claude_chrome_detection_mount
+
+    local bridge_mount="/deva-host-chrome-bridge"
+    if ! user_volume_mounts_target "$bridge_mount"; then
+        USER_VOLUMES+=("$host_bridge_dir:$bridge_mount")
+    fi
+    USER_ENVS+=("DEVA_CHROME_HOST_BRIDGE=1")
+    USER_ENVS+=("DEVA_CHROME_HOST_USER=$host_user")
+    USER_ENVS+=("DEVA_CHROME_HOST_BRIDGE_DIR=$bridge_mount")
 }
 
 append_unique_line() {
@@ -2175,6 +2424,7 @@ autolink_legacy_into_deva_root() {
 }
 
 check_agent "$ACTIVE_AGENT"
+prepare_claude_chrome_bridge
 
 if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
     if [ ! -d "$CONFIG_HOME" ]; then

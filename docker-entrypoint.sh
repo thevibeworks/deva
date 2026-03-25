@@ -249,6 +249,43 @@ fix_docker_socket_permissions() {
     fi
 }
 
+get_node_tmpdir() {
+    local tmpdir="${TMPDIR:-/tmp}"
+    if command -v node >/dev/null 2>&1; then
+        local detected
+        detected=$(node -p 'require("os").tmpdir()' 2>/dev/null || true)
+        if [ -n "$detected" ]; then
+            tmpdir="$detected"
+        fi
+    fi
+    printf '%s' "$tmpdir"
+}
+
+setup_claude_chrome_bridge() {
+    if [ "${DEVA_CHROME_HOST_BRIDGE:-}" != "1" ]; then
+        return 0
+    fi
+
+    local host_bridge_dir="${DEVA_CHROME_HOST_BRIDGE_DIR:-/deva-host-chrome-bridge}"
+    if [ ! -d "$host_bridge_dir" ]; then
+        echo "[entrypoint] error: Claude in Chrome bridge mount missing: $host_bridge_dir" >&2
+        exit 1
+    fi
+
+    local container_tmpdir
+    container_tmpdir="$(get_node_tmpdir)"
+    mkdir -p "$container_tmpdir"
+
+    local container_socket_path="$container_tmpdir/claude-mcp-browser-bridge-$DEVA_USER"
+    rm -f "$container_socket_path" 2>/dev/null || true
+    ln -snf "$host_bridge_dir" "$container_socket_path"
+    chown -h "$DEVA_UID:$DEVA_GID" "$container_socket_path" 2>/dev/null || true
+
+    if [ "$VERBOSE" = "true" ]; then
+        echo "[entrypoint] Claude in Chrome bridge: $container_socket_path -> $host_bridge_dir"
+    fi
+}
+
 build_gosu_env_cmd() {
     local user="$1"
     shift
@@ -298,6 +335,7 @@ main() {
     fi
 
     setup_nonroot_user
+    setup_claude_chrome_bridge
     fix_rust_permissions
     fix_docker_socket_permissions
     ensure_agent_binaries

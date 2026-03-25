@@ -2,10 +2,12 @@
 IMAGE_NAME := ghcr.io/thevibeworks/deva
 TAG := latest
 RUST_TAG := rust
+CORE_TAG := core
 DOCKERFILE := Dockerfile
 RUST_DOCKERFILE := Dockerfile.rust
 MAIN_IMAGE := $(IMAGE_NAME):$(TAG)
 RUST_IMAGE := $(IMAGE_NAME):$(RUST_TAG)
+CORE_IMAGE := $(IMAGE_NAME):$(CORE_TAG)
 CONTAINER_NAME := deva-$(shell basename $(PWD))-$(shell date +%s)
 
 # Smart image detection: auto-detect available image for version checking
@@ -18,11 +20,11 @@ DETECTED_IMAGE := $(shell \
 	else \
 		echo "$(IMAGE_NAME):$(TAG)"; \
 	fi)
-CLAUDE_CODE_VERSION := $(shell npm view @anthropic-ai/claude-code version 2>/dev/null || echo "2.0.1")
-CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.42.0")
-GEMINI_CLI_VERSION := $(shell npm view @google/gemini-cli version 2>/dev/null || echo "latest")
-ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.1")
-COPILOT_API_VERSION := $(shell gh api repos/ericc-ch/copilot-api/branches/master --jq '.commit.sha' 2>/dev/null || echo "83cdfde17d7d3be36bd2493cc7592ff13be4928d")
+CLAUDE_CODE_VERSION := $(shell npm view @anthropic-ai/claude-code version 2>/dev/null || echo "2.1.81")
+CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.116.0")
+GEMINI_CLI_VERSION := $(shell npm view @google/gemini-cli version 2>/dev/null || echo "0.35.0")
+ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.4")
+COPILOT_API_VERSION := $(shell gh api repos/ericc-ch/copilot-api/branches/master --jq '.commit.sha' 2>/dev/null || echo "0ea08febdd7e3e055b03dd298bf57e669500b5c1")
 
 export DOCKER_BUILDKIT := 1
 
@@ -79,17 +81,33 @@ rebuild:
 	@echo "✅ Rebuild completed: $(MAIN_IMAGE)"
 
 
-.PHONY: build-rust
-build-rust:
+.PHONY: build-core
+build-core:
+	@echo "🔨 Building stable core image..."
+	docker build -f $(DOCKERFILE) --target agent-base --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(CORE_IMAGE) .
+	@echo "✅ Core build completed: $(CORE_IMAGE)"
+
+.PHONY: build-rust-image
+build-rust-image:
 	@echo "🔨 Building Rust Docker image..."
-	docker build -f $(RUST_DOCKERFILE) --build-arg BASE_IMAGE=$(MAIN_IMAGE) -t $(RUST_IMAGE) .
+	docker build -f $(RUST_DOCKERFILE) \
+		--build-arg BASE_IMAGE=$(CORE_IMAGE) \
+		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
+		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+		-t $(RUST_IMAGE) .
 	@echo "✅ Rust build completed: $(RUST_IMAGE)"
+
+.PHONY: build-rust
+build-rust: build-core build-rust-image
 
 .PHONY: build-all
 build-all:
 	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION), Gemini $(GEMINI_CLI_VERSION), Atlas $(ATLAS_CLI_VERSION), Copilot-API $(COPILOT_API_VERSION)..."
+	@$(MAKE) build-core COPILOT_API_VERSION=$(COPILOT_API_VERSION)
 	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
-	@$(MAKE) build-rust BASE_IMAGE=$(MAIN_IMAGE)
+	@$(MAKE) build-rust-image CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
 	@echo "✅ All images built successfully"
 
 .PHONY: buildx
@@ -160,6 +178,7 @@ clean:
 	@echo "Removing project images..."
 	-docker rmi $(MAIN_IMAGE) 2>/dev/null || true
 	-docker rmi $(RUST_IMAGE) 2>/dev/null || true
+	-docker rmi $(CORE_IMAGE) 2>/dev/null || true
 	@echo "Pruning stopped containers..."
 	-docker container prune -f
 	@echo "Pruning unused images..."
@@ -179,6 +198,7 @@ clean-all:
 	@echo "Removing project images..."
 	-docker rmi $(MAIN_IMAGE) 2>/dev/null || true
 	-docker rmi $(RUST_IMAGE) 2>/dev/null || true
+	-docker rmi $(CORE_IMAGE) 2>/dev/null || true
 	@echo "Removing ALL stopped containers..."
 	-docker container prune -af
 	@echo "Removing ALL dangling and unused images..."
@@ -297,6 +317,7 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  build                Build all images (auto-detects latest npm versions)"
+	@echo "  build-core           Build stable core image only"
 	@echo "  build-main           Build main Docker image only"
 	@echo "  build-rust           Build Rust Docker image"
 	@echo "  build-all            Build all images (main + rust)"
@@ -320,6 +341,7 @@ help:
 	@echo "  IMAGE_NAME           Main image name (default: $(IMAGE_NAME))"
 	@echo "  TAG                  Docker image tag (default: $(TAG))"
 	@echo "  RUST_TAG             Rust image tag (default: $(RUST_TAG))"
+	@echo "  CORE_TAG             Stable core image tag (default: $(CORE_TAG))"
 	@echo "  DOCKERFILE           Dockerfile to use (default: $(DOCKERFILE))"
 	@echo "  RUST_DOCKERFILE      Rust Dockerfile path (default: $(RUST_DOCKERFILE))"
 	@echo "  CLAUDE_CODE_VERSION  Claude CLI version (default: $(CLAUDE_CODE_VERSION))"
@@ -329,6 +351,7 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build                                    # Build all images with latest versions"
+	@echo "  make build-core                               # Build stable core image only"
 	@echo "  make build-main                               # Build main image only"
 	@echo "  make build-rust                               # Build Rust image only"
 	@echo "  make TAG=dev build                            # Build all with custom tag"
