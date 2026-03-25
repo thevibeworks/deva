@@ -5,6 +5,26 @@ All notable changes to deva.sh will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-03-24
+
+### Added
+- Claude `--chrome` integration: auto-mount host Chrome profile Extensions and bridge socket into container
+- `DEVA_CHROME_PROFILE_PATH`, `DEVA_CHROME_USER_DATA_DIR`, `DEVA_HOST_CHROME_BRIDGE_DIR` config knobs
+- `build-core` and `build-rust-image` Makefile targets for faster incremental builds
+- `scripts/install-agent-tooling.sh` shared agent install script for base and rust images
+- Custom images guide (`docs/custom-images.md`)
+- CI smoke tests for Chrome mount assembly and entrypoint bridge symlink
+
+### Fixed
+- Bridge dir resolution now matches Node.js `os.tmpdir()` order (macOS `/var/folders/` before `/tmp`)
+- `image_ref()` in installer and deva.sh now handles full image refs with embedded tags and digests
+- Removed dead entrypoint fallback env vars (`DEVA_CHROME_HOST_SOCKET_PATH`, `DEVA_CHROME_HOST_TMPDIR`)
+
+### Changed
+- Dockerfile split into `agent-base` (stable) + `final` (volatile) stages for better layer caching
+- `Dockerfile.rust` now inherits `agent-base` and runs its own agent install, making it self-contained
+- Default tool versions pinned in Dockerfiles and Makefile
+
 ## [0.9.2] - 2026-03-11
 
 ### Added
