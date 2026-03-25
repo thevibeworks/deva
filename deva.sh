@@ -39,6 +39,37 @@ LOADED_CONFIGS=()
 AGENT_ARGS=()
 AGENT_EXPLICIT=false
 
+normalize_docker_image_parts() {
+    local tail="${DEVA_DOCKER_IMAGE##*/}"
+
+    if [[ "$DEVA_DOCKER_IMAGE" == *@* ]]; then
+        DEVA_DOCKER_TAG=""
+        DEVA_DOCKER_TAG_ENV_SET=true
+        return
+    fi
+
+    if [[ "$tail" == *:* ]]; then
+        local embedded_tag="${tail##*:}"
+        DEVA_DOCKER_IMAGE="${DEVA_DOCKER_IMAGE%:*}"
+        if [ "$DEVA_DOCKER_TAG_ENV_SET" = false ]; then
+            DEVA_DOCKER_TAG="$embedded_tag"
+            DEVA_DOCKER_TAG_ENV_SET=true
+        fi
+    fi
+}
+
+docker_image_ref() {
+    if [[ "$DEVA_DOCKER_IMAGE" == *@* ]]; then
+        printf '%s' "$DEVA_DOCKER_IMAGE"
+    elif [ -n "${DEVA_DOCKER_TAG:-}" ]; then
+        printf '%s:%s' "$DEVA_DOCKER_IMAGE" "$DEVA_DOCKER_TAG"
+    else
+        printf '%s' "$DEVA_DOCKER_IMAGE"
+    fi
+}
+
+normalize_docker_image_parts
+
 EPHEMERAL_MODE=false
 QUICK_MODE=false
 GLOBAL_MODE=false
@@ -88,9 +119,20 @@ Deva flags:
   --verbose, --debug      Print full docker command before execution
   --                      Everything after this sentinel is passed to the agent unchanged
 
+Chrome integration for `claude -- --chrome`:
+  Set one of these in `.deva.local` or pass with `-e`:
+  DEVA_CHROME_PROFILE_PATH=/path/to/Profile 6
+                          Mount that profile's `Extensions/` tree for detection
+  DEVA_CHROME_PROFILE_NAME=Profile 6
+                          Override target profile name when source basename differs
+  DEVA_CHROME_USER_DATA_DIR=/path/to/Chrome user data
+                          Scan `Default`/`Profile *` and mount only `Extensions/`
+  DEVA_HOST_CHROME_BRIDGE_DIR=/path/to/claude-mcp-browser-bridge-$USER
+                          Override the exact host bridge directory if needed
+
 Container Behavior (NEW in v0.8.0):
   Default (persistent):   Shared per project by default, but split when container shape changes
-                          (extra volumes, explicit config-home, auth mode).
+                          (image/profile, extra volumes, explicit config-home, auth mode).
                           Preserves state (npm packages, builds, etc).
                           Faster startup, and default-auth runs can share one warm container.
 
@@ -98,7 +140,7 @@ Container Behavior (NEW in v0.8.0):
                           Agent-specific naming for parallel runs.
 
 Container Naming (NEW):
-  Persistent:  deva-<parent>-<project>[..shape]     # shape may encode volumes/config/auth
+  Persistent:  deva-<parent>-<project>[..shape]     # shape may encode image/volumes/config/auth
   Ephemeral:   deva-<parent>-<project>-<agent>-<pid>  # Agent-specific
 
   Example:
@@ -148,6 +190,13 @@ print(os.path.abspath(sys.argv[1]))
 PY
 }
 
+canonical_path() {
+    python3 - "$1" <<'PY'
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+}
+
 default_config_home_for_agent() {
     local agent="$1"
     local xdg_home
@@ -185,33 +234,37 @@ check_agent() {
 }
 
 check_image() {
-    if docker image inspect "${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >/dev/null 2>&1; then
+    local image_ref
+    image_ref="$(docker_image_ref)"
+
+    if docker image inspect "$image_ref" >/dev/null 2>&1; then
         return
     fi
 
     # Try pulling first
-    if docker pull "${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >/dev/null 2>&1; then
+    if docker pull "$image_ref" >/dev/null 2>&1; then
         return
     fi
 
-    # Smart fallback: check for available profile images locally
+    # Smart fallback: check for available profile images locally.
+    # Digest-pinned refs are exact; tag fallback does not make sense there.
     local available_tags=""
-    local original_tag="$DEVA_DOCKER_TAG"
-
-    # Check common profile tags (prefer rust as it's a superset of base)
-    for tag in rust latest; do
-        if [ "$tag" = "$DEVA_DOCKER_TAG" ]; then
-            continue  # Skip the one we already tried
-        fi
-        if docker image inspect "${DEVA_DOCKER_IMAGE}:${tag}" >/dev/null 2>&1; then
-            available_tags="${available_tags}${tag} "
-        fi
-    done
+    if [[ "$DEVA_DOCKER_IMAGE" != *@* ]]; then
+        # Check common profile tags (prefer rust as it's a superset of base)
+        for tag in rust latest; do
+            if [ "$tag" = "$DEVA_DOCKER_TAG" ]; then
+                continue  # Skip the one we already tried
+            fi
+            if docker image inspect "${DEVA_DOCKER_IMAGE}:${tag}" >/dev/null 2>&1; then
+                available_tags="${available_tags}${tag} "
+            fi
+        done
+    fi
 
     if [ -n "$available_tags" ]; then
         # Found alternative images - use the first one
         local fallback_tag="${available_tags%% *}"  # Get first tag
-        echo "Image ${DEVA_DOCKER_IMAGE}:${original_tag} not found" >&2
+        echo "Image $image_ref not found" >&2
         echo "Using available image: ${DEVA_DOCKER_IMAGE}:${fallback_tag}" >&2
         DEVA_DOCKER_TAG="$fallback_tag"
         return
@@ -225,24 +278,24 @@ check_image() {
         ;;
     esac
 
-    echo "Docker image ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG} not found locally" >&2
+    echo "Docker image $image_ref not found locally" >&2
     if [ -n "$df" ]; then
         echo "A matching Dockerfile exists at: $df" >&2
         case "${PROFILE:-}" in
         rust)
             echo "Build with: make build-rust" >&2
-            echo "or: docker build -f $df -t ghcr.io/thevibeworks/deva:rust \"$SCRIPT_DIR\"" >&2
+            echo "Manual docker builds need explicit build args and BASE_IMAGE; see docs/custom-images.md" >&2
             ;;
         "" | base)
             echo "Build with: make build" >&2
-            echo "or: docker build -f Dockerfile -t ghcr.io/thevibeworks/deva:latest \"$SCRIPT_DIR\"" >&2
+            echo "Manual docker builds need explicit build args; see docs/custom-images.md" >&2
             ;;
         *)
             echo "Build with your Dockerfile and tag appropriately (e.g., :${PROFILE})" >&2
             ;;
         esac
     else
-        echo "Pull with: docker pull ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}" >&2
+        echo "Pull with: docker pull $image_ref" >&2
     fi
     exit 1
 }
@@ -281,6 +334,237 @@ EOF
 
 translate_localhost() {
     echo "$1" | sed 's/127\.0\.0\.1/host.docker.internal/g' | sed 's/localhost/host.docker.internal/g'
+}
+
+claude_args_request_chrome() {
+    local arg
+    local wants_chrome=false
+    local disables_chrome=false
+
+    for arg in "$@"; do
+        case "$arg" in
+        --chrome)
+            wants_chrome=true
+            ;;
+        --no-chrome)
+            disables_chrome=true
+            ;;
+        esac
+    done
+
+    [ "$wants_chrome" = true ] && [ "$disables_chrome" = false ]
+}
+
+get_host_tmpdir() {
+    local tmpdir=""
+
+    if command -v node >/dev/null 2>&1; then
+        tmpdir=$(node -p 'require("os").tmpdir()' 2>/dev/null || true)
+    fi
+
+    if [ -z "$tmpdir" ] && command -v python3 >/dev/null 2>&1; then
+        tmpdir=$(python3 - <<'PY'
+import tempfile
+print(tempfile.gettempdir())
+PY
+        )
+    fi
+
+    if [ -z "$tmpdir" ]; then
+        tmpdir="${TMPDIR:-/tmp}"
+    fi
+
+    printf '%s' "$tmpdir"
+}
+
+normalize_host_bind_path() {
+    local path="$1"
+    path="$(expand_tilde "$path")"
+
+    if [[ "$path" == /* ]]; then
+        printf '%s' "$path"
+        return 0
+    fi
+
+    absolute_path "$path"
+}
+
+configured_env_value() {
+    local name="$1"
+    local spec
+
+    for spec in "${USER_ENVS[@]+"${USER_ENVS[@]}"}"; do
+        if [[ "$spec" == "$name="* ]]; then
+            printf '%s' "${spec#*=}"
+            return 0
+        fi
+        if [ "$spec" = "$name" ] && [ -n "${!name-}" ]; then
+            printf '%s' "${!name}"
+            return 0
+        fi
+    done
+
+    if [ -n "${!name-}" ]; then
+        printf '%s' "${!name}"
+        return 0
+    fi
+
+    return 1
+}
+
+user_volume_mounts_target() {
+    local target="$1"
+    local spec remainder dest
+
+    for spec in "${USER_VOLUMES[@]+"${USER_VOLUMES[@]}"}"; do
+        remainder="${spec#*:}"
+        dest="${remainder%%:*}"
+        if [ "$dest" = "$target" ]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+prepare_claude_chrome_detection_mount() {
+    local profile_path=""
+    local user_data_dir=""
+    local profile_name=""
+    local profile_target=""
+    local extensions_source=""
+    local found_profile=false
+
+    profile_path="$(configured_env_value DEVA_CHROME_PROFILE_PATH || true)"
+    user_data_dir="$(configured_env_value DEVA_CHROME_USER_DATA_DIR || true)"
+
+    if [ -n "$profile_path" ]; then
+        profile_path="$(normalize_host_bind_path "$profile_path")"
+        if [ ! -d "$profile_path" ]; then
+            echo "error: DEVA_CHROME_PROFILE_PATH does not exist: $profile_path" >&2
+            exit 1
+        fi
+
+        profile_name="$(configured_env_value DEVA_CHROME_PROFILE_NAME || true)"
+        if [ -z "$profile_name" ]; then
+            profile_name="$(basename "$profile_path")"
+        fi
+
+        case "$profile_name" in
+        Default | "Profile "*)
+            ;;
+        *)
+            echo "error: Chrome profile name must be 'Default' or 'Profile N'; got: $profile_name" >&2
+            echo "hint: set DEVA_CHROME_PROFILE_NAME='Profile 6' if the source path basename is different" >&2
+            exit 1
+            ;;
+        esac
+
+        extensions_source="$profile_path/Extensions"
+        if [ ! -d "$extensions_source" ]; then
+            echo "error: Chrome profile is missing Extensions directory: $extensions_source" >&2
+            exit 1
+        fi
+
+        profile_target="/home/deva/.config/google-chrome/$profile_name/Extensions"
+        if ! user_volume_mounts_target "$profile_target"; then
+            USER_VOLUMES+=("$extensions_source:$profile_target:ro")
+        fi
+        return 0
+    fi
+
+    if [ -n "$user_data_dir" ]; then
+        user_data_dir="$(normalize_host_bind_path "$user_data_dir")"
+        if [ ! -d "$user_data_dir" ]; then
+            echo "error: DEVA_CHROME_USER_DATA_DIR does not exist: $user_data_dir" >&2
+            exit 1
+        fi
+
+        if [ -d "$user_data_dir/Default" ]; then
+            extensions_source="$user_data_dir/Default/Extensions"
+            if [ -d "$extensions_source" ]; then
+                profile_target="/home/deva/.config/google-chrome/Default/Extensions"
+                if ! user_volume_mounts_target "$profile_target"; then
+                    USER_VOLUMES+=("$extensions_source:$profile_target:ro")
+                fi
+                found_profile=true
+            fi
+        fi
+
+        local candidate
+        for candidate in "$user_data_dir"/Profile\ *; do
+            [ -d "$candidate" ] || continue
+            extensions_source="$candidate/Extensions"
+            [ -d "$extensions_source" ] || continue
+
+            profile_name="$(basename "$candidate")"
+            profile_target="/home/deva/.config/google-chrome/$profile_name/Extensions"
+            if ! user_volume_mounts_target "$profile_target"; then
+                USER_VOLUMES+=("$extensions_source:$profile_target:ro")
+            fi
+            found_profile=true
+        done
+
+        if [ "$found_profile" = false ]; then
+            echo "error: DEVA_CHROME_USER_DATA_DIR has no Default/Profile */Extensions directories: $user_data_dir" >&2
+            exit 1
+        fi
+    fi
+}
+
+resolve_claude_chrome_bridge_dir() {
+    local host_user="$1"
+    local configured_bridge_dir=""
+    local host_tmpdir=""
+    local host_bridge_dir=""
+
+    configured_bridge_dir="$(configured_env_value DEVA_HOST_CHROME_BRIDGE_DIR || true)"
+    if [ -n "$configured_bridge_dir" ]; then
+        host_bridge_dir="$(normalize_host_bind_path "$configured_bridge_dir")"
+    else
+        host_tmpdir="$(get_host_tmpdir)"
+        local tmp_bridge_dir="$host_tmpdir/claude-mcp-browser-bridge-$host_user"
+
+        # Claude's native host currently creates the bridge under /tmp, while the
+        # client also probes os.tmpdir() as an extra lookup path. Keep /tmp as
+        # the default mount target and only prefer os.tmpdir() when it already
+        # exists and /tmp does not.
+        host_bridge_dir="/tmp/claude-mcp-browser-bridge-$host_user"
+
+        if [ ! -d "$host_bridge_dir" ] && [ "$host_tmpdir" != "/tmp" ] && [ -d "$tmp_bridge_dir" ]; then
+            host_bridge_dir="$tmp_bridge_dir"
+        fi
+    fi
+
+    mkdir -p "$host_bridge_dir"
+    chmod 700 "$host_bridge_dir" 2>/dev/null || true
+    canonical_path "$host_bridge_dir"
+}
+
+prepare_claude_chrome_bridge() {
+    [ "$ACTIVE_AGENT" = "claude" ] || return 0
+
+    if ! claude_args_request_chrome "${AGENT_ARGV[@]+"${AGENT_ARGV[@]}"}"; then
+        return 0
+    fi
+
+    local host_user
+    host_user="$(configured_env_value DEVA_CHROME_HOST_USER || true)"
+    if [ -z "$host_user" ]; then
+        host_user="$(id -un)"
+    fi
+    local host_bridge_dir
+    host_bridge_dir="$(resolve_claude_chrome_bridge_dir "$host_user")"
+
+    prepare_claude_chrome_detection_mount
+
+    local bridge_mount="/deva-host-chrome-bridge"
+    if ! user_volume_mounts_target "$bridge_mount"; then
+        USER_VOLUMES+=("$host_bridge_dir:$bridge_mount")
+    fi
+    USER_ENVS+=("DEVA_CHROME_HOST_BRIDGE=1")
+    USER_ENVS+=("DEVA_CHROME_HOST_USER=$host_user")
+    USER_ENVS+=("DEVA_CHROME_HOST_BRIDGE_DIR=$bridge_mount")
 }
 
 append_unique_line() {
@@ -609,7 +893,7 @@ show_config() {
     fi
     echo ""
 
-    echo "Docker image: ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+    echo "Docker image: $(docker_image_ref)"
     echo "Container prefix: $DEVA_CONTAINER_PREFIX"
 }
 
@@ -634,18 +918,14 @@ prepare_base_docker_args() {
             config_hash_source="$CONFIG_ROOT"
         fi
     fi
-    if [ -n "$config_hash_source" ]; then
-        if command -v md5sum >/dev/null 2>&1; then
-            config_hash=$(printf '%s' "$config_hash_source" | md5sum | cut -c1-6)
-        elif command -v shasum >/dev/null 2>&1; then
-            config_hash=$(printf '%s' "$config_hash_source" | shasum | cut -c1-6)
-        else
-            config_hash=$(printf '%s' "$config_hash_source" | cksum | cut -d' ' -f1 | cut -c1-6)
-        fi
-    fi
+    [ -n "$config_hash_source" ] && config_hash=$(short_hash "$config_hash_source" 6)
+
+    local image_hash=""
+    image_hash=$(short_hash "$(docker_image_ref)" 6)
 
     local suffix=""
-    [ -n "$volume_hash" ] && suffix="..v${volume_hash}"
+    [ -n "$image_hash" ] && suffix="..i${image_hash}"
+    [ -n "$volume_hash" ] && suffix="${suffix}..v${volume_hash}"
     [ -n "$config_hash" ] && suffix="${suffix}..c${config_hash}"
 
     if [ "$EPHEMERAL_MODE" = true ]; then
@@ -677,9 +957,13 @@ prepare_base_docker_args() {
         --label "deva.workspace_hash=${ws_hash}"
         --label "deva.agent=${ACTIVE_AGENT}"
         --label "deva.ephemeral=${EPHEMERAL_MODE}"
+        --label "deva.image=$(docker_image_ref)"
     )
     if [ -n "$volume_hash" ]; then
         DOCKER_ARGS+=(--label "deva.volhash=${volume_hash}")
+    fi
+    if [ -n "$image_hash" ]; then
+        DOCKER_ARGS+=(--label "deva.image_hash=${image_hash}")
     fi
 
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
@@ -1139,6 +1423,19 @@ normalize_volume_spec() {
     echo "$src:$remainder"
 }
 
+short_hash() {
+    local input="$1"
+    local length="${2:-8}"
+
+    if command -v md5sum >/dev/null 2>&1; then
+        printf '%s' "$input" | md5sum | cut -c1-"$length"
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$input" | shasum | cut -c1-"$length"
+    else
+        printf '%s' "$input" | cksum | cut -d' ' -f1 | cut -c1-"$length"
+    fi
+}
+
 compute_volume_hash() {
     if [ ${#USER_VOLUMES[@]} -eq 0 ]; then
         return
@@ -1161,15 +1458,7 @@ compute_volume_hash() {
         hash_input="${hash_input}${src}:${vol#*:}|"
     done <<<"$sorted_vols"
 
-    if [ -n "$hash_input" ]; then
-        if command -v md5sum >/dev/null 2>&1; then
-            echo "$hash_input" | md5sum | cut -c1-8
-        elif command -v shasum >/dev/null 2>&1; then
-            echo "$hash_input" | shasum | cut -c1-8
-        else
-            echo "$hash_input" | cksum | cut -d' ' -f1 | cut -c1-8
-        fi
-    fi
+    [ -n "$hash_input" ] && short_hash "$hash_input" 8
 }
 
 workspace_hash() {
@@ -1180,13 +1469,7 @@ workspace_hash() {
 
     local p
     p="$(pwd)"
-    if command -v md5sum >/dev/null 2>&1; then
-        _WS_HASH_CACHE=$(printf '%s' "$p" | md5sum | cut -c1-8)
-    elif command -v shasum >/dev/null 2>&1; then
-        _WS_HASH_CACHE=$(printf '%s' "$p" | shasum | cut -c1-8)
-    else
-        _WS_HASH_CACHE=$(printf '%s' "$p" | cksum | cut -d' ' -f1 | cut -c1-8)
-    fi
+    _WS_HASH_CACHE=$(short_hash "$p" 8)
     printf '%s' "$_WS_HASH_CACHE"
 }
 
@@ -1398,6 +1681,20 @@ process_var_config() {
         if [ "$CONFIG_HOME_FROM_CLI" = false ]; then
             set_config_home_value "$value"
         fi
+        ;;
+    DEVA_DOCKER_IMAGE)
+        DEVA_DOCKER_IMAGE="$value"
+        DEVA_DOCKER_IMAGE_ENV_SET=true
+        normalize_docker_image_parts
+        export DEVA_DOCKER_IMAGE
+        USER_ENVS+=("$name=$value")
+        ;;
+    DEVA_DOCKER_TAG)
+        DEVA_DOCKER_TAG="$value"
+        DEVA_DOCKER_TAG_ENV_SET=true
+        normalize_docker_image_parts
+        export DEVA_DOCKER_TAG
+        USER_ENVS+=("$name=$value")
         ;;
     DEFAULT_AGENT)
         DEFAULT_AGENT="$value"
@@ -1716,7 +2013,7 @@ if [ ${#PRE_ARGS[@]} -gt 0 ]; then
             ;;
         --version)
             echo "deva.sh v${VERSION}"
-            echo "Docker Image: ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+            echo "Docker Image: $(docker_image_ref)"
             exit 0
             ;;
         --show-config)
@@ -1766,6 +2063,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
         if [ -z "$ACTIVE_AGENT" ]; then
             ACTIVE_AGENT="$DEFAULT_AGENT"
         fi
+        resolve_profile
         show_config
         exit 0
     fi
@@ -2126,6 +2424,7 @@ autolink_legacy_into_deva_root() {
 }
 
 check_agent "$ACTIVE_AGENT"
+prepare_claude_chrome_bridge
 
 if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
     if [ ! -d "$CONFIG_HOME" ]; then
@@ -2232,26 +2531,14 @@ if [ -n "${AUTH_METHOD:-}" ]; then
                 auth_config_src="$CONFIG_ROOT"
             fi
         fi
-        if [ -n "$auth_config_src" ]; then
-            if command -v md5sum >/dev/null 2>&1; then
-                auth_config_hash=$(printf '%s' "$auth_config_src" | md5sum | cut -c1-6)
-            elif command -v shasum >/dev/null 2>&1; then
-                auth_config_hash=$(printf '%s' "$auth_config_src" | shasum | cut -c1-6)
-            else
-                auth_config_hash=$(printf '%s' "$auth_config_src" | cksum | cut -d' ' -f1 | cut -c1-6)
-            fi
-        fi
+        [ -n "$auth_config_src" ] && auth_config_hash=$(short_hash "$auth_config_src" 6)
+
+        image_hash=$(short_hash "$(docker_image_ref)" 6)
 
         # Hash credential file path for credentials-file auth
         creds_hash=""
         if [ "$AUTH_METHOD" = "credentials-file" ] && [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
-            if command -v md5sum >/dev/null 2>&1; then
-                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | md5sum | cut -c1-8)
-            elif command -v shasum >/dev/null 2>&1; then
-                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | shasum | cut -c1-8)
-            else
-                creds_hash=$(printf '%s' "$CUSTOM_CREDENTIALS_FILE" | cksum | cut -d' ' -f1 | cut -c1-8)
-            fi
+            creds_hash=$(short_hash "$CUSTOM_CREDENTIALS_FILE" 8)
         fi
 
         new_container_name=""
@@ -2265,7 +2552,8 @@ if [ -n "${AUTH_METHOD:-}" ]; then
 
         # Build suffix chain: volume + config + auth
         name_suffix=""
-        [ -n "$volume_hash" ] && name_suffix="..v${volume_hash}"
+        [ -n "$image_hash" ] && name_suffix="..i${image_hash}"
+        [ -n "$volume_hash" ] && name_suffix="${name_suffix}..v${volume_hash}"
         [ -n "$auth_config_hash" ] && name_suffix="${name_suffix}..c${auth_config_hash}"
         name_suffix="${name_suffix}..${auth_suffix}"
 
@@ -2360,7 +2648,7 @@ if [ "$QUICK_MODE" = false ] && [ -d "$(pwd)/.claude" ]; then
     DOCKER_ARGS+=("-v" "$(pwd)/.claude:$(pwd)/.claude")
 fi
 
-DOCKER_ARGS+=("${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}")
+DOCKER_ARGS+=("$(docker_image_ref)")
 
 if [ "$ACTION" = "shell" ]; then
     AGENT_COMMAND=("/bin/zsh")
@@ -2479,7 +2767,7 @@ if [ "$EPHEMERAL_MODE" = false ]; then
 
     exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
 else
-    echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via ${DEVA_DOCKER_IMAGE}:${DEVA_DOCKER_TAG}"
+    echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
     write_session_file
     if ! docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"; then
         echo "error: failed to launch ephemeral container" >&2

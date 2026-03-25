@@ -165,8 +165,10 @@ ENV NPM_CONFIG_FETCH_RETRIES=5 \
     NPM_CONFIG_FETCH_RETRY_FACTOR=2 \
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=10000
 
-# Final stage with shell setup
-FROM tools AS final
+# Stable agent base: user, shell, and shared runtimes.
+# Keep volatile agent package installs out of this stage so downstream
+# images can inherit it without rebuilding on every late-stage change.
+FROM tools AS agent-base
 
 # Create non-root user for agent execution
 # Using 1001 as default to avoid conflicts with ubuntu user (usually 1000)
@@ -208,43 +210,28 @@ RUN echo 'export ZSH="$HOME/.oh-my-zsh"' > "$DEVA_HOME/.zshrc" && \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $DEVA_HOME/.local/bin/uv python install 3.14t
 
+# Final image: install volatile agent packages on top of the stable base.
+FROM agent-base AS final
+
 # Declare ARGs immediately before usage to minimize cache invalidation
-ARG CLAUDE_CODE_VERSION
-ARG CODEX_VERSION
-ARG GEMINI_CLI_VERSION=latest
+ARG CLAUDE_CODE_VERSION=2.1.81
+ARG CODEX_VERSION=0.116.0
+ARG GEMINI_CLI_VERSION=0.35.0
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 
-# Install CLI tools via npm
-RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
-    set -eux && \
-    npm config set prefix "$DEVA_HOME/.npm-global" && \
-    npm install -g --no-audit --no-fund \
-        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-        @mariozechner/claude-trace \
-        @openai/codex@${CODEX_VERSION} \
-        @google/gemini-cli@${GEMINI_CLI_VERSION} && \
-    npm cache clean --force && \
-    "$DEVA_HOME/.npm-global/bin/claude" --version && \
-    "$DEVA_HOME/.npm-global/bin/codex" --version && \
-    "$DEVA_HOME/.npm-global/bin/gemini" --version && \
-    "$DEVA_HOME/.npm-global/bin/claude-trace" --help >/dev/null && \
-    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true)
-
-# Volatile packages: Install at the end to avoid cascading rebuilds
-ARG ATLAS_CLI_VERSION=main
+ARG ATLAS_CLI_VERSION=v0.1.4
 
 LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
 
-# Install atlas-cli binary + skill via upstream install.sh
-# - Uses prebuilt release tarball (faster than go install)
-# - Falls back to go install if no prebuilt for platform
-# - Installs skill with proper structure (SKILL.md + references/)
-RUN curl -fsSL "https://raw.githubusercontent.com/lroolle/atlas-cli/${ATLAS_CLI_VERSION}/install.sh" \
-    | bash -s -- --skill-dir $DEVA_HOME/.skills
+COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
+
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    bash /tmp/install-agent-tooling.sh && \
+    rm -f /tmp/install-agent-tooling.sh
 
 USER root
 
