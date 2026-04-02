@@ -44,6 +44,10 @@ jobs:
           chmod +x scripts/version-check.sh
           ./scripts/version-check.sh
 
+      - name: Test versions-up build args
+        shell: bash
+        run: bash ./tests/version-upgrade.sh
+
   smoke:
     name: Installer Smoke Test
     runs-on: ubuntu-latest

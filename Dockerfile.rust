@@ -80,6 +80,7 @@ RUN echo 'export PATH="/opt/cargo/bin:$PATH"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cl="cargo clippy"' >> "$DEVA_HOME/.zshrc"
 
 USER $DEVA_USER
+WORKDIR $DEVA_HOME
 
 COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
 

@@ -22,5 +22,6 @@ npm cache clean --force
 "$DEVA_HOME/.npm-global/bin/claude-trace" --help >/dev/null
 (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true)
 
+cd "$DEVA_HOME"
 curl -fsSL "https://raw.githubusercontent.com/lroolle/atlas-cli/${ATLAS_CLI_VERSION}/install.sh" \
     | bash -s -- --skill-dir "$DEVA_HOME/.skills"

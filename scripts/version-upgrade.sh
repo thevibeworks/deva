@@ -107,6 +107,10 @@ main() {
     section "Building Rust Image"
     docker build -f "$RUST_DOCKERFILE" \
         --build-arg BASE_IMAGE="$BUILD_IMAGE" \
+        --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
+        --build-arg CODEX_VERSION="$codex_ver" \
+        --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
+        --build-arg ATLAS_CLI_VERSION="$atlas_ver" \
         -t "$RUST_IMAGE" .
 
     echo ""

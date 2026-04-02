@@ -416,15 +416,39 @@ user_volume_mounts_target() {
     local target="$1"
     local spec remainder dest
 
+    target="$(normalize_container_bind_target "$target")"
+
     for spec in "${USER_VOLUMES[@]+"${USER_VOLUMES[@]}"}"; do
         remainder="${spec#*:}"
         dest="${remainder%%:*}"
+        dest="$(normalize_container_bind_target "$dest")"
         if [ "$dest" = "$target" ]; then
             return 0
         fi
     done
 
     return 1
+}
+
+normalize_container_bind_target() {
+    local path="$1"
+
+    while [ "$path" != "/" ] && [[ "$path" == */ ]]; do
+        path="${path%/}"
+    done
+
+    printf '%s' "$path"
+}
+
+append_shared_agents_mount() {
+    local target="/home/deva/.agents"
+
+    [ "$QUICK_MODE" = false ] || return 0
+    [ -d "$HOME/.agents" ] || return 0
+
+    if ! user_volume_mounts_target "$target"; then
+        USER_VOLUMES+=("$HOME/.agents:$target")
+    fi
 }
 
 prepare_claude_chrome_detection_mount() {
@@ -2425,6 +2449,7 @@ autolink_legacy_into_deva_root() {
 
 check_agent "$ACTIVE_AGENT"
 prepare_claude_chrome_bridge
+append_shared_agents_mount
 
 if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
     if [ ! -d "$CONFIG_HOME" ]; then
