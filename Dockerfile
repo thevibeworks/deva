@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         openssh-client rsync \
         shellcheck bat fd-find silversearcher-ag \
         vim \
-        procps psmisc zsh socat \
+        procps psmisc zsh socat bubblewrap \
         libevent-dev libncurses-dev bison
 
 # Prevent noisy setlocale warnings at shell startup
@@ -43,7 +43,7 @@ RUN git lfs install --system
 # Install language runtimes in parallel-friendly layers
 FROM base AS runtimes
 
-ARG NODE_MAJOR=22
+ARG NODE_MAJOR=24
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - && \
@@ -60,12 +60,13 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 # Pre-install Python 3.14t (free-threaded) for uv
 RUN /root/.local/bin/uv python install 3.14t
 
+ARG GO_VERSION=1.26.2
 RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     GO_ARCH=$([ "$ARCH" = "amd64" ] && echo "amd64" || echo "arm64") && \
     cd /tmp/go-cache && \
-    wget -q https://go.dev/dl/go1.22.0.linux-${GO_ARCH}.tar.gz && \
-    tar -C /usr/local -xzf go1.22.0.linux-${GO_ARCH}.tar.gz
+    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" && \
+    tar -C /usr/local -xzf "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
 
 # Install Copilot API (ericc-ch fork with latest features)
 # Placed at end of runtimes stage to avoid invalidating cache for stable runtimes

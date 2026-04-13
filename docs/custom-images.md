@@ -67,6 +67,7 @@ docker build -t deva-local:latest \
   --build-arg GEMINI_CLI_VERSION=<gemini_cli_version> \
   --build-arg ATLAS_CLI_VERSION=<atlas_cli_version> \
   --build-arg COPILOT_API_VERSION=<copilot_api_version> \
+  --build-arg GO_VERSION=1.26.2 \
   .
 
 docker build -f Dockerfile --target agent-base -t deva-local:core .
@@ -77,6 +78,8 @@ docker build -f Dockerfile.rust -t deva-local:rust \
   --build-arg CODEX_VERSION=<codex_version> \
   --build-arg GEMINI_CLI_VERSION=<gemini_cli_version> \
   --build-arg ATLAS_CLI_VERSION=<atlas_cli_version> \
+  --build-arg PLAYWRIGHT_VERSION=<playwright_version> \
+  --build-arg PLAYWRIGHT_MCP_VERSION=<playwright_mcp_version> \
   .
 ```
 
@@ -118,6 +121,10 @@ deva.sh codex
 
 That is the whole trick. This is not Kubernetes. It is just an image
 name plus a tag.
+
+If you want the same fast layering in your own registry for downstream
+profile builds, publish a `core` tag too and make the Rust image inherit
+from that instead of from the full `latest` image.
 
 ## Keep It Personal
 
@@ -165,6 +172,23 @@ DEVA_DOCKER_IMAGE=deva-local DEVA_DOCKER_TAG=extras deva.sh gemini
 ```
 
 That is usually the sane move.
+
+## Rust Image Includes Browser Tooling
+
+The rebuilt `rust` profile now bakes in:
+
+- `bubblewrap` for Claude Code subprocess isolation on Linux
+- Go `1.26.2`
+- Playwright CLI and Playwright MCP
+- Playwright browsers installed in-image
+- Google Chrome stable on `linux/amd64`
+
+Important detail:
+
+- Google Chrome's official Linux `.deb` is available for `amd64`
+- on `arm64`, the image still has Playwright Chromium/Firefox/WebKit, but not `google-chrome-stable`
+
+If you only bump `claude-code`, `codex`, or `gemini`, the Rust build should mostly reuse cached lower layers. The browser/toolchain layers sit below the volatile agent install layer on purpose.
 
 ## What Still Comes From The Wrapper
 
