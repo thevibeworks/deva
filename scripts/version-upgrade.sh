@@ -10,9 +10,13 @@ source "$SCRIPT_DIR/release-utils.sh"
 # Defaults
 CHECK_IMAGE=${MAIN_IMAGE:-ghcr.io/thevibeworks/deva:latest}
 BUILD_IMAGE=${BUILD_IMAGE:-ghcr.io/thevibeworks/deva:latest}
+CORE_IMAGE=${CORE_IMAGE:-ghcr.io/thevibeworks/deva:core}
 RUST_IMAGE=${RUST_IMAGE:-ghcr.io/thevibeworks/deva:rust}
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
 RUST_DOCKERFILE=${RUST_DOCKERFILE:-Dockerfile.rust}
+GO_VERSION=${GO_VERSION:-1.26.2}
+PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION:-1.59.1}
+PLAYWRIGHT_MCP_VERSION=${PLAYWRIGHT_MCP_VERSION:-0.0.70}
 COUNTDOWN=${COUNTDOWN:-5}
 AUTO_YES=${AUTO_YES:-}
 
@@ -26,12 +30,16 @@ Options:
 
 Environment:
   MAIN_IMAGE            Main image name (default: ghcr.io/thevibeworks/deva:latest)
+  CORE_IMAGE            Core image name (default: ghcr.io/thevibeworks/deva:core)
   RUST_IMAGE            Rust image name (default: ghcr.io/thevibeworks/deva:rust)
   CLAUDE_CODE_VERSION   Override claude-code version
   CODEX_VERSION         Override codex version
   GEMINI_CLI_VERSION    Override gemini-cli version
   ATLAS_CLI_VERSION     Override atlas-cli version
   COPILOT_API_VERSION   Override copilot-api version
+  GO_VERSION            Override Go version for base/core builds
+  PLAYWRIGHT_VERSION    Override Playwright version for rust builds
+  PLAYWRIGHT_MCP_VERSION Override Playwright MCP version for rust builds
 EOF
 }
 
@@ -48,7 +56,7 @@ main() {
     echo -e "${CYAN}${BOLD}║  Upgrading to Latest Versions                      ║${RESET}"
     echo -e "${CYAN}${BOLD}╚════════════════════════════════════════════════════╝${RESET}"
     echo -e "${DIM}Time: $(date '+%Y-%m-%d %H:%M:%S')${RESET}"
-    echo -e "${DIM}Check: ${CHECK_IMAGE}  Build: ${BUILD_IMAGE}${RESET}"
+    echo -e "${DIM}Check: ${CHECK_IMAGE}  Build: ${BUILD_IMAGE}  Core: ${CORE_IMAGE}${RESET}"
     echo ""
 
     load_versions "$CHECK_IMAGE"
@@ -94,6 +102,14 @@ main() {
         echo ""
     fi
 
+    section "Building Core Image"
+    docker build -f "$DOCKERFILE" \
+        --target agent-base \
+        --build-arg COPILOT_API_VERSION="$copilot_ver" \
+        --build-arg GO_VERSION="$GO_VERSION" \
+        -t "$CORE_IMAGE" .
+
+    echo ""
     section "Building Main Image"
     docker build -f "$DOCKERFILE" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
@@ -101,16 +117,19 @@ main() {
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
         --build-arg ATLAS_CLI_VERSION="$atlas_ver" \
         --build-arg COPILOT_API_VERSION="$copilot_ver" \
+        --build-arg GO_VERSION="$GO_VERSION" \
         -t "$BUILD_IMAGE" .
 
     echo ""
     section "Building Rust Image"
     docker build -f "$RUST_DOCKERFILE" \
-        --build-arg BASE_IMAGE="$BUILD_IMAGE" \
+        --build-arg BASE_IMAGE="$CORE_IMAGE" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
         --build-arg CODEX_VERSION="$codex_ver" \
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
         --build-arg ATLAS_CLI_VERSION="$atlas_ver" \
+        --build-arg PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
+        --build-arg PLAYWRIGHT_MCP_VERSION="$PLAYWRIGHT_MCP_VERSION" \
         -t "$RUST_IMAGE" .
 
     echo ""

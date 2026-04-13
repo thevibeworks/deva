@@ -120,25 +120,56 @@ DOCKER_BUILD_LOG="$DOCKER_BUILD_LOG" \
 AUTO_YES=1 \
 CHECK_IMAGE="ghcr.io/thevibeworks/deva:rust" \
 BUILD_IMAGE="ghcr.io/thevibeworks/deva:latest" \
+CORE_IMAGE="ghcr.io/thevibeworks/deva:core" \
 RUST_IMAGE="ghcr.io/thevibeworks/deva:rust" \
+GO_VERSION="1.26.2" \
+PLAYWRIGHT_VERSION="1.59.1" \
+PLAYWRIGHT_MCP_VERSION="0.0.70" \
 "$REPO_ROOT/scripts/version-upgrade.sh" >/dev/null
 
-main_build="$(sed -n '1p' "$DOCKER_BUILD_LOG")"
-rust_build="$(sed -n '2p' "$DOCKER_BUILD_LOG")"
+core_build="$(sed -n '1p' "$DOCKER_BUILD_LOG")"
+main_build="$(sed -n '2p' "$DOCKER_BUILD_LOG")"
+rust_build="$(sed -n '3p' "$DOCKER_BUILD_LOG")"
 
+[[ -n "$core_build" ]] || { echo "missing core build invocation" >&2; exit 1; }
 [[ -n "$main_build" ]] || { echo "missing main build invocation" >&2; exit 1; }
 [[ -n "$rust_build" ]] || { echo "missing rust build invocation" >&2; exit 1; }
+
+for expected in \
+    "--target agent-base" \
+    "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
+    "--build-arg GO_VERSION=1.26.2" \
+    "-t ghcr.io/thevibeworks/deva:core ."
+do
+    [[ "$core_build" == *"$expected"* ]] || {
+        echo "core build missing expected arg: $expected" >&2
+        exit 1
+    }
+done
 
 for expected in \
     "--build-arg CLAUDE_CODE_VERSION=2.1.87" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
-    "--build-arg ATLAS_CLI_VERSION=v0.1.4"
+    "--build-arg ATLAS_CLI_VERSION=v0.1.4" \
+    "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
+    "--build-arg GO_VERSION=1.26.2"
 do
     [[ "$main_build" == *"$expected"* ]] || {
         echo "main build missing expected arg: $expected" >&2
         exit 1
     }
+done
+
+for expected in \
+    "--build-arg BASE_IMAGE=ghcr.io/thevibeworks/deva:core" \
+    "--build-arg CLAUDE_CODE_VERSION=2.1.87" \
+    "--build-arg CODEX_VERSION=0.117.0" \
+    "--build-arg GEMINI_CLI_VERSION=0.35.3" \
+    "--build-arg ATLAS_CLI_VERSION=v0.1.4" \
+    "--build-arg PLAYWRIGHT_VERSION=1.59.1" \
+    "--build-arg PLAYWRIGHT_MCP_VERSION=0.0.70"
+do
     [[ "$rust_build" == *"$expected"* ]] || {
         echo "rust build missing expected arg: $expected" >&2
         exit 1
