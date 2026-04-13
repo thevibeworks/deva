@@ -203,13 +203,13 @@ for section in sections:
         if cur_v < v <= lat_v:
             lines = section.strip().split("\n")
             output = [lines[0].replace("## ", "")]
-            content_lines = [l for l in lines[1:] if l.strip()][:10]
+            content_lines = [l for l in lines[1:] if l.strip()]
             output.extend(content_lines)
             changes.append("\n".join(output))
     except:
         continue
 
-for change in reversed(changes[-3:]):
+for change in reversed(changes):
     print(change)
     print()
 ' "$current" "$latest" <<< "$data" 2>/dev/null || true
@@ -256,10 +256,10 @@ for rel in releases:
     except:
         continue
 
-for v, ver, body in sorted(changes, key=lambda x: x[0], reverse=True)[:3]:
+for v, ver, body in sorted(changes, key=lambda x: x[0], reverse=True):
     print(f"{ver}")
     if body:
-        for line in [l.rstrip() for l in body.split("\n") if l.strip()][:15]:
+        for line in [l.rstrip() for l in body.split("\n") if l.strip()]:
             print(f"  {line}")
     print()
 ' "$current" "$latest" <<< "$json" 2>/dev/null || true
@@ -467,7 +467,7 @@ for section in sections:
         continue
     lines = section.strip().split("\n")
     print(lines[0].replace("## ", ""))
-    for line in [l for l in lines[1:] if l.strip()][:8]:
+    for line in [l for l in lines[1:] if l.strip()]:
         print(line)
     print()
     printed += 1
@@ -497,7 +497,7 @@ for rel in releases:
     body = (rel.get("body") or "").replace("\r\n", "\n").strip()
     print(ver)
     if body:
-        for line in [l.rstrip() for l in body.split("\n") if l.strip()][:12]:
+        for line in [l.rstrip() for l in body.split("\n") if l.strip()]:
             print(f"  {line}")
     print()
     printed += 1

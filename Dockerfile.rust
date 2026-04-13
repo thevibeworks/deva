@@ -12,6 +12,8 @@ ARG CLAUDE_CODE_VERSION=2.1.81
 ARG CODEX_VERSION=0.116.0
 ARG GEMINI_CLI_VERSION=0.35.0
 ARG ATLAS_CLI_VERSION=v0.1.4
+ARG PLAYWRIGHT_VERSION=1.59.1
+ARG PLAYWRIGHT_MCP_VERSION=0.0.70
 ARG RUST_TOOLCHAINS="stable"
 ARG RUST_TARGETS="wasm32-unknown-unknown"
 
@@ -19,12 +21,15 @@ LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
+LABEL org.opencontainers.image.playwright_version=${PLAYWRIGHT_VERSION}
+LABEL org.opencontainers.image.playwright_mcp_version=${PLAYWRIGHT_MCP_VERSION}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ENV RUSTUP_HOME=/opt/rustup \
     CARGO_HOME=/opt/cargo \
-    PATH=/opt/cargo/bin:$PATH
+    PATH=/opt/cargo/bin:$PATH \
+    PLAYWRIGHT_BROWSERS_PATH=/home/deva/.cache/ms-playwright
 
 USER root
 
@@ -46,6 +51,20 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg arch=${ARCH}] https://packages.clickhouse.com/deb stable main" > /etc/apt/sources.list.d/clickhouse.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends clickhouse-client
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -euxo pipefail && \
+    ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        mkdir -p /etc/apt/keyrings && \
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg && \
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends google-chrome-stable; \
+    else \
+        echo "Skipping google-chrome-stable on unsupported architecture: $ARCH"; \
+    fi
 
 RUN --mount=type=cache,target=/tmp/rust-cache,sharing=locked \
     set -euxo pipefail && \
@@ -80,8 +99,16 @@ RUN echo 'export PATH="/opt/cargo/bin:$PATH"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cl="cargo clippy"' >> "$DEVA_HOME/.zshrc"
 
 USER $DEVA_USER
+WORKDIR $DEVA_HOME
 
+COPY --chown=deva:deva scripts/install-browser-tooling.sh /tmp/install-browser-tooling.sh
 COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
+
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    bash /tmp/install-browser-tooling.sh && \
+    rm -f /tmp/install-browser-tooling.sh
 
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
     bash /tmp/install-agent-tooling.sh && \

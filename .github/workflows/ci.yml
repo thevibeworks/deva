@@ -44,6 +44,10 @@ jobs:
           chmod +x scripts/version-check.sh
           ./scripts/version-check.sh
 
+      - name: Test versions-up build args
+        shell: bash
+        run: bash ./tests/version-upgrade.sh
+
   smoke:
     name: Installer Smoke Test
     runs-on: ubuntu-latest
@@ -54,7 +58,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Resolve tool versions
         id: versions
@@ -84,6 +88,23 @@ jobs:
             GEMINI_CLI_VERSION="${{ steps.versions.outputs.gemini_cli_version }}" \
             ATLAS_CLI_VERSION="${{ steps.versions.outputs.atlas_cli_version }}" \
             COPILOT_API_VERSION="${{ steps.versions.outputs.copilot_api_version }}"
+
+      - name: Smoke rust runtime and browser tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm deva-smoke:ci-rust bash -lc '
+            bwrap --version
+            go version | grep "go1.26.2"
+            playwright --version
+            playwright-mcp --help >/dev/null
+            playwright install --list
+            if command -v google-chrome >/dev/null 2>&1; then
+              google-chrome --version
+            else
+              echo "google-chrome not installed on $(dpkg --print-architecture)"
+            fi
+          '
 
       - name: Install and launch each agent without a TTY
         shell: bash

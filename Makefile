@@ -25,6 +25,9 @@ CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.1
 GEMINI_CLI_VERSION := $(shell npm view @google/gemini-cli version 2>/dev/null || echo "0.35.0")
 ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.4")
 COPILOT_API_VERSION := $(shell gh api repos/ericc-ch/copilot-api/branches/master --jq '.commit.sha' 2>/dev/null || echo "0ea08febdd7e3e055b03dd298bf57e669500b5c1")
+PLAYWRIGHT_VERSION := $(shell npm view playwright version 2>/dev/null || echo "1.59.1")
+PLAYWRIGHT_MCP_VERSION := $(shell npm view @playwright/mcp version 2>/dev/null || echo "0.0.70")
+GO_VERSION := 1.26.2
 
 export DOCKER_BUILDKIT := 1
 
@@ -70,21 +73,21 @@ build-main:
 		     echo "Gemini: $$curG -> $$tgtG"; \
 		   fi; \
 		 fi
-	@echo "Hint: override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... GEMINI_CLI_VERSION=... ATLAS_CLI_VERSION=... COPILOT_API_VERSION=... or run 'make bump-versions' to pin"
-	docker build -f $(DOCKERFILE) --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
+	@echo "Hint: override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... GEMINI_CLI_VERSION=... ATLAS_CLI_VERSION=... COPILOT_API_VERSION=... GO_VERSION=... PLAYWRIGHT_VERSION=... PLAYWRIGHT_MCP_VERSION=..."
+	docker build -f $(DOCKERFILE) --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) --build-arg GO_VERSION=$(GO_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Build completed: $(MAIN_IMAGE)"
 
 .PHONY: rebuild
 rebuild:
 	@echo "🔨 Rebuilding Docker image (no cache) with $(DOCKERFILE)..."
-	docker build -f $(DOCKERFILE) --no-cache --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
+	docker build -f $(DOCKERFILE) --no-cache --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) --build-arg GO_VERSION=$(GO_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Rebuild completed: $(MAIN_IMAGE)"
 
 
 .PHONY: build-core
 build-core:
 	@echo "🔨 Building stable core image..."
-	docker build -f $(DOCKERFILE) --target agent-base --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(CORE_IMAGE) .
+	docker build -f $(DOCKERFILE) --target agent-base --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) --build-arg GO_VERSION=$(GO_VERSION) -t $(CORE_IMAGE) .
 	@echo "✅ Core build completed: $(CORE_IMAGE)"
 
 .PHONY: build-rust-image
@@ -96,6 +99,8 @@ build-rust-image:
 		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
 		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
 		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+		--build-arg PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION) \
+		--build-arg PLAYWRIGHT_MCP_VERSION=$(PLAYWRIGHT_MCP_VERSION) \
 		-t $(RUST_IMAGE) .
 	@echo "✅ Rust build completed: $(RUST_IMAGE)"
 
@@ -104,16 +109,16 @@ build-rust: build-core build-rust-image
 
 .PHONY: build-all
 build-all:
-	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION), Gemini $(GEMINI_CLI_VERSION), Atlas $(ATLAS_CLI_VERSION), Copilot-API $(COPILOT_API_VERSION)..."
-	@$(MAKE) build-core COPILOT_API_VERSION=$(COPILOT_API_VERSION)
-	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
-	@$(MAKE) build-rust-image CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
+	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION), Gemini $(GEMINI_CLI_VERSION), Atlas $(ATLAS_CLI_VERSION), Copilot-API $(COPILOT_API_VERSION), Go $(GO_VERSION), Playwright $(PLAYWRIGHT_VERSION), Playwright MCP $(PLAYWRIGHT_MCP_VERSION)..."
+	@$(MAKE) build-core COPILOT_API_VERSION=$(COPILOT_API_VERSION) GO_VERSION=$(GO_VERSION)
+	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION) GO_VERSION=$(GO_VERSION)
+	@$(MAKE) build-rust-image CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION) PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION) PLAYWRIGHT_MCP_VERSION=$(PLAYWRIGHT_MCP_VERSION)
 	@echo "✅ All images built successfully"
 
 .PHONY: buildx
 buildx:
 	@echo "🔨 Building with docker buildx..."
-	docker buildx build -f $(DOCKERFILE) --load --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
+	docker buildx build -f $(DOCKERFILE) --load --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) --build-arg GO_VERSION=$(GO_VERSION) -t $(MAIN_IMAGE) .
 	@echo "✅ Buildx completed: $(MAIN_IMAGE)"
 
 .PHONY: buildx-multi
@@ -125,14 +130,30 @@ buildx-multi:
 		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
 		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
 		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
 		--push -t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed and pushed: $(MAIN_IMAGE)"
 
+.PHONY: buildx-multi-core
+buildx-multi-core:
+	@echo "🔨 Building multi-arch core image for amd64 and arm64..."
+	docker buildx build -f $(DOCKERFILE) --target agent-base --platform linux/amd64,linux/arm64 \
+		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		--push -t $(CORE_IMAGE) .
+	@echo "✅ Multi-arch core build completed and pushed: $(CORE_IMAGE)"
+
 .PHONY: buildx-multi-rust
-buildx-multi-rust:
+buildx-multi-rust: buildx-multi-core
 	@echo "🔨 Building multi-arch Rust images for amd64 and arm64..."
 	docker buildx build -f $(RUST_DOCKERFILE) --platform linux/amd64,linux/arm64 \
-		--build-arg BASE_IMAGE=$(MAIN_IMAGE) \
+		--build-arg BASE_IMAGE=$(CORE_IMAGE) \
+		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
+		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+		--build-arg PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION) \
+		--build-arg PLAYWRIGHT_MCP_VERSION=$(PLAYWRIGHT_MCP_VERSION) \
 		--push -t $(RUST_IMAGE) .
 	@echo "✅ Multi-arch Rust build completed and pushed: $(RUST_IMAGE)"
 
@@ -145,6 +166,7 @@ buildx-multi-local:
 		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
 		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
 		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
 		-t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed locally: $(MAIN_IMAGE)"
 
@@ -152,6 +174,7 @@ buildx-multi-local:
 versions-up:
 	@MAIN_IMAGE=$(DETECTED_IMAGE) \
 	 BUILD_IMAGE=$(MAIN_IMAGE) \
+	 CORE_IMAGE=$(CORE_IMAGE) \
 	 RUST_IMAGE=$(RUST_IMAGE) \
 	 DOCKERFILE=$(DOCKERFILE) \
 	 RUST_DOCKERFILE=$(RUST_DOCKERFILE) \
@@ -159,6 +182,9 @@ versions-up:
 	 CODEX_VERSION=$(CODEX_VERSION) \
 	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
 	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+	 PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION) \
+	 PLAYWRIGHT_MCP_VERSION=$(PLAYWRIGHT_MCP_VERSION) \
+	 GO_VERSION=$(GO_VERSION) \
 	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
 	 ./scripts/version-upgrade.sh
 
@@ -168,6 +194,9 @@ versions:
 	 CODEX_VERSION=$(CODEX_VERSION) \
 	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
 	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+	 PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION) \
+	 PLAYWRIGHT_MCP_VERSION=$(PLAYWRIGHT_MCP_VERSION) \
+	 GO_VERSION=$(GO_VERSION) \
 	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
 	 MAIN_IMAGE=$(DETECTED_IMAGE) \
 	 ./scripts/version-report.sh
@@ -237,8 +266,8 @@ test-rust:
 	@echo "🧪 Testing $(RUST_IMAGE)..."
 	@echo "Testing Rust toolchain..."
 	docker run --rm $(RUST_IMAGE) bash -c 'rustc --version && cargo --version && rustfmt --version && clippy-driver --version'
-	@echo "Testing Rust tools..."
-	docker run --rm $(RUST_IMAGE) bash -c 'cargo-watch --version && wasm-pack --version'
+	@echo "Testing Rust and browser tools..."
+	docker run --rm $(RUST_IMAGE) bash -c 'cargo-watch --version && wasm-pack --version && bwrap --version && go version && playwright --version && playwright-mcp --help >/dev/null && playwright install --list && if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; else echo "google-chrome not installed on $$(dpkg --print-architecture)"; fi'
 	@echo "✅ Rust tests passed"
 
 .PHONY: test-local
@@ -324,6 +353,7 @@ help:
 	@echo "  rebuild              Rebuild without cache"
 	@echo "  buildx               Build with buildx"
 	@echo "  buildx-multi         Build multi-arch and push"
+	@echo "  buildx-multi-core    Build multi-arch core image and push"
 	@echo "  buildx-multi-rust    Build multi-arch Rust and push"
 	@echo "  versions             Compare built vs latest versions with changelogs"
 	@echo "  versions-up          Upgrade both images to latest npm versions"
