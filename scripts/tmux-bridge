@@ -1,0 +1,403 @@
+#!/usr/bin/env bash
+# tmux-bridge — Agent-agnostic CLI for cross-pane communication in tmux.
+# Any tool that can run bash can use this to talk to other panes.
+set -euo pipefail
+
+VERSION="2.0.0"
+
+# --- Helpers ---
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# --- Read Guard ---
+# Enforces read-before-act: agents must read a pane before typing/keys.
+
+read_guard_path() {
+  local pane_id="$1"
+  # Sanitize: %66 → _66
+  echo "/tmp/tmux-bridge-read-${pane_id//%/_}"
+}
+
+mark_read() {
+  touch "$(read_guard_path "$1")"
+}
+
+require_read() {
+  local guard
+  guard=$(read_guard_path "$1")
+  if [[ ! -f "$guard" ]]; then
+    die "must read the pane before interacting. Run: tmux-bridge read $1"
+  fi
+}
+
+clear_read() {
+  rm -f "$(read_guard_path "$1")"
+}
+
+# Detect the correct tmux server socket.
+# Priority: TMUX_BRIDGE_SOCKET env > $TMUX (if socket alive) > scan for pane owner.
+detect_socket() {
+  # Explicit override
+  if [[ -n "${TMUX_BRIDGE_SOCKET:-}" ]]; then
+    if [[ -S "$TMUX_BRIDGE_SOCKET" ]]; then
+      echo "$TMUX_BRIDGE_SOCKET"
+      return
+    fi
+    die "TMUX_BRIDGE_SOCKET=$TMUX_BRIDGE_SOCKET is not a valid socket"
+  fi
+
+  # Extract from $TMUX (format: "socket_path,pid,session_index")
+  if [[ -n "${TMUX:-}" ]]; then
+    local socket="${TMUX%%,*}"
+    if [[ -S "$socket" ]]; then
+      # Verify the socket is actually reachable
+      if tmux -S "$socket" list-sessions &>/dev/null; then
+        echo "$socket"
+        return
+      fi
+    fi
+  fi
+
+  # Fallback: scan tmux server sockets for one that owns $TMUX_PANE
+  local pane="${TMUX_PANE:-}"
+  if [[ -n "$pane" ]]; then
+    local uid
+    uid=$(id -u)
+    # Check both /tmp and /private/tmp (macOS symlinks /tmp → /private/tmp,
+    # but some sandboxed environments only see one or the other)
+    local sock_dirs=("/tmp/tmux-${uid}" "/private/tmp/tmux-${uid}")
+    for sock_dir in "${sock_dirs[@]}"; do
+      [[ -d "$sock_dir" ]] || continue
+      for sock in "$sock_dir"/*; do
+        [[ -S "$sock" ]] || continue
+        if tmux -S "$sock" display-message -t "$pane" -p '#{pane_id}' &>/dev/null; then
+          echo "$sock"
+          return
+        fi
+      done
+    done
+    # Also try the default socket (no -S flag)
+    if tmux display-message -t "$pane" -p '#{pane_id}' &>/dev/null; then
+      echo "__default__"
+      return
+    fi
+  fi
+
+  # Last resort: try default tmux server
+  if tmux list-sessions &>/dev/null; then
+    echo "__default__"
+    return
+  fi
+
+  die "cannot find a reachable tmux server (TMUX=${TMUX:-<unset>}, TMUX_PANE=${TMUX_PANE:-<unset>})"
+}
+
+# Resolved once at startup, used by tmx() for all tmux calls.
+TMUX_SOCKET=""
+
+init_socket() {
+  TMUX_SOCKET=$(detect_socket)
+}
+
+# Wrapper: run tmux with the detected socket.
+tmx() {
+  if [[ "$TMUX_SOCKET" == "__default__" || -z "$TMUX_SOCKET" ]]; then
+    tmux "$@"
+  else
+    tmux -S "$TMUX_SOCKET" "$@"
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+tmux-bridge — cross-pane communication for AI agents
+
+Usage: tmux-bridge <command> [args...]
+
+Commands:
+  list                      Show all panes (target, pid, command, size, label)
+  type <target> <text>      Type text without pressing Enter
+  message <target> <text>   Type text with auto-prepended sender info and reply target
+  read <target> [lines]     Read last N lines from pane (default: 50)
+  keys <target> <key>...    Send special keys (Enter, Escape, C-c, etc.)
+  name <target> <label>     Label a pane (visible in tmux border)
+  resolve <label>           Print pane target for a label
+  id                        Print this pane's ID ($TMUX_PANE)
+  doctor                    Diagnose tmux connectivity issues
+  version                   Print version
+
+Target resolution:
+  Targets can be tmux native (session:window.pane, %N) or a label set via 'name'.
+  Labels are resolved automatically — e.g. 'tmux-bridge type codex "hello"' works.
+
+Environment:
+  TMUX_BRIDGE_SOCKET   Override the tmux server socket path (skips auto-detection)
+EOF
+  exit 0
+}
+
+require_tmux() {
+  command -v tmux >/dev/null 2>&1 || die "tmux is not installed or not in PATH"
+}
+
+# Resolve a target: if it looks like a tmux target (%N, session:win.pane, pure digits),
+# use it directly; otherwise treat it as a @name label and resolve.
+resolve_target() {
+  local target="$1"
+
+  # tmux pane ID like %0, %12
+  if [[ "$target" =~ ^%[0-9]+$ ]]; then
+    echo "$target"; return
+  fi
+
+  # Looks like a tmux target with colon or dot (session:win.pane)
+  if [[ "$target" == *:* ]] || [[ "$target" == *.* ]]; then
+    echo "$target"; return
+  fi
+
+  # Pure numeric — treat as window index
+  if [[ "$target" =~ ^[0-9]+$ ]]; then
+    echo "$target"; return
+  fi
+
+  # Otherwise resolve as a @name label
+  resolve_label "$target"
+}
+
+resolve_label() {
+  local label="$1"
+  local result
+  result=$(tmx list-panes -a -F '#{pane_id} #{@name}' 2>/dev/null \
+    | awk -v lbl="$label" '$2 == lbl { print $1; exit }')
+  if [[ -z "$result" ]]; then
+    die "no pane found with label '$label'"
+  fi
+  echo "$result"
+}
+
+validate_target() {
+  local target="$1"
+  tmx display-message -t "$target" -p '#{pane_id}' >/dev/null 2>&1 \
+    || die "invalid target: $target"
+}
+
+require_args() {
+  local need="$1" have="$2" cmd="$3"
+  if (( have < need )); then
+    die "'$cmd' requires at least $need argument(s). Run 'tmux-bridge' for usage."
+  fi
+}
+
+# --- Commands ---
+
+cmd_list() {
+  require_tmux
+  printf "%-8s %-16s %-10s %-25s %-10s %s\n" "TARGET" "SESSION:WIN" "SIZE" "PROCESS" "LABEL" "CWD"
+  tmx list-panes -a \
+    -F '#{pane_id}|#{session_name}|#{window_index}|#{window_name}|#{pane_pid}|#{pane_width}x#{pane_height}|#{@name}|#{pane_current_path}' \
+    2>/dev/null | while IFS='|' read -r id sess widx wname pid size label cwd; do
+      # Get the actual running process (deepest child of pane pid)
+      local proc child_pid
+      proc=$(ps -o comm= -p "$pid" 2>/dev/null || echo "?")
+      # Find child process (e.g. claude/node running inside zsh) — works on macOS + Linux
+      child_pid=$(pgrep -P "$pid" 2>/dev/null | head -1 || true)
+      if [[ -n "$child_pid" ]]; then
+        local child_proc
+        child_proc=$(ps -o comm= -p "$child_pid" 2>/dev/null || true)
+        if [[ -n "$child_proc" ]]; then
+          proc="$child_proc"
+        fi
+      fi
+      # Shorten home dir in cwd
+      cwd="${cwd/#$HOME/~}"
+      printf "%-8s %-16s %-10s %-25s %-10s %s\n" \
+        "$id" "${sess}:${widx}" "$size" "$proc" "${label:--}" "$cwd"
+    done
+}
+
+cmd_type() {
+  require_args 2 $# "type"
+  require_tmux
+  local target
+  target=$(resolve_target "$1")
+  validate_target "$target"
+  require_read "$target"
+
+  tmx send-keys -t "$target" -l -- "$2"
+  clear_read "$target"
+}
+
+cmd_message() {
+  require_args 2 $# "message"
+  require_tmux
+  local target
+  target=$(resolve_target "$1")
+  validate_target "$target"
+  require_read "$target"
+
+  # Detect sender identity and location
+  local sender_pane="${TMUX_PANE:-}"
+  if [[ -z "$sender_pane" ]]; then
+    die "not running inside a tmux pane (\$TMUX_PANE is unset)"
+  fi
+  local sender_label
+  sender_label=$(tmx display-message -t "$sender_pane" -p '#{@name}' 2>/dev/null || true)
+  local from="${sender_label:-$sender_pane}"
+  local session_win
+  session_win=$(tmx display-message -t "$sender_pane" -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null || true)
+
+  local header="[tmux-bridge from:${from} pane:${sender_pane} at:${session_win} — load the smux skill to reply]"
+  tmx send-keys -t "$target" -l -- "${header} $2"
+  clear_read "$target"
+}
+
+cmd_read() {
+  require_tmux
+  require_args 1 $# "read"
+  local target
+  target=$(resolve_target "$1")
+  validate_target "$target"
+  local lines="${2:-50}"
+
+  tmx capture-pane -t "$target" -p -J -S "-${lines}"
+  mark_read "$target"
+}
+
+cmd_keys() {
+  require_args 2 $# "keys"
+  require_tmux
+  local target
+  target=$(resolve_target "$1")
+  validate_target "$target"
+  require_read "$target"
+  shift
+
+  for key in "$@"; do
+    tmx send-keys -t "$target" "$key"
+  done
+  clear_read "$target"
+}
+
+cmd_name() {
+  require_args 2 $# "name"
+  require_tmux
+  local target
+  target=$(resolve_target "$1")
+  validate_target "$target"
+
+  tmx set-option -p -t "$target" @name "$2"
+}
+
+cmd_resolve() {
+  require_args 1 $# "resolve"
+  require_tmux
+  resolve_label "$1"
+}
+
+cmd_id() {
+  if [[ -z "${TMUX_PANE:-}" ]]; then
+    die "not running inside a tmux pane (\$TMUX_PANE is unset)"
+  fi
+  echo "$TMUX_PANE"
+}
+
+cmd_doctor() {
+  require_tmux
+  local ok=true
+
+  echo "tmux-bridge doctor v${VERSION}"
+  echo "---"
+
+  # Environment
+  echo "TMUX_PANE:          ${TMUX_PANE:-<unset>}"
+  echo "TMUX:               ${TMUX:-<unset>}"
+  echo "TMUX_BRIDGE_SOCKET: ${TMUX_BRIDGE_SOCKET:-<unset>}"
+
+  # Socket from $TMUX
+  if [[ -n "${TMUX:-}" ]]; then
+    local env_socket="${TMUX%%,*}"
+    if [[ -S "$env_socket" ]]; then
+      if tmux -S "$env_socket" list-sessions &>/dev/null; then
+        echo "\$TMUX socket:       $env_socket (reachable)"
+      else
+        echo "\$TMUX socket:       $env_socket (exists but not responding)"
+        ok=false
+      fi
+    else
+      echo "\$TMUX socket:       $env_socket (MISSING — stale env)"
+      ok=false
+    fi
+  fi
+
+  # Detected socket
+  echo "---"
+  local detected
+  detected=$(detect_socket 2>/dev/null || echo "__failed__")
+  if [[ "$detected" == "__failed__" ]]; then
+    echo "Detected socket:    FAILED — no reachable tmux server found"
+    ok=false
+  elif [[ "$detected" == "__default__" ]]; then
+    echo "Detected socket:    (default tmux server)"
+  else
+    echo "Detected socket:    $detected"
+  fi
+
+  # Pane visibility
+  echo "---"
+  if [[ -n "${TMUX_PANE:-}" && "$detected" != "__failed__" ]]; then
+    if tmx display-message -t "$TMUX_PANE" -p '#{pane_id}' &>/dev/null; then
+      echo "This pane ($TMUX_PANE): visible to server"
+    else
+      echo "This pane ($TMUX_PANE): NOT visible to server"
+      ok=false
+    fi
+  fi
+
+  # Pane count
+  if [[ "$detected" != "__failed__" ]]; then
+    local count
+    count=$(tmx list-panes -a -F '#{pane_id}' 2>/dev/null | wc -l | tr -d ' ')
+    echo "Total panes:        $count"
+    local labeled
+    labeled=$(tmx list-panes -a -F '#{@name}' 2>/dev/null | grep -cv '^$' || echo 0)
+    echo "Labeled panes:      $labeled"
+  fi
+
+  echo "---"
+  if $ok; then
+    echo "Status: OK"
+  else
+    echo "Status: ISSUES DETECTED"
+    echo ""
+    echo "Likely cause: \$TMUX env var is stale (terminal was restarted)."
+    echo "Fix: re-source tmux env or set TMUX_BRIDGE_SOCKET explicitly."
+    return 1
+  fi
+}
+
+# --- Main ---
+
+[[ $# -eq 0 ]] && usage
+
+# cmd_id and cmd_doctor(detect) don't need socket pre-init for the id case
+case "$1" in
+  id)      shift; cmd_id "$@"; exit ;;
+  -h|--help|help) usage ;;
+  version) echo "tmux-bridge $VERSION"; exit ;;
+esac
+
+# All other commands need the socket
+require_tmux
+init_socket
+
+case "$1" in
+  list)    shift; cmd_list "$@" ;;
+  type)    shift; cmd_type "$@" ;;
+  message|msg) shift; cmd_message "$@" ;;
+  read)    shift; cmd_read "$@" ;;
+  keys)    shift; cmd_keys "$@" ;;
+  name)    shift; cmd_name "$@" ;;
+  resolve) shift; cmd_resolve "$@" ;;
+  doctor)  shift; cmd_doctor "$@" ;;
+  *)       die "unknown command: $1. Run 'tmux-bridge' for usage." ;;
+esac

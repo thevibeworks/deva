@@ -5,6 +5,15 @@ All notable changes to deva.sh will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `scripts/tmux-bridge` vendored from upstream smux (commit 95bf0b6, MIT) for layer-2 agent-to-agent communication over tmux panes: read/type/keys/label/envelope/doctor
+- `tmux-bridge` installed at `/usr/local/bin/tmux-bridge` in container images; composes with existing `deva-bridge-tmux` (layer 1, kernel boundary)
+- `scripts/THIRD_PARTY_LICENSES/smux-LICENSE` and `scripts/tmux-bridge.VENDORED` provenance metadata pinning upstream commit + SHA256
+- `docs/tmux-bridge-agent-comms.md` explaining the two-layer bridge composition, read-before-act guard, and socket detection order
+- CI smoke test exercising the full `tmux-bridge` CLI surface (list/name/resolve/read/type/read-guard) against an ephemeral tmux server inside the built image
+
 ## [0.10.0] - 2026-03-24
 
 ### Added
