@@ -147,6 +147,44 @@ jobs:
             deva-smoke:ci \
             bash -lc 'link="/tmp/claude-mcp-browser-bridge-$(id -un)"; test -L "$link"; test "$(readlink "$link")" = "/deva-host-chrome-bridge"'
 
+      - name: Smoke tmux-bridge CLI surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          # tmux-bridge is the layer-2 agent comms CLI vendored from smux.
+          # We assert it's installed, executable, runs outside a tmux pane for
+          # the version/help/id error paths, and that tmux itself is present
+          # so a future operator can drive tmux-bridge against host tmux.
+          docker run --rm deva-smoke:ci bash -lc '
+            set -euo pipefail
+            command -v tmux-bridge
+            command -v tmux
+            tmux-bridge version
+            tmux-bridge --help | grep -q "cross-pane communication"
+            # id requires $TMUX_PANE; outside tmux it must error cleanly.
+            if tmux-bridge id 2>/dev/null; then
+              echo "tmux-bridge id should fail outside a tmux pane" >&2
+              exit 1
+            fi
+            # Ephemeral tmux server to prove list/name/read/type work end-to-end.
+            sock="/tmp/tmux-smoke.sock"
+            tmux -S "$sock" new-session -d -s smoke "sleep 30"
+            export TMUX_BRIDGE_SOCKET="$sock"
+            tmux-bridge list | tee /tmp/list.out
+            grep -q "smoke:0" /tmp/list.out
+            target="$(tmux -S "$sock" display-message -p "#{pane_id}")"
+            tmux-bridge name "$target" smoke-worker
+            tmux-bridge resolve smoke-worker
+            tmux-bridge read "$target" 5 >/dev/null
+            # read-guard: must read before type; second type without read must fail
+            tmux-bridge type smoke-worker "echo hi"
+            if tmux-bridge type smoke-worker "echo twice" 2>/dev/null; then
+              echo "read-guard should have blocked second type without read" >&2
+              exit 1
+            fi
+            tmux -S "$sock" kill-server
+          '
+
   docs:
     name: Docs Build
     runs-on: ubuntu-latest

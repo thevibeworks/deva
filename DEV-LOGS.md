@@ -13,6 +13,17 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-04-13] Dev Log: adopt smux tmux-bridge as layer-2 agent comms
+- Why: deva-v2 proposal left the agent-to-agent transport CLI as an open question; smux (github.com/ShawnPana/smux) shipped exactly the shape we sketched (read/type/keys/label/envelope) in 403 lines of bash, MIT-licensed. Reinventing it would be waste. The existing `deva-bridge-tmux` (socat TCP) is layer 1 (kernel boundary); `tmux-bridge` is layer 2 (semantic). They compose cleanly.
+- What:
+  - vendored `scripts/tmux-bridge` byte-for-byte from upstream commit `95bf0b6` (SHA256 `ed66862b...`), not downloaded at build time, so image builds stay reproducible and auditable
+  - recorded provenance in `scripts/tmux-bridge.VENDORED` and shipped the upstream MIT license at `scripts/THIRD_PARTY_LICENSES/smux-LICENSE`
+  - installed `tmux-bridge` into container images at `/usr/local/bin/tmux-bridge` alongside existing `deva-bridge-tmux` (Dockerfile COPY + chmod)
+  - wrote `docs/tmux-bridge-agent-comms.md` covering the two-layer composition, security model, socket detection order, and the read-before-act guard (sentinel at `/tmp/tmux-bridge-read-<pane_id>`, cleared on any write — main safety net against an agent hallucinating into the wrong pane)
+  - added CI smoke step that builds an ephemeral tmux server inside the image and exercises the full CLI surface: `list`, `name`, `resolve`, `read`, `type`, plus a negative assertion that the read-guard blocks a second `type` without an intervening `read`
+  - did not touch `deva.sh`, auth wiring, or `docker-entrypoint.sh` — layer 2 is purely additive
+- Result: agents inside deva containers can now drive each other's tmux panes with a single 403-line CLI that was not ours to write. Layer 1 (our own socat tunnel) and layer 2 (vendored smux) compose: once `deva-bridge-tmux` is running, setting `TMUX_BRIDGE_SOCKET=/tmp/host-tmux.sock` (or just attaching to tmux via `-S`) lets `tmux-bridge` target panes on the HOST tmux server from inside the container. Layer 3 (coordinator/router with text envelopes, state detection, scratchpad) remains an open design question tracked in `docs/devlog/260401-deva-v2-proposal.org`; this PR intentionally does not touch it.
+
 # [2026-03-11] Dev Log: deva.sh docs spine for OSS release
 - Why: the repo had a decent landing page but still dumped too much context into one README and did not read like an organized OSS project
 - What:

@@ -237,9 +237,13 @@ USER root
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY scripts/deva-bridge-tmux /usr/local/bin/deva-bridge-tmux
+# tmux-bridge: vendored from smux (layer-2 agent comms CLI over tmux panes)
+# See scripts/tmux-bridge.VENDORED for upstream commit and SHA256 pin.
+COPY scripts/tmux-bridge /usr/local/bin/tmux-bridge
 
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh && \
     chmod 755 /usr/local/bin/deva-bridge-tmux && \
+    chmod 755 /usr/local/bin/tmux-bridge && \
     chmod -R 755 /usr/local/bin/scripts || true
 
 WORKDIR /root
