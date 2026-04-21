@@ -1,8 +1,7 @@
 #!/bin/bash
-set -e
+# version-check.sh - Validate repo version references stay consistent
 
-# deva Version Consistency Checker
-# Validates that all version references are consistent
+set -e
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

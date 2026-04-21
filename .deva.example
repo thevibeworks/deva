@@ -50,6 +50,26 @@ EPHEMERAL=false
 # 6. Disable ephemeral containers (persistent):
 #    EPHEMERAL=false
 
+# Hybrid Agent Setup:
+#
+# Hybrid is the DEFAULT. deva walks every populated subdir under
+# ~/.config/deva/ (claude, codex, gemini) and mounts each agent's
+# canonical entries into the container. Populated = you either
+# hand-created the subdir or autolink symlinked it from legacy
+# ~/.claude, ~/.codex, ~/.gemini on first run.
+#
+# No .deva entries required for the common case. To opt OUT of
+# hybrid for a single invocation, pass --config-home DIR to
+# isolate that run to a single home.
+#
+# Use VOLUME= only when you want to mount host paths OUTSIDE
+# ~/.config/deva/ (e.g. a shared secrets vault) at an agent target.
+# VOLUME= entries win over the default per-agent mount at the same
+# container target (first-writer-wins; CLI -v beats .deva).
+#
+# Auth credentials inside mounted agent dirs ride along — hybrid
+# only makes sense if you trust every agent equally.
+
 # Project-Specific Config (.deva in project root):
 #
 # VOLUME=./vendor:/home/deva/project/vendor:ro

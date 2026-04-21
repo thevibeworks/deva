@@ -8,22 +8,28 @@ FROM ${BASE_IMAGE}
 LABEL org.opencontainers.image.title="deva-rust"
 LABEL org.opencontainers.image.description="Rust development environment with full toolchain"
 
-ARG CLAUDE_CODE_VERSION=2.1.81
-ARG CODEX_VERSION=0.116.0
-ARG GEMINI_CLI_VERSION=0.35.0
+ARG CLAUDE_CODE_VERSION=2.1.116
+ARG CLAUDE_TRACE_VERSION=1.0.9
+ARG CODEX_VERSION=0.122.0
+ARG GEMINI_CLI_VERSION=0.38.2
 ARG ATLAS_CLI_VERSION=v0.1.4
+ARG PLAYWRIGHT_VERSION=1.59.1
 ARG RUST_TOOLCHAINS="stable"
+ARG RUST_DEFAULT_TOOLCHAIN="stable"
 ARG RUST_TARGETS="wasm32-unknown-unknown"
 
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
+LABEL org.opencontainers.image.claude_trace_version=${CLAUDE_TRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
+LABEL org.opencontainers.image.playwright_version=${PLAYWRIGHT_VERSION}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ENV RUSTUP_HOME=/opt/rustup \
     CARGO_HOME=/opt/cargo \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     PATH=/opt/cargo/bin:$PATH
 
 USER root
@@ -47,14 +53,29 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends clickhouse-client
 
+# Playwright/Chromium runtime system libs (Ubuntu 24.04 noble t64 variants).
+# Installed here as root so `playwright install chromium` can run as deva user
+# without --with-deps (which requires root apt).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libnss3 libnspr4 libdbus-1-3 libexpat1 \
+        libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+        libcups2t64 libdrm2 \
+        libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libxkbcommon0 libxcb1 \
+        libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+        fonts-liberation xdg-utils
+
 RUN --mount=type=cache,target=/tmp/rust-cache,sharing=locked \
     set -euxo pipefail && \
     mkdir -p "$RUSTUP_HOME" "$CARGO_HOME" && \
     mkdir -p "$CARGO_HOME/registry/cache" "$CARGO_HOME/registry/index" "$CARGO_HOME/git" && \
     chown -R "$DEVA_UID:$DEVA_GID" "$RUSTUP_HOME" "$CARGO_HOME" && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-        sh -s -- -y --default-toolchain none --profile default && \
-    rustup toolchain install ${RUST_TOOLCHAINS} && \
+        sh -s -- -y --default-toolchain none --profile default --no-modify-path && \
+    rustup set auto-self-update disable && \
+    rustup toolchain install --no-self-update ${RUST_TOOLCHAINS} && \
     for tc in ${RUST_TOOLCHAINS}; do \
         rustup component add --toolchain "$tc" rustfmt clippy rust-analyzer; \
     done && \
@@ -63,12 +84,13 @@ RUN --mount=type=cache,target=/tmp/rust-cache,sharing=locked \
             rustup target add --toolchain "$tc" ${RUST_TARGETS}; \
         done; \
     fi && \
-    rustup default stable && \
+    rustup default "${RUST_DEFAULT_TOOLCHAIN}" && \
     chown -R "$DEVA_UID:$DEVA_GID" "$RUSTUP_HOME" "$CARGO_HOME"
 
 RUN echo 'export PATH="/opt/cargo/bin:$PATH"' >> "$DEVA_HOME/.zshrc" && \
     echo 'export RUSTUP_HOME=/opt/rustup' >> "$DEVA_HOME/.zshrc" && \
     echo 'export CARGO_HOME=/opt/cargo' >> "$DEVA_HOME/.zshrc" && \
+    echo 'export PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright' >> "$DEVA_HOME/.zshrc" && \
     sed -i 's/plugins=(git docker python golang node npm aws/plugins=(git docker python golang rust node npm aws/' "$DEVA_HOME/.zshrc" && \
     echo '# Rust aliases' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cr="cargo run"' >> "$DEVA_HOME/.zshrc" && \
@@ -79,6 +101,9 @@ RUN echo 'export PATH="/opt/cargo/bin:$PATH"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cf="cargo fmt"' >> "$DEVA_HOME/.zshrc" && \
     echo 'alias cl="cargo clippy"' >> "$DEVA_HOME/.zshrc"
 
+RUN mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" && \
+    chown -R "$DEVA_UID:$DEVA_GID" "$PLAYWRIGHT_BROWSERS_PATH"
+
 USER $DEVA_USER
 
 COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
@@ -86,6 +111,36 @@ COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooli
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
     bash /tmp/install-agent-tooling.sh && \
     rm -f /tmp/install-agent-tooling.sh
+
+# Install Playwright + both chromium binaries. Runs after install-agent-tooling.sh
+# so npm prefix ($DEVA_HOME/.npm-global) is already configured. System deps are
+# pre-installed above, so we skip --with-deps (which would need root).
+#
+# Two browsers installed: `chromium` (headed) + `chromium-headless-shell`
+# (headless-only, lighter). Playwright 1.49+ uses the shell for `headless: true`
+# which is what Playwright MCP and most agent tools call — missing it gives
+# "Executable doesn't exist at .../chromium_headless_shell-XXXX/..." at runtime.
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    set -eux && \
+    cd "$DEVA_HOME" && \
+    for i in 1 2 3; do \
+        if npm install -g --no-audit --no-fund \
+            "playwright@${PLAYWRIGHT_VERSION}" \
+            "@playwright/test@${PLAYWRIGHT_VERSION}"; then break; fi; \
+        if [ "$i" -ge 3 ]; then echo "playwright npm install failed" >&2; exit 1; fi; \
+        echo "playwright npm install attempt $i failed; retrying" >&2; \
+        sleep $((i * 3)); \
+    done && \
+    for i in 1 2 3; do \
+        if npx --yes playwright install chromium chromium-headless-shell; then break; fi; \
+        if [ "$i" -ge 3 ]; then echo "playwright browser install failed" >&2; exit 1; fi; \
+        echo "playwright browser install attempt $i failed; retrying" >&2; \
+        sleep $((i * 5)); \
+    done && \
+    npx playwright --version && \
+    ls "$PLAYWRIGHT_BROWSERS_PATH" && \
+    test -x "$(ls -d ${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-*/chrome-linux/headless_shell 2>/dev/null | head -1)" && \
+    npm cache clean --force
 
 USER root
 

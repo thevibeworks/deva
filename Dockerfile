@@ -58,14 +58,16 @@ RUN curl -fsSL https://bun.sh/install | bash && \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Pre-install Python 3.14t (free-threaded) for uv
-RUN /root/.local/bin/uv python install 3.14t
+ARG PYTHON_VERSION=3.14t
+RUN /root/.local/bin/uv python install "${PYTHON_VERSION}"
 
+ARG GO_VERSION=1.26.2
 RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     GO_ARCH=$([ "$ARCH" = "amd64" ] && echo "amd64" || echo "arm64") && \
     cd /tmp/go-cache && \
-    wget -q https://go.dev/dl/go1.22.0.linux-${GO_ARCH}.tar.gz && \
-    tar -C /usr/local -xzf go1.22.0.linux-${GO_ARCH}.tar.gz
+    wget -q https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
+    tar -C /usr/local -xzf go${GO_VERSION}.linux-${GO_ARCH}.tar.gz
 
 # Install Copilot API (ericc-ch fork with latest features)
 # Placed at end of runtimes stage to avoid invalidating cache for stable runtimes
@@ -133,14 +135,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install -y gh && \
     rm -f /tmp/githubcli-keyring.gpg
 
+ARG DELTA_VERSION=0.19.2
 RUN --mount=type=cache,target=/tmp/delta-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     DELTA_ARCH=$([ "$ARCH" = "amd64" ] && echo "x86_64" || echo "aarch64") && \
     cd /tmp/delta-cache && \
-    wget -q https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
-    tar -xzf delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
-    mv delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu/delta /usr/local/bin/ && \
-    rm -rf delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu*
+    wget -q https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
+    tar -xzf delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
+    mv delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu/delta /usr/local/bin/ && \
+    rm -rf delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu*
 
 # Install tmux from source (protocol version must match host for socket bridge)
 # Same major.minor usually works; exact match is pragmatic, not required.
@@ -207,19 +210,22 @@ RUN echo 'export ZSH="$HOME/.oh-my-zsh"' > "$DEVA_HOME/.zshrc" && \
     echo 'export PATH=$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/go/bin:/usr/local/go/bin:$PATH' >> "$DEVA_HOME/.zshrc"
 
 # Pre-install uv for deva user and warm Python 3.14t
+ARG PYTHON_VERSION=3.14t
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    $DEVA_HOME/.local/bin/uv python install 3.14t
+    $DEVA_HOME/.local/bin/uv python install "${PYTHON_VERSION}"
 
 # Final image: install volatile agent packages on top of the stable base.
 FROM agent-base AS final
 
 # Declare ARGs immediately before usage to minimize cache invalidation
-ARG CLAUDE_CODE_VERSION=2.1.81
-ARG CODEX_VERSION=0.116.0
-ARG GEMINI_CLI_VERSION=0.35.0
+ARG CLAUDE_CODE_VERSION=2.1.116
+ARG CLAUDE_TRACE_VERSION=1.0.9
+ARG CODEX_VERSION=0.122.0
+ARG GEMINI_CLI_VERSION=0.38.2
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
+LABEL org.opencontainers.image.claude_trace_version=${CLAUDE_TRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 

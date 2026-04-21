@@ -97,10 +97,12 @@ It may also mount:
 - additional user volumes from `-v` or `.deva`
 - config-home contents into `/home/deva`
 - `~/.config/deva` and `~/.cache/deva` when using the default config root
-- project-local `.claude` if present
 - `/var/run/docker.sock` if present and not disabled
 
 Loose credential files, backup files, `.DS_Store`, and VCS junk are intentionally skipped during config-home fan-out.
+
+Deva also rejects redundant recursive bind mounts before startup, so a child path
+cannot be rebound over the exact same subtree already covered by a parent mount.
 
 ### 6. Deva creates or reuses a container
 

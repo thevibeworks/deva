@@ -6,12 +6,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/release-utils.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/version-pins.sh"
 
 IMAGE=${MAIN_IMAGE:-ghcr.io/thevibeworks/deva:latest}
 CHANGELOG_DEPTH=${CHANGELOG_DEPTH:-3}
 
 main() {
-    section "Version Status"
+    load_version_pins
+
+    bash "$SCRIPT_DIR/toolchain-report.sh"
+
     echo -e "${DIM}Time: $(date '+%Y-%m-%d %H:%M:%S')${RESET}"
     echo -e "${DIM}Image: ${IMAGE}${RESET}"
     echo ""
