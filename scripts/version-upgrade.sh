@@ -85,12 +85,12 @@ main() {
 
     local claude_ver claude_trace_ver codex_ver gemini_ver atlas_ver copilot_ver playwright_ver
     claude_ver=$(get_latest "claude-code")
-    claude_trace_ver="${CLAUDE_TRACE_VERSION}"
+    claude_trace_ver=$(get_latest "claude-trace")
     codex_ver=$(get_latest "codex")
     gemini_ver=$(get_latest "gemini-cli")
     atlas_ver=$(get_latest "atlas-cli")
     copilot_ver=$(get_latest "copilot-api")
-    playwright_ver="${PLAYWRIGHT_VERSION}"
+    playwright_ver=$(get_latest "playwright")
 
     # Verify all required versions are set
     local missing=()
