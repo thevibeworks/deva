@@ -418,36 +418,21 @@ load_versions() {
             set_current "$tool" ""
         fi
 
-        # Latest from source (respect env overrides)
-        local env_var latest_val
-        case $tool in
-            claude-code) env_var="CLAUDE_CODE_VERSION" ;;
-            claude-trace) env_var="CLAUDE_TRACE_VERSION" ;;
-            codex) env_var="CODEX_VERSION" ;;
-            gemini-cli) env_var="GEMINI_CLI_VERSION" ;;
-            atlas-cli) env_var="ATLAS_CLI_VERSION" ;;
-            copilot-api) env_var="COPILOT_API_VERSION" ;;
-            playwright) env_var="PLAYWRIGHT_VERSION" ;;
-            *) env_var="" ;;
-        esac
-
-        eval "latest_val=\"\${$env_var:-}\""
-        if [[ -n $latest_val ]]; then
-            set_latest "$tool" "$latest_val"
+        # Always fetch latest from upstream. versions.env populates env vars
+        # unconditionally, so checking them here would compare pin-vs-pin and
+        # always report "up-to-date". CLI overrides are respected at BUILD
+        # time (version-upgrade.sh), not at CHECK time.
+        local fetched
+        fetched=$(fetch_latest_version "$tool")
+        if [[ -n $fetched ]]; then
+            set_latest "$tool" "$fetched"
         else
-            local fetched
-            fetched=$(fetch_latest_version "$tool")
-            if [[ -n $fetched ]]; then
-                set_latest "$tool" "$fetched"
+            local current=$(get_current "$tool")
+            if [[ -n $current ]]; then
+                echo -e "${YELLOW}Warning: Failed to fetch latest $tool, using current: $current${RESET}" >&2
+                set_latest "$tool" "$current"
             else
-                # Network failure - fallback to current image version
-                local current=$(get_current "$tool")
-                if [[ -n $current ]]; then
-                    echo -e "${YELLOW}Warning: Failed to fetch latest $tool, using current: $current${RESET}" >&2
-                    set_latest "$tool" "$current"
-                else
-                    echo -e "${RED}Error: Cannot determine version for $tool${RESET}" >&2
-                fi
+                echo -e "${RED}Error: Cannot determine version for $tool${RESET}" >&2
             fi
         fi
 

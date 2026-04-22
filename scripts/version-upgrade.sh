@@ -7,6 +7,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./release-utils.sh
 source "$SCRIPT_DIR/release-utils.sh"
+
+# Snapshot explicit CLI overrides BEFORE version-pins fills defaults from
+# versions.env. Makefile VERSION_QUERY_OVERRIDES only forwards vars whose
+# $(origin) is command-line/environment/override, so anything already set
+# here is a genuine user override — not a pin default.
+_CLI_CLAUDE_CODE="${CLAUDE_CODE_VERSION:-}"
+_CLI_CLAUDE_TRACE="${CLAUDE_TRACE_VERSION:-}"
+_CLI_CODEX="${CODEX_VERSION:-}"
+_CLI_GEMINI="${GEMINI_CLI_VERSION:-}"
+_CLI_ATLAS="${ATLAS_CLI_VERSION:-}"
+_CLI_COPILOT="${COPILOT_API_VERSION:-}"
+_CLI_PLAYWRIGHT="${PLAYWRIGHT_VERSION:-}"
+
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/version-pins.sh"
 
@@ -83,14 +96,15 @@ main() {
     echo -e "${GREEN}Proceeding with build...${RESET}"
     echo ""
 
+    # CLI override wins; otherwise use whatever load_versions fetched.
     local claude_ver claude_trace_ver codex_ver gemini_ver atlas_ver copilot_ver playwright_ver
-    claude_ver=$(get_latest "claude-code")
-    claude_trace_ver=$(get_latest "claude-trace")
-    codex_ver=$(get_latest "codex")
-    gemini_ver=$(get_latest "gemini-cli")
-    atlas_ver=$(get_latest "atlas-cli")
-    copilot_ver=$(get_latest "copilot-api")
-    playwright_ver=$(get_latest "playwright")
+    claude_ver="${_CLI_CLAUDE_CODE:-$(get_latest "claude-code")}"
+    claude_trace_ver="${_CLI_CLAUDE_TRACE:-$(get_latest "claude-trace")}"
+    codex_ver="${_CLI_CODEX:-$(get_latest "codex")}"
+    gemini_ver="${_CLI_GEMINI:-$(get_latest "gemini-cli")}"
+    atlas_ver="${_CLI_ATLAS:-$(get_latest "atlas-cli")}"
+    copilot_ver="${_CLI_COPILOT:-$(get_latest "copilot-api")}"
+    playwright_ver="${_CLI_PLAYWRIGHT:-$(get_latest "playwright")}"
 
     # Verify all required versions are set
     local missing=()
