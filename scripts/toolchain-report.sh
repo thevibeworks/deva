@@ -18,7 +18,7 @@ line() {
 main() {
     load_version_pins
 
-    heading "Pinned Toolchains"
+    heading "Toolchains (pinned — edit versions.env to bump)"
     line "Node.js line:" "${NODE_MAJOR}.x"
     line "Go:" "$GO_VERSION"
     line "Python:" "$PYTHON_VERSION"
@@ -28,7 +28,7 @@ main() {
     line "delta:" "$DELTA_VERSION"
     line "tmux:" "$TMUX_VERSION"
 
-    heading "Pinned Agent Tools"
+    heading "Agent Tools (auto-upgraded by make versions-up)"
     line "Claude Code:" "$CLAUDE_CODE_VERSION"
     line "Claude Trace:" "$CLAUDE_TRACE_VERSION"
     line "Codex:" "$CODEX_VERSION"
@@ -36,7 +36,7 @@ main() {
     line "Atlas CLI:" "$ATLAS_CLI_VERSION"
     line "Copilot API:" "$COPILOT_API_VERSION"
 
-    heading "Pinned Browser Tooling"
+    heading "Browser Tooling (pinned — edit versions.env to bump)"
     line "Playwright:" "$PLAYWRIGHT_VERSION"
 
     heading "Floating Build-Time Tools"

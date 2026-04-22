@@ -104,7 +104,7 @@ main() {
     gemini_ver="${_CLI_GEMINI:-$(get_latest "gemini-cli")}"
     atlas_ver="${_CLI_ATLAS:-$(get_latest "atlas-cli")}"
     copilot_ver="${_CLI_COPILOT:-$(get_latest "copilot-api")}"
-    playwright_ver="${_CLI_PLAYWRIGHT:-$(get_latest "playwright")}"
+    playwright_ver="${_CLI_PLAYWRIGHT:-${PLAYWRIGHT_VERSION}}"
 
     # Verify all required versions are set
     local missing=()
