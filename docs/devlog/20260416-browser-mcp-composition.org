@@ -1,0 +1,190 @@
+* [2026-04-16] Dev Log: browser automation via MCP, composed :DESIGN:COMPOSITION:BROWSER:MCP:
+
+** Context
+Deva runs each agent (claude, codex, gemini) in one container. The
+container is the sandbox. We just shipped playwright + chromium +
+chromium-headless-shell baked into =deva-rust= so MCP browser tools
+have a working binary on =$PATH= out of the box.
+
+That closes the "it doesn't work" gap. It does not close the "it
+shouldn't live there" gap:
+
+- =deva-rust= now carries ~500MB of browser stack whether the current
+  task touches a browser or not
+- a chromium crash lives in the same cgroup as the agent — OOM kills
+  everything together
+- every agent flavor (rust/base/future node-only) would need its own
+  browser install to keep "out of the box" parity
+
+The question the user asked: can we compose containers and trigger
+browser automation over MCP, instead of jamming it into every agent
+image?
+
+** Why
+The MCP contract is transport-agnostic: stdio, SSE, streamable HTTP.
+=@playwright/mcp= exposes all three. That means the browser process
+does not have to live in the agent's container — it just has to be
+reachable by one of those transports. Docker containers on the same
+network namespace reach each other as =localhost=. So the composition
+is already latent in the stack; we just have not drawn the line.
+
+If we draw the line cleanly, we get:
+
+- the agent image stops caring whether a given workspace needs a
+  browser
+- browser lifecycle (crash, restart, memory pressure) is isolated
+- playwright / chromium upgrades stop rebuilding the agent image
+- future non-browser MCP services (database sidecar, search index,
+  scratch FS) slot into the same mechanism
+
+=CAVEAT= this is a new bridge in the AGENTS.md sense. Adding
+cross-container network paths expands the trust perimeter. We must
+document and CI-cover it, not hand-wave it.
+
+** What
+Design space enumerated — we pick one, not all.
+
+*** Option A: single-container baseline :CURRENT:
+- playwright + chromium inside =deva-rust=
+- MCP server runs in-container over stdio
+- =--shm-size=2g= prevents =/dev/shm= OOM
+- =PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright= pre-seeded
+
+Pros: zero additional moving parts, works today
+Cons: browser bloat in agent image, shared resource pool
+
+*** Option B: playwright MCP HTTP sidecar :PROPOSED-NEXT:
+- new image =deva-playwright= (or alias to
+  =mcr.microsoft.com/playwright:vX.Y.Z-noble=)
+- runs =@playwright/mcp --port N= (or =--sse= / =--http=)
+- deva.sh launches it alongside the agent container under a shared
+  user-defined docker network =deva-net-<shape-hash>=
+- agent's MCP config gets auto-rewritten to point at
+  =http://localhost:N= (same network namespace) or
+  =http://deva-playwright:N= (different namespace, same docker net)
+- deva.sh tears down sidecar when agent container goes away
+
+Pros: isolation, slim agent image, reusable MS base image
+Cons: new lifecycle, new bridge, new flag surface
+
+*** Option C: playwright server + external client :REJECTED:
+- =playwright run-server --port N= in sidecar
+- =@playwright/mcp= stays in agent container, connects via
+  =--ws-endpoint=
+
+Rejected for v1: two-layer split (MCP agent-side, browser
+sidecar-side) doubles the upgrade surface and couples the agent
+container's playwright version to the sidecar's. Option B keeps both
+the MCP server and the browser co-located.
+
+*** Option D: docker-compose drop-in :REJECTED:
+- =.deva/compose.yml= triggers full compose mode
+- user defines everything
+
+Rejected: 2025-07-04 analysis already floated this. We never shipped
+it, for the same reason we should not ship it now: it pushes the
+composition model out to the user instead of making the default case
+just work. =deva.sh= is deliberately opinionated; compose is
+deliberately open-ended. They fight.
+
+** How
+Phased — do not ship B before A has shipped and stabilized.
+
+*** Phase 1: ship A, document the seam           :DONE:
+- playwright + both chromium binaries in =deva-rust=
+- system apt deps, chown =/opt/ms-playwright=
+- =--shm-size=2g= in =DOCKER_ARGS=
+- =PLAYWRIGHT_VERSION= wired into =TOOL_REGISTRY= so =make
+  versions-up= keeps browser revision matched to runtime MCP
+- rustup =--no-self-update= so flaky =static.rust-lang.org= no longer
+  bricks the build
+
+Exit criteria: =deva.sh claude -Q= can =npx @playwright/mcp@latest=
+and have =chromium.launch({ headless: true })= succeed on first call,
+no network at agent start.
+
+*** Phase 2: add =--with-browser= sidecar flag   :PROPOSED:
+Surface (sketch, not committed):
+
+#+BEGIN_SRC bash
+deva.sh claude --with-browser
+# spins deva-playwright sidecar on shared docker net
+# writes agent MCP config entry pointing at sidecar
+# both containers tear down together
+
+deva.sh claude --with-browser --browser-image custom/pw:1.60.0
+# override image
+
+deva.sh claude --with-browser=persistent
+# keep sidecar warm across agent restarts
+#+END_SRC
+
+Implementation outline:
+1. add =DEVA_SIDECARS=()= array to =deva.sh= alongside
+   =EXTRA_DOCKER_ARGS=
+2. =--with-browser= appends a sidecar spec (image, port, env, wait
+   probe)
+3. before =docker run= on the agent, iterate sidecars: =docker run
+   -d= each with =--network deva-net-<hash>=, wait on probe
+4. agent container joins the same =--network=; localhost and DNS
+   both work
+5. write/patch MCP config file mounted into agent container
+   (=/home/deva/.config/claude/mcp-servers.json= or per-agent
+   equivalent) with an entry keyed by sidecar name
+6. on agent container exit, best-effort =docker stop= sidecars;
+   persistent mode skips this
+7. shape hash includes sidecar specs so different
+   =--with-browser= choices do not collide on container reuse
+
+Exit criteria: =deva.sh claude --with-browser -- "take a screenshot
+of example.com"= works end-to-end, no manual MCP config.
+
+*** Phase 3: reconsider A's browser payload    :DEFERRED:
+Once Phase 2 has shipped and is in real use, revisit whether
+=deva-rust= should still carry the browser stack or whether the
+sidecar is the canonical path and =deva-rust= goes back to being a
+pure language toolchain image.
+
+Do not preempt this call. Let actual usage drive it.
+
+** Open Questions
+1. Lifecycle ownership: deva.sh as supervisor vs systemd unit vs
+   docker compose under the hood. Leaning supervisor for shape-hash
+   integration; compose would fight our persistent-container model.
+2. Network topology: =--network container:<agent>= (tightest, one
+   sidecar per agent) vs shared =deva-net-<hash>= (allows N
+   sidecars, adds DNS). Probably shared net — tmux-bridge precedent
+   shows we already handle multi-service shape.
+3. MCP config writing: where does the entry go for each agent?
+   Claude uses =~/.claude/mcp.json=; codex has its own; gemini has
+   its own. Needs a per-agent adapter, like =shared_auth.sh= for
+   auth. Candidate filename: =agents/mcp_wire.sh=.
+4. Version lock-step: sidecar =@playwright/mcp= version must roughly
+   match the playwright version brought in by the agent's MCP
+   client. Simplest: pin both in =TOOL_REGISTRY= and bump together.
+5. Security: sidecar gets same workspace mount as agent (=-v
+   $PWD:$PWD=)? Or read-only? Or none? Default probably read-only
+   write-through for downloads dir.
+6. Non-browser MCP servers: the same mechanism trivially supports
+   DB sidecars, search sidecars, scratch FS sidecars. Design the
+   flag surface so =--with-<service>= generalizes without us having
+   to rev deva.sh per new service.
+
+** Non-goals
+- replacing Option A; it stays as the out-of-the-box default
+- supporting arbitrary user compose files (that is Option D,
+  rejected)
+- running the browser on the host (different feature — see existing
+  =claude -- --chrome= host-bridge; out of scope here)
+
+** Prior Art In This Repo
+- =2025-07-04= DEV-LOGS.md: proposed docker-compose + playwright
+  sidecar. Ready-for-impl, not shipped. This doc supersedes that
+  framing — we are picking the sidecar half and rejecting the
+  compose half.
+- =2026-04-13= DEV-LOGS.md: tmux-bridge as layer-2. Precedent for
+  composing two bridge types (layer-1 socat, layer-2 smux) cleanly.
+  Phase 2 here is a third bridge type: "sidecar-MCP".
+- =agents/shared_auth.sh=: precedent for a per-agent adapter layer
+  that writes the right config file for each agent. =mcp_wire.sh=
+  would mirror its shape.

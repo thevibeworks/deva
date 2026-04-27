@@ -1,10 +1,14 @@
 
+VERSION_PINS_FILE ?= versions.env
+-include $(VERSION_PINS_FILE)
+
 IMAGE_NAME := ghcr.io/thevibeworks/deva
 TAG := latest
 RUST_TAG := rust
 CORE_TAG := core
 DOCKERFILE := Dockerfile
 RUST_DOCKERFILE := Dockerfile.rust
+MULTI_ARCH_PLATFORMS := linux/amd64,linux/arm64
 MAIN_IMAGE := $(IMAGE_NAME):$(TAG)
 RUST_IMAGE := $(IMAGE_NAME):$(RUST_TAG)
 CORE_IMAGE := $(IMAGE_NAME):$(CORE_TAG)
@@ -20,26 +24,87 @@ DETECTED_IMAGE := $(shell \
 	else \
 		echo "$(IMAGE_NAME):$(TAG)"; \
 	fi)
-CLAUDE_CODE_VERSION := $(shell npm view @anthropic-ai/claude-code version 2>/dev/null || echo "2.1.81")
-CODEX_VERSION := $(shell npm view @openai/codex version 2>/dev/null || echo "0.116.0")
-GEMINI_CLI_VERSION := $(shell npm view @google/gemini-cli version 2>/dev/null || echo "0.35.0")
-ATLAS_CLI_VERSION := $(shell gh api repos/lroolle/atlas-cli/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.4")
-COPILOT_API_VERSION := $(shell gh api repos/ericc-ch/copilot-api/branches/master --jq '.commit.sha' 2>/dev/null || echo "0ea08febdd7e3e055b03dd298bf57e669500b5c1")
+NODE_MAJOR ?= 22
+GO_VERSION ?= 1.26.2
+PYTHON_VERSION ?= 3.14t
+DELTA_VERSION ?= 0.19.2
+TMUX_VERSION ?= 3.6a
+TMUX_SHA256 ?= b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759
+CLAUDE_CODE_VERSION ?= 2.1.116
+CLAUDE_TRACE_VERSION ?= 1.0.9
+CODEX_VERSION ?= 0.122.0
+GEMINI_CLI_VERSION ?= 0.38.2
+ATLAS_CLI_VERSION ?= v0.1.4
+COPILOT_API_VERSION ?= 0ea08febdd7e3e055b03dd298bf57e669500b5c1
+PLAYWRIGHT_VERSION ?= 1.59.1
+RUST_TOOLCHAINS ?= stable
+RUST_DEFAULT_TOOLCHAIN ?= stable
+RUST_TARGETS ?= wasm32-unknown-unknown
+
+TOOLCHAIN_BUILD_ARGS := \
+	--build-arg NODE_MAJOR=$(NODE_MAJOR) \
+	--build-arg GO_VERSION=$(GO_VERSION) \
+	--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
+	--build-arg DELTA_VERSION=$(DELTA_VERSION) \
+	--build-arg TMUX_VERSION=$(TMUX_VERSION) \
+	--build-arg TMUX_SHA256=$(TMUX_SHA256)
+
+CORE_BUILD_ARGS := $(TOOLCHAIN_BUILD_ARGS) \
+	--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION)
+
+AGENT_BUILD_ARGS := \
+	--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
+	--build-arg CLAUDE_TRACE_VERSION=$(CLAUDE_TRACE_VERSION) \
+	--build-arg CODEX_VERSION=$(CODEX_VERSION) \
+	--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+	--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION)
+
+MAIN_BUILD_ARGS := $(TOOLCHAIN_BUILD_ARGS) $(AGENT_BUILD_ARGS) \
+	--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION)
+
+RUST_BUILD_ARGS := $(AGENT_BUILD_ARGS) \
+	--build-arg PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION) \
+	--build-arg RUST_TOOLCHAINS=$(RUST_TOOLCHAINS) \
+	--build-arg RUST_DEFAULT_TOOLCHAIN=$(RUST_DEFAULT_TOOLCHAIN) \
+	--build-arg RUST_TARGETS=$(RUST_TARGETS)
+
+VERSION_QUERY_OVERRIDES := \
+	$(if $(filter command line environment environment\ override override,$(origin NODE_MAJOR)),NODE_MAJOR=$(NODE_MAJOR)) \
+	$(if $(filter command line environment environment\ override override,$(origin GO_VERSION)),GO_VERSION=$(GO_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin PYTHON_VERSION)),PYTHON_VERSION=$(PYTHON_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin DELTA_VERSION)),DELTA_VERSION=$(DELTA_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin TMUX_VERSION)),TMUX_VERSION=$(TMUX_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin TMUX_SHA256)),TMUX_SHA256=$(TMUX_SHA256)) \
+	$(if $(filter command line environment environment\ override override,$(origin CLAUDE_CODE_VERSION)),CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin CLAUDE_TRACE_VERSION)),CLAUDE_TRACE_VERSION=$(CLAUDE_TRACE_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin CODEX_VERSION)),CODEX_VERSION=$(CODEX_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin GEMINI_CLI_VERSION)),GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin ATLAS_CLI_VERSION)),ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin COPILOT_API_VERSION)),COPILOT_API_VERSION=$(COPILOT_API_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin PLAYWRIGHT_VERSION)),PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin RUST_TOOLCHAINS)),RUST_TOOLCHAINS=$(RUST_TOOLCHAINS)) \
+	$(if $(filter command line environment environment\ override override,$(origin RUST_DEFAULT_TOOLCHAIN)),RUST_DEFAULT_TOOLCHAIN=$(RUST_DEFAULT_TOOLCHAIN)) \
+	$(if $(filter command line environment environment\ override override,$(origin RUST_TARGETS)),RUST_TARGETS=$(RUST_TARGETS))
 
 export DOCKER_BUILDKIT := 1
+export VERSION_PINS_FILE
 
 .DEFAULT_GOAL := help
 
-.PHONY: build
+.PHONY: build build-main rebuild build-core build-rust-image build-rust build-all
+.PHONY: buildx buildx-multi buildx-multi-rust buildx-multi-local
+.PHONY: versions-up versions versions-pin toolchains scripts commands clean clean-all shell test test-rust test-local
+.PHONY: info push pull build-test dev context-size lint version-check
+.PHONY: release-patch release-minor release-major help
+
 build: build-all
 
-.PHONY: build-main
 build-main:
 	@echo "🔨 Building Docker image with $(DOCKERFILE)..."
-	@if command -v npm >/dev/null 2>&1; then \
-		echo "🔎 Resolving latest versions from npm..."; \
+	@if [ -f "$(VERSION_PINS_FILE)" ]; then \
+		echo "📌 Using shared defaults from $(VERSION_PINS_FILE)"; \
 	else \
-		echo "ℹ npm not found; using defaults/fallbacks"; \
+		echo "ℹ $(VERSION_PINS_FILE) not found; using Makefile fallbacks"; \
 	fi
 	@# Inspect existing image labels; print direct diff lines
 	@prev_claude=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.claude_code_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
@@ -70,109 +135,91 @@ build-main:
 		     echo "Gemini: $$curG -> $$tgtG"; \
 		   fi; \
 		 fi
-	@echo "Hint: override via CLAUDE_CODE_VERSION=... CODEX_VERSION=... GEMINI_CLI_VERSION=... ATLAS_CLI_VERSION=... COPILOT_API_VERSION=... or run 'make bump-versions' to pin"
-	docker build -f $(DOCKERFILE) --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
+	@echo "Hint: override via GO_VERSION=... CLAUDE_CODE_VERSION=... or run 'make versions-pin'"
+	docker build -f $(DOCKERFILE) $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Build completed: $(MAIN_IMAGE)"
 
-.PHONY: rebuild
 rebuild:
 	@echo "🔨 Rebuilding Docker image (no cache) with $(DOCKERFILE)..."
-	docker build -f $(DOCKERFILE) --no-cache --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
+	docker build -f $(DOCKERFILE) --no-cache $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Rebuild completed: $(MAIN_IMAGE)"
 
 
-.PHONY: build-core
 build-core:
 	@echo "🔨 Building stable core image..."
-	docker build -f $(DOCKERFILE) --target agent-base --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(CORE_IMAGE) .
+	docker build -f $(DOCKERFILE) --target agent-base $(CORE_BUILD_ARGS) -t $(CORE_IMAGE) .
 	@echo "✅ Core build completed: $(CORE_IMAGE)"
 
-.PHONY: build-rust-image
 build-rust-image:
 	@echo "🔨 Building Rust Docker image..."
 	docker build -f $(RUST_DOCKERFILE) \
 		--build-arg BASE_IMAGE=$(CORE_IMAGE) \
-		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
-		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
-		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
-		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
+		$(RUST_BUILD_ARGS) \
 		-t $(RUST_IMAGE) .
 	@echo "✅ Rust build completed: $(RUST_IMAGE)"
 
-.PHONY: build-rust
 build-rust: build-core build-rust-image
 
-.PHONY: build-all
 build-all:
-	@echo "🔨 Building all images with versions: Claude $(CLAUDE_CODE_VERSION), Codex $(CODEX_VERSION), Gemini $(GEMINI_CLI_VERSION), Atlas $(ATLAS_CLI_VERSION), Copilot-API $(COPILOT_API_VERSION)..."
-	@$(MAKE) build-core COPILOT_API_VERSION=$(COPILOT_API_VERSION)
-	@$(MAKE) build-main CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
-	@$(MAKE) build-rust-image CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) CODEX_VERSION=$(CODEX_VERSION) GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) COPILOT_API_VERSION=$(COPILOT_API_VERSION)
+	@echo "🔨 Building all images with pins from $(VERSION_PINS_FILE)..."
+	@$(MAKE) build-core
+	@$(MAKE) build-main
+	@$(MAKE) build-rust-image
 	@echo "✅ All images built successfully"
 
-.PHONY: buildx
 buildx:
 	@echo "🔨 Building with docker buildx..."
-	docker buildx build -f $(DOCKERFILE) --load --build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) --build-arg CODEX_VERSION=$(CODEX_VERSION) --build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) --build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) --build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) -t $(MAIN_IMAGE) .
+	docker buildx build -f $(DOCKERFILE) --load $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Buildx completed: $(MAIN_IMAGE)"
 
-.PHONY: buildx-multi
 buildx-multi:
 	@echo "🔨 Building multi-arch images for amd64 and arm64..."
-	docker buildx build -f $(DOCKERFILE) --platform linux/amd64,linux/arm64 \
-		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
-		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
-		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
-		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
-		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	docker buildx build -f $(DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
+		$(MAIN_BUILD_ARGS) \
 		--push -t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed and pushed: $(MAIN_IMAGE)"
 
-.PHONY: buildx-multi-rust
 buildx-multi-rust:
 	@echo "🔨 Building multi-arch Rust images for amd64 and arm64..."
-	docker buildx build -f $(RUST_DOCKERFILE) --platform linux/amd64,linux/arm64 \
+	docker buildx build -f $(RUST_DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
 		--build-arg BASE_IMAGE=$(MAIN_IMAGE) \
+		$(RUST_BUILD_ARGS) \
 		--push -t $(RUST_IMAGE) .
 	@echo "✅ Multi-arch Rust build completed and pushed: $(RUST_IMAGE)"
 
-.PHONY: buildx-multi-local
 buildx-multi-local:
 	@echo "🔨 Building multi-arch images locally..."
-	docker buildx build --platform linux/amd64,linux/arm64 \
-		--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
-		--build-arg CODEX_VERSION=$(CODEX_VERSION) \
-		--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
-		--build-arg ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
-		--build-arg COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	docker buildx build -f $(DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
+		$(MAIN_BUILD_ARGS) \
 		-t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed locally: $(MAIN_IMAGE)"
 
-.PHONY: versions-up
 versions-up:
 	@MAIN_IMAGE=$(DETECTED_IMAGE) \
 	 BUILD_IMAGE=$(MAIN_IMAGE) \
 	 RUST_IMAGE=$(RUST_IMAGE) \
 	 DOCKERFILE=$(DOCKERFILE) \
 	 RUST_DOCKERFILE=$(RUST_DOCKERFILE) \
-	 CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
-	 CODEX_VERSION=$(CODEX_VERSION) \
-	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
-	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
-	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	 $(VERSION_QUERY_OVERRIDES) \
 	 ./scripts/version-upgrade.sh
 
-.PHONY: versions
 versions:
-	@CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
-	 CODEX_VERSION=$(CODEX_VERSION) \
-	 GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
-	 ATLAS_CLI_VERSION=$(ATLAS_CLI_VERSION) \
-	 COPILOT_API_VERSION=$(COPILOT_API_VERSION) \
+	@$(VERSION_QUERY_OVERRIDES) \
 	 MAIN_IMAGE=$(DETECTED_IMAGE) \
 	 ./scripts/version-report.sh
 
-.PHONY: clean
+versions-pin:
+	@bash ./scripts/update-version-pins.sh
+	@echo "✅ Updated $(VERSION_PINS_FILE)"
+
+toolchains:
+	@bash ./scripts/toolchain-report.sh
+
+scripts:
+	@bash ./scripts/list-scripts.sh
+
+commands: help
+
 clean:
 	@echo "🧹 Aggressive Docker cleanup..."
 	@echo "Removing project images..."
@@ -189,7 +236,6 @@ clean:
 	-docker builder prune -f
 	@echo "✅ Cleanup completed"
 
-.PHONY: clean-all
 clean-all:
 	@echo "🧹 NUCLEAR: Removing ALL unused Docker resources..."
 	@echo "WARNING: This will remove ALL unused containers, images, networks, and volumes"
@@ -214,7 +260,6 @@ clean-all:
 	@df -h | grep -E '(Filesystem|/var/lib/docker|overlay)' 2>/dev/null || echo "Docker storage info not available"
 	@echo "✅ Nuclear cleanup completed"
 
-.PHONY: shell
 shell:
 	@echo "🐚 Opening shell in $(MAIN_IMAGE)..."
 	docker run --rm -it \
@@ -223,7 +268,6 @@ shell:
 		--name $(CONTAINER_NAME) \
 		$(MAIN_IMAGE) /bin/zsh
 
-.PHONY: test
 test:
 	@echo "🧪 Testing $(MAIN_IMAGE)..."
 	@echo "Testing claude command..."
@@ -232,7 +276,6 @@ test:
 	docker run --rm $(MAIN_IMAGE) bash -c 'python --version && node --version && go version'
 	@echo "✅ All tests passed"
 
-.PHONY: test-rust
 test-rust:
 	@echo "🧪 Testing $(RUST_IMAGE)..."
 	@echo "Testing Rust toolchain..."
@@ -241,7 +284,6 @@ test-rust:
 	docker run --rm $(RUST_IMAGE) bash -c 'cargo-watch --version && wasm-pack --version'
 	@echo "✅ Rust tests passed"
 
-.PHONY: test-local
 test-local:
 	@echo "🧪 Testing $(MAIN_IMAGE) with local directory..."
 	docker run --rm -it \
@@ -249,7 +291,6 @@ test-local:
 		-w $(PWD) \
 		$(MAIN_IMAGE) bash -c 'pwd && ls -la && claude --version'
 
-.PHONY: info
 info:
 	@echo "📊 Image information for $(MAIN_IMAGE):"
 	@docker images $(MAIN_IMAGE) --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
@@ -257,31 +298,25 @@ info:
 	@echo "🔍 Image layers:"
 	@docker history $(MAIN_IMAGE) --no-trunc
 
-.PHONY: push
 push:
 	@echo "📤 Pushing $(MAIN_IMAGE) to registry..."
 	docker push $(MAIN_IMAGE)
 	@echo "✅ Push completed"
 
-.PHONY: pull
 pull:
 	@echo "📥 Pulling $(MAIN_IMAGE) from registry..."
 	docker pull $(MAIN_IMAGE)
 	@echo "✅ Pull completed"
 
-.PHONY: build-test
 build-test: build test
 	@echo "✅ Build and test completed successfully"
 
-.PHONY: dev
 dev: build shell
 
-.PHONY: context-size
 context-size:
 	@echo "📏 Build context size:"
 	@du -sh . --exclude='.git' --exclude='node_modules' --exclude='.claude-trace'
 
-.PHONY: lint
 lint:
 	@echo "🔍 Linting Dockerfile..."
 	@if command -v hadolint >/dev/null 2>&1; then \
@@ -292,23 +327,18 @@ lint:
 		echo "   Or run in Docker: docker run --rm -i hadolint/hadolint < Dockerfile"; \
 	fi
 
-.PHONY: version-check
 version-check:
 	@./scripts/version-check.sh
 
-.PHONY: release-patch
 release-patch:
 	@./deva.sh claude -Q -- -p "Execute release workflow from @workflows/RELEASE.md for a **patch** release"
 
-.PHONY: release-minor
 release-minor:
 	@./deva.sh claude -Q -- -p "Execute release workflow from @workflows/RELEASE.md for a **minor** release"
 
-.PHONY: release-major
 release-major:
 	@./deva.sh claude -Q -- -p "Execute release workflow from @workflows/RELEASE.md for a **major** release"
 
-.PHONY: help
 help:
 	@echo "deva.sh - Docker Build Shortcuts"
 	@echo "==============================="
@@ -316,7 +346,7 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  build                Build all images (auto-detects latest npm versions)"
+	@echo "  build                Build all images with pinned Makefile defaults"
 	@echo "  build-core           Build stable core image only"
 	@echo "  build-main           Build main Docker image only"
 	@echo "  build-rust           Build Rust Docker image"
@@ -325,8 +355,12 @@ help:
 	@echo "  buildx               Build with buildx"
 	@echo "  buildx-multi         Build multi-arch and push"
 	@echo "  buildx-multi-rust    Build multi-arch Rust and push"
+	@echo "  toolchains           List pinned toolchains and managed build tools"
 	@echo "  versions             Compare built vs latest versions with changelogs"
-	@echo "  versions-up          Upgrade both images to latest npm versions"
+	@echo "  versions-up          Build both images with latest upstream agent versions"
+	@echo "  versions-pin         Refresh $(VERSION_PINS_FILE) from upstream"
+	@echo "  scripts              List repo helper scripts"
+	@echo "  commands             Alias for help"
 	@echo "  test                 Test main image"
 	@echo "  test-rust            Test Rust image"
 	@echo "  shell                Open shell in container"
@@ -344,13 +378,23 @@ help:
 	@echo "  CORE_TAG             Stable core image tag (default: $(CORE_TAG))"
 	@echo "  DOCKERFILE           Dockerfile to use (default: $(DOCKERFILE))"
 	@echo "  RUST_DOCKERFILE      Rust Dockerfile path (default: $(RUST_DOCKERFILE))"
+	@echo "  VERSION_PINS_FILE    Shared pin file (default: $(VERSION_PINS_FILE))"
+	@echo "  NODE_MAJOR           Node major line (default: $(NODE_MAJOR))"
+	@echo "  GO_VERSION           Go toolchain version (default: $(GO_VERSION))"
+	@echo "  PYTHON_VERSION       Python toolchain version (default: $(PYTHON_VERSION))"
+	@echo "  DELTA_VERSION        delta version (default: $(DELTA_VERSION))"
+	@echo "  TMUX_VERSION         tmux version (default: $(TMUX_VERSION))"
 	@echo "  CLAUDE_CODE_VERSION  Claude CLI version (default: $(CLAUDE_CODE_VERSION))"
+	@echo "  CLAUDE_TRACE_VERSION Claude trace version (default: $(CLAUDE_TRACE_VERSION))"
 	@echo "  CODEX_VERSION        Codex CLI version (default: $(CODEX_VERSION))"
 	@echo "  GEMINI_CLI_VERSION   Gemini CLI version (default: $(GEMINI_CLI_VERSION))"
 	@echo "  ATLAS_CLI_VERSION    Atlas CLI version (default: $(ATLAS_CLI_VERSION))"
+	@echo "  PLAYWRIGHT_VERSION   Playwright version (default: $(PLAYWRIGHT_VERSION))"
+	@echo "  RUST_TOOLCHAINS      Rust toolchains to install (default: $(RUST_TOOLCHAINS))"
+	@echo "  RUST_DEFAULT_TOOLCHAIN Rust default toolchain (default: $(RUST_DEFAULT_TOOLCHAIN))"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make build                                    # Build all images with latest versions"
+	@echo "  make build                                    # Build all images with pinned versions"
 	@echo "  make build-core                               # Build stable core image only"
 	@echo "  make build-main                               # Build main image only"
 	@echo "  make build-rust                               # Build Rust image only"
@@ -358,5 +402,10 @@ help:
 	@echo "  make CLAUDE_CODE_VERSION=2.0.5 build          # Override with specific version"
 	@echo "  make GEMINI_CLI_VERSION=0.18.0 build          # Override gemini version"
 	@echo "  make ATLAS_CLI_VERSION=5f6a20c build          # Pin atlas-cli to specific commit"
+	@echo "  make GO_VERSION=1.26.2 build                  # Override Go pin"
+	@echo "  make toolchains                               # Show pinned toolchain inventory"
+	@echo "  make scripts                                  # List helper scripts"
+	@echo "  make versions-pin                             # Refresh shared pin file"
 	@echo "  make versions                                 # Check current versions"
-	@echo "  make versions-up                              # Upgrade to latest (includes atlas-cli)"
+	@echo "  make PLAYWRIGHT_VERSION=1.59.1 build-rust     # Override rust browser tooling"
+	@echo "  make versions-up                              # Upgrade to latest upstream versions"
