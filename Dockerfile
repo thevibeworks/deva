@@ -79,20 +79,7 @@ ARG COPILOT_API_VERSION
 LABEL org.opencontainers.image.copilot_api_version=${COPILOT_API_VERSION}
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    set -eu && \
-    i=0 && \
-    while :; do \
-        i=$((i + 1)) && \
-        if npm install -g npm@latest pnpm; then \
-            break; \
-        fi; \
-        if [ "$i" -ge 5 ]; then \
-            echo "npm install failed after $i attempts" >&2; \
-            exit 1; \
-        fi; \
-        echo "npm install failed (attempt $i), retrying..." >&2; \
-        sleep $((i * 5)); \
-    done && \
+    npm install -g pnpm && \
     git clone --branch "${COPILOT_API_BRANCH}" "${COPILOT_API_REPO}" /tmp/copilot-api && \
     cd /tmp/copilot-api && \
     git checkout "${COPILOT_API_COMMIT}" && \

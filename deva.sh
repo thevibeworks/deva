@@ -2976,6 +2976,9 @@ if [ "$CONFIG_HOME_FROM_CLI" = false ] && [ "$QUICK_MODE" = false ]; then
     if [ -d "$HOME/.cache/deva" ]; then
         DOCKER_ARGS+=("-v" "$HOME/.cache/deva:/home/deva/.cache/deva")
     fi
+    if [ -d "$HOME/.agents" ]; then
+        DOCKER_ARGS+=("-v" "$HOME/.agents:/home/deva/.agents")
+    fi
 fi
 
 append_user_envs
