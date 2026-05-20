@@ -554,7 +554,11 @@ set_user_env_value() {
         retained+=("$spec")
     done
 
-    USER_ENVS=("${retained[@]}")
+    if [ ${#retained[@]} -gt 0 ]; then
+        USER_ENVS=("${retained[@]}")
+    else
+        USER_ENVS=()
+    fi
     USER_ENVS+=("$name=$value")
     export "$name=$value"
 }
