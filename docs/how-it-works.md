@@ -48,6 +48,8 @@ Supported directives are simple:
 - `AUTH_METHOD=...`
 - `PROFILE=...`
 - `EPHEMERAL=...`
+- `CODEX_BROWSER_MCP=true`
+- `CODEX_CONFIG=key=value`
 
 See [`.deva.example`](https://github.com/thevibeworks/deva/blob/main/.deva.example).
 
@@ -143,6 +145,13 @@ For ephemeral mode, it runs the agent directly in `docker run`.
 - Gemini: injects `--yolo`
 
 This is not subtle. The container is the trust boundary, so the agent's internal approval system is intentionally bypassed.
+
+## Browser Wiring
+
+- `deva.sh claude -- --chrome` is Claude's host Chrome bridge. deva mounts the host bridge dir and wires the container tmp path Claude expects.
+- `deva.sh codex --browser-mcp` is Codex MCP wiring. deva injects a session-only `mcp_servers.playwright` override and uses the rust image profile.
+
+Do not treat these as interchangeable. Codex CLI does not consume Claude's `--chrome` bridge, and Claude's native `--chrome` mode does not read Codex MCP config.
 
 ## Proxy and Network Behavior
 

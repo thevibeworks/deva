@@ -13,6 +13,24 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-04-28] Dev Log: agent-context consolidation — ~/.claude as single source of truth [WIP]
+- Why: agent customizations are scattered across three directories (=~/.claude/=, =~/.codex/=, =~/.agents/=), 10 concepts are duplicated between Claude Code agents and Codex skills and are already diverging, and the shared global instructions (GENERAL-AGENTS.md) copied into both =~/.claude/CLAUDE.md= and =~/.codex/AGENTS.md= are 30 lines out of sync
+- What:
+  - **[PLANNING]** Phase 1 — establish source of truth: =~/.claude/= is canonical; Claude Code agents/ are authoritative for the 10 duplicated concepts; =~/.claude/CLAUDE.md= is the master global instructions file
+  - **[PLANNING]** Phase 2 — Codex sync mechanism: decision needed between symlinking =~/.codex/AGENTS.md= -> =~/.claude/CLAUDE.md= vs. a sync script that copies with Codex-specific adaptations; leaning toward symlink for zero-drift maintenance
+  - **[PLANNING]** Phase 3 — deduplicate Codex skills: remove from =~/.codex/skills/= all 10 Claude Code agent duplicates (linus-committer, linus-rants, comment-flusher, etc.) plus 8 skills already covered by the superpowers plugin in CC (brainstorming, executing-plans, writing-plans, dispatching-parallel-agents, subagent-driven-development, skill-creator-6rok, using-superpowers, codex-primary-runtime); retain Codex-only skills: docker-compose-safe-deploy, systematic-debugging, test-driven-development, verification-before-completion, finishing-a-development-branch, using-git-worktrees, receiving-code-review, writing-skills
+  - **[PLANNING]** Phase 4 — clean =~/.agents/=: this directory is dead weight; Claude Code does not scan it; Codex only scans .agents/ walking up from cwd, not from HOME; decide whether to archive the telegram TS package and repurpose the dir as a shared skill source, or delete it entirely
+  - **[PLANNING]** Phase 5 — purge stale files: delete all .bak/.backup files from =~/.claude/= and =~/.codex/= (~1MB), delete empty =~/.codex/instructions.md=, clean =~/.claude/.claude.json= backup chain
+  - **[PLANNING]** Phase 6 — document the layout: brief README or section in CLAUDE.md covering what lives where, how to add new skills/agents, and the Codex sync workflow
+
+- Open decisions:
+  1. Symlink =AGENTS.md= -> =CLAUDE.md=, or keep separate with a sync script? (symlink eliminates drift but loses ability to add Codex-specific front matter)
+  2. Kill the 10 Codex duplicates entirely, or keep for standalone Codex use without deva? (Claude Code + superpowers already covers the gap when running inside deva)
+  3. =~/.agents/=: repurpose as shared skill source readable by both tools, or delete?
+  4. Should unique Codex workflow skills (TDD, systematic-debugging, finishing-a-development-branch, etc.) be ported back into Claude Code agents?
+
+- Result: **[WIP — no files changed yet]** planning entry only; execution blocked on the four decisions above
+
 # [2026-04-13] Dev Log: adopt smux tmux-bridge as layer-2 agent comms
 - Why: deva-v2 proposal left the agent-to-agent transport CLI as an open question; smux (github.com/ShawnPana/smux) shipped exactly the shape we sketched (read/type/keys/label/envelope) in 403 lines of bash, MIT-licensed. Reinventing it would be waste. The existing `deva-bridge-tmux` (socat TCP) is layer 1 (kernel boundary); `tmux-bridge` is layer 2 (semantic). They compose cleanly.
 - What:

@@ -61,7 +61,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ARG PYTHON_VERSION=3.14t
 RUN /root/.local/bin/uv python install "${PYTHON_VERSION}"
 
-ARG GO_VERSION=1.26.2
+ARG GO_VERSION=1.26.3
 RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     GO_ARCH=$([ "$ARCH" = "amd64" ] && echo "amd64" || echo "arm64") && \
@@ -205,10 +205,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 FROM agent-base AS final
 
 # Declare ARGs immediately before usage to minimize cache invalidation
-ARG CLAUDE_CODE_VERSION=2.1.116
+ARG CLAUDE_CODE_VERSION=2.1.143
 ARG CLAUDE_TRACE_VERSION=1.0.9
-ARG CODEX_VERSION=0.122.0
-ARG GEMINI_CLI_VERSION=0.38.2
+ARG CODEX_VERSION=0.131.0
+ARG GEMINI_CLI_VERSION=0.42.0
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}

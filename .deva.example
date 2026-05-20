@@ -49,6 +49,14 @@ EPHEMERAL=false
 #
 # 6. Disable ephemeral containers (persistent):
 #    EPHEMERAL=false
+#
+# 7. Enable Codex browser MCP for this project:
+#    DEFAULT_AGENT=codex
+#    CODEX_BROWSER_MCP=true
+#
+#    Optional session-only Codex config overrides:
+#    CODEX_CONFIG=features.apps=false
+#    CODEX_CONFIG=features.plugins=false
 
 # Hybrid Agent Setup:
 #

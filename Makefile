@@ -25,18 +25,18 @@ DETECTED_IMAGE := $(shell \
 		echo "$(IMAGE_NAME):$(TAG)"; \
 	fi)
 NODE_MAJOR ?= 22
-GO_VERSION ?= 1.26.2
+GO_VERSION ?= 1.26.3
 PYTHON_VERSION ?= 3.14t
 DELTA_VERSION ?= 0.19.2
 TMUX_VERSION ?= 3.6a
 TMUX_SHA256 ?= b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759
-CLAUDE_CODE_VERSION ?= 2.1.116
+CLAUDE_CODE_VERSION ?= 2.1.143
 CLAUDE_TRACE_VERSION ?= 1.0.9
-CODEX_VERSION ?= 0.122.0
-GEMINI_CLI_VERSION ?= 0.38.2
+CODEX_VERSION ?= 0.131.0
+GEMINI_CLI_VERSION ?= 0.42.0
 ATLAS_CLI_VERSION ?= v0.1.4
 COPILOT_API_VERSION ?= 0ea08febdd7e3e055b03dd298bf57e669500b5c1
-PLAYWRIGHT_VERSION ?= 1.59.1
+PLAYWRIGHT_VERSION ?= 1.60.0
 RUST_TOOLCHAINS ?= stable
 RUST_DEFAULT_TOOLCHAIN ?= stable
 RUST_TARGETS ?= wasm32-unknown-unknown
@@ -402,10 +402,10 @@ help:
 	@echo "  make CLAUDE_CODE_VERSION=2.0.5 build          # Override with specific version"
 	@echo "  make GEMINI_CLI_VERSION=0.18.0 build          # Override gemini version"
 	@echo "  make ATLAS_CLI_VERSION=5f6a20c build          # Pin atlas-cli to specific commit"
-	@echo "  make GO_VERSION=1.26.2 build                  # Override Go pin"
+	@echo "  make GO_VERSION=1.26.3 build                  # Override Go pin"
 	@echo "  make toolchains                               # Show pinned toolchain inventory"
 	@echo "  make scripts                                  # List helper scripts"
 	@echo "  make versions-pin                             # Refresh shared pin file"
 	@echo "  make versions                                 # Check current versions"
-	@echo "  make PLAYWRIGHT_VERSION=1.59.1 build-rust     # Override rust browser tooling"
+	@echo "  make PLAYWRIGHT_VERSION=1.60.0 build-rust     # Override rust browser tooling"
 	@echo "  make versions-up                              # Upgrade to latest upstream versions"
