@@ -643,6 +643,94 @@ generate_container_slug() {
     generate_container_slug_for_path "$(pwd)"
 }
 
+extract_auth_file_stem() {
+    local path="$1"
+    local base
+    base="$(basename "$path")"
+    base="${base%.credentials.json}"
+    base="${base%.json}"
+    base="$(sanitize_slug_component "$base")"
+    printf '%s' "${base:0:20}"
+}
+
+generate_auth_tag() {
+    local agent="$1"
+    local auth_method="${2:-}"
+    local creds_file="${3:-}"
+    local env_override="${4:-false}"
+
+    if [ "$env_override" = true ]; then
+        printf '%s' "env"
+        return
+    fi
+
+    if [ -z "$auth_method" ]; then
+        printf '%s' "auth-default"
+        return
+    fi
+
+    case "$agent:$auth_method" in
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth)
+            printf '%s' "auth-default"
+            return
+            ;;
+    esac
+
+    case "$auth_method" in
+        credentials-file)
+            if [ -n "$creds_file" ]; then
+                local stem
+                stem="$(extract_auth_file_stem "$creds_file")"
+                printf '%s' "auth-file-${stem}"
+            else
+                printf '%s' "auth-file"
+            fi
+            ;;
+        api-key|gemini-api-key)
+            local key_val=""
+            case "$agent" in
+                claude) key_val="${ANTHROPIC_API_KEY:-}" ;;
+                codex)  key_val="${OPENAI_API_KEY:-}" ;;
+                gemini) key_val="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}" ;;
+            esac
+            if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
+                printf '%s' "api-key-${key_val: -4}"
+            else
+                printf '%s' "api-key"
+            fi
+            ;;
+        *)
+            printf '%s' "$(sanitize_slug_component "$auth_method")"
+            ;;
+    esac
+}
+
+compute_shape_hash() {
+    local image_ref="$1"
+    local volume_input="${2:-}"
+    local config_input="${3:-}"
+    local combined="$image_ref"
+    [ -n "$volume_input" ] && combined="${combined}|${volume_input}"
+    [ -n "$config_input" ] && combined="${combined}|${config_input}"
+    short_hash "$combined" 8
+}
+
+build_container_name() {
+    local prefix="$1"
+    local agent="$2"
+    local auth_tag="$3"
+    local slug="$4"
+    local shape_hash="$5"
+    local ephemeral="${6:-false}"
+    local pid="${7:-}"
+
+    local name="${prefix}--${agent}--${auth_tag}--${slug}..${shape_hash}"
+    if [ "$ephemeral" = true ] && [ -n "$pid" ]; then
+        name="${name}--${pid}"
+    fi
+    printf '%s' "$name"
+}
+
 slug_candidates_for_path() {
     local path="$1"
     local parent project
@@ -740,15 +828,19 @@ project_container_rows() {
         return
     fi
 
+    local esc_prefix
+    esc_prefix=$(printf '%s' "$DEVA_CONTAINER_PREFIX" | sed -e 's/[.[\\^$*+?{}()|]/\\&/g')
     local pattern=""
     local slug escaped
     for slug in $slugs; do
         [ -n "$slug" ] || continue
         escaped=$(printf '%s' "$slug" | sed -e 's/[.[\\^$*+?{}()|]/\\&/g')
+        local new_fmt="^${esc_prefix}--.*--${escaped}([.-]|$)"
+        local old_fmt="^${esc_prefix}-${escaped}([.-]|$)"
         if [ -n "$pattern" ]; then
-            pattern="${pattern}|-${escaped}([.-]|$)"
+            pattern="${pattern}|(${new_fmt})|(${old_fmt})"
         else
-            pattern="-${escaped}([.-]|$)"
+            pattern="(${new_fmt})|(${old_fmt})"
         fi
     done
 
@@ -769,15 +861,19 @@ project_container_rows() {
 
 extract_agent_from_name() {
     local name="$1"
-    local rest="${name#"${DEVA_CONTAINER_PREFIX}"-}"
+    local rest="${name#"${DEVA_CONTAINER_PREFIX}"}"
 
-    # Ephemeral pattern: ends with -<agent>-<pid> where pid is all digits
-    if [[ "$rest" =~ -([a-z]+)-([0-9]+)$ ]]; then
-        local agent="${BASH_REMATCH[1]}"
-        printf '%s' "$agent"
-    else
-        printf 'share'
+    if [[ "$rest" =~ ^--([a-z]+)-- ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return
     fi
+
+    if [[ "$rest" =~ -([a-z]+)-([0-9]+)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return
+    fi
+
+    printf 'share'
 }
 
 pick_container() {
@@ -902,37 +998,33 @@ prepare_base_docker_args() {
     local slug
     slug="$(generate_container_slug)"
 
-    local volume_hash=""
+    local volume_input=""
     if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
-        volume_hash=$(compute_volume_hash)
+        volume_input=$(printf '%s\n' "${USER_VOLUMES[@]}" | sort | tr '\n' '|')
     fi
 
-    # Include config-home in container identity when explicit.
-    # Use CONFIG_HOME if set, else CONFIG_ROOT (root mode clears CONFIG_HOME).
-    local config_hash=""
-    local config_hash_source=""
+    local config_input=""
     if [ "$CONFIG_HOME_FROM_CLI" = true ]; then
         if [ -n "$CONFIG_HOME" ]; then
-            config_hash_source="$CONFIG_HOME"
+            config_input="$CONFIG_HOME"
         elif [ -n "$CONFIG_ROOT" ]; then
-            config_hash_source="$CONFIG_ROOT"
+            config_input="$CONFIG_ROOT"
         fi
     fi
-    [ -n "$config_hash_source" ] && config_hash=$(short_hash "$config_hash_source" 6)
 
-    local image_hash=""
-    image_hash=$(short_hash "$(docker_image_ref)" 6)
+    local image_ref
+    image_ref="$(docker_image_ref)"
+    local shape_hash
+    shape_hash=$(compute_shape_hash "$image_ref" "$volume_input" "$config_input")
 
-    local suffix=""
-    [ -n "$image_hash" ] && suffix="..i${image_hash}"
-    [ -n "$volume_hash" ] && suffix="${suffix}..v${volume_hash}"
-    [ -n "$config_hash" ] && suffix="${suffix}..c${config_hash}"
+    local auth_tag="auth-default"
+    container_name=$(build_container_name \
+        "$DEVA_CONTAINER_PREFIX" "$ACTIVE_AGENT" "$auth_tag" \
+        "$slug" "$shape_hash" "$EPHEMERAL_MODE" "$$")
 
     if [ "$EPHEMERAL_MODE" = true ]; then
-        container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}-${ACTIVE_AGENT}-$$"
         DOCKER_ARGS=(run --rm "${DOCKER_TERMINAL_ARGS[@]}")
     else
-        container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}"
         DOCKER_ARGS=(run -d)
     fi
 
@@ -947,7 +1039,6 @@ prepare_base_docker_args() {
         --add-host host.docker.internal:host-gateway
     )
 
-    # Attach labels to identify workspace and container grouping
     local ws_hash
     ws_hash=$(workspace_hash)
     DOCKER_ARGS+=(
@@ -957,14 +1048,9 @@ prepare_base_docker_args() {
         --label "deva.workspace_hash=${ws_hash}"
         --label "deva.agent=${ACTIVE_AGENT}"
         --label "deva.ephemeral=${EPHEMERAL_MODE}"
-        --label "deva.image=$(docker_image_ref)"
+        --label "deva.image=$image_ref"
+        --label "deva.shape_hash=${shape_hash}"
     )
-    if [ -n "$volume_hash" ]; then
-        DOCKER_ARGS+=(--label "deva.volhash=${volume_hash}")
-    fi
-    if [ -n "$image_hash" ]; then
-        DOCKER_ARGS+=(--label "deva.image_hash=${image_hash}")
-    fi
 
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
     if [ -n "${LC_ALL:-}" ]; then DOCKER_ARGS+=(-e "LC_ALL=$LC_ALL"); fi
@@ -1427,12 +1513,12 @@ short_hash() {
     local input="$1"
     local length="${2:-8}"
 
-    if command -v md5sum >/dev/null 2>&1; then
-        printf '%s' "$input" | md5sum | cut -c1-"$length"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$input" | sha256sum | cut -c1-"$length"
     elif command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$input" | shasum | cut -c1-"$length"
+        printf '%s' "$input" | shasum -a 256 | cut -c1-"$length"
     else
-        printf '%s' "$input" | cksum | cut -d' ' -f1 | cut -c1-"$length"
+        printf '%s' "$input" | md5sum | cut -c1-"$length"
     fi
 }
 
@@ -2097,7 +2183,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
             else
                 slug="$(generate_container_slug)"
                 escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
-                rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|-|$)"
+                rgx="^${DEVA_CONTAINER_PREFIX}(--.*--${escaped_slug}|-${escaped_slug})(\\.\\.|-|$)"
                 all_names=$(docker ps -a --format '{{.Names}}')
                 matching_names=$(echo "$all_names" | grep -E -- "$rgx" || true)
             fi
@@ -2164,7 +2250,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
             if [ -z "$matching_stopped" ]; then
                 slug="$(generate_container_slug)"
                 escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
-                rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|-|$)"
+                rgx="^${DEVA_CONTAINER_PREFIX}(--.*--${escaped_slug}|-${escaped_slug})(\\.\\.|-|$)"
                 all_stopped=$(docker ps -a --filter "status=exited" --format '{{.Names}}')
                 matching_stopped=$(echo "$all_stopped" | grep -E -- "$rgx" || true)
             fi
@@ -2494,91 +2580,60 @@ else
     agent_prepare
 fi
 
-# Update container name based on auth method
-if [ -n "${AUTH_METHOD:-}" ]; then
-    # Determine if we need auth suffix
-    needs_auth_suffix=false
+# Rewrite container name now that AUTH_METHOD is known from agent_prepare().
+# prepare_base_docker_args used auth-default; update if auth is non-default.
+{
+    _needs_rewrite=false
     _env_auth_override=false
-    if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" != "claude" ]; then
-        needs_auth_suffix=true
-    elif [ "$ACTIVE_AGENT" = "codex" ] && [ "$AUTH_METHOD" != "chatgpt" ]; then
-        needs_auth_suffix=true
-    elif [ "$ACTIVE_AGENT" = "gemini" ] && [ "$AUTH_METHOD" != "oauth" ] && [ "$AUTH_METHOD" != "gemini-app-oauth" ]; then
-        needs_auth_suffix=true
+
+    if [ -n "${AUTH_METHOD:-}" ]; then
+        case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth) ;;
+            *) _needs_rewrite=true ;;
+        esac
+
+        if [ "$_needs_rewrite" = false ] && has_auth_override; then
+            _needs_rewrite=true
+            _env_auth_override=true
+        fi
     fi
 
-    # Env-var auth override: default method but auth env vars reaching container.
-    # Container name must change when effective auth source changes.
-    if [ "$needs_auth_suffix" = false ] && has_auth_override; then
-        needs_auth_suffix=true
-        _env_auth_override=true
-    fi
+    if [ "$_needs_rewrite" = true ]; then
+        _rw_slug="$(generate_container_slug)"
 
-    if [ "$needs_auth_suffix" = true ]; then
-        slug="$(generate_container_slug)"
-        volume_hash=""
+        _rw_vol_input=""
         if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
-            volume_hash=$(compute_volume_hash)
+            _rw_vol_input=$(printf '%s\n' "${USER_VOLUMES[@]}" | sort | tr '\n' '|')
         fi
-
-        # Recompute config hash to preserve in auth-rewritten name
-        auth_config_hash=""
-        auth_config_src=""
+        _rw_cfg_input=""
         if [ "$CONFIG_HOME_FROM_CLI" = true ]; then
-            if [ -n "$CONFIG_HOME" ]; then
-                auth_config_src="$CONFIG_HOME"
-            elif [ -n "$CONFIG_ROOT" ]; then
-                auth_config_src="$CONFIG_ROOT"
-            fi
-        fi
-        [ -n "$auth_config_src" ] && auth_config_hash=$(short_hash "$auth_config_src" 6)
-
-        image_hash=$(short_hash "$(docker_image_ref)" 6)
-
-        # Hash credential file path for credentials-file auth
-        creds_hash=""
-        if [ "$AUTH_METHOD" = "credentials-file" ] && [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
-            creds_hash=$(short_hash "$CUSTOM_CREDENTIALS_FILE" 8)
+            [ -n "$CONFIG_HOME" ] && _rw_cfg_input="$CONFIG_HOME"
+            [ -z "$_rw_cfg_input" ] && [ -n "$CONFIG_ROOT" ] && _rw_cfg_input="$CONFIG_ROOT"
         fi
 
-        new_container_name=""
-        if [ "$_env_auth_override" = true ]; then
-            auth_suffix="env"
-        else
-            auth_suffix="${AUTH_METHOD}"
-        fi
-        [ -n "$creds_hash" ] && auth_suffix="${AUTH_METHOD}-${creds_hash}"
-        auth_suffix="${auth_suffix}-${ACTIVE_AGENT}"
+        _rw_shape=$(compute_shape_hash "$(docker_image_ref)" "$_rw_vol_input" "$_rw_cfg_input")
+        _rw_auth_tag=$(generate_auth_tag "$ACTIVE_AGENT" "$AUTH_METHOD" "${CUSTOM_CREDENTIALS_FILE:-}" "$_env_auth_override")
 
-        # Build suffix chain: volume + config + auth
-        name_suffix=""
-        [ -n "$image_hash" ] && name_suffix="..i${image_hash}"
-        [ -n "$volume_hash" ] && name_suffix="${name_suffix}..v${volume_hash}"
-        [ -n "$auth_config_hash" ] && name_suffix="${name_suffix}..c${auth_config_hash}"
-        name_suffix="${name_suffix}..${auth_suffix}"
+        _rw_name=$(build_container_name \
+            "$DEVA_CONTAINER_PREFIX" "$ACTIVE_AGENT" "$_rw_auth_tag" \
+            "$_rw_slug" "$_rw_shape" "$EPHEMERAL_MODE" "$$")
 
-        if [ "$EPHEMERAL_MODE" = true ]; then
-            new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}${name_suffix}-${ACTIVE_AGENT}-$$"
-        else
-            new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}${name_suffix}"
-        fi
-
-        # Update container name in DOCKER_ARGS
         for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
             if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ]; then
-                DOCKER_ARGS[i + 1]="$new_container_name"
+                DOCKER_ARGS[i + 1]="$_rw_name"
                 break
             fi
         done
+
+        DOCKER_ARGS+=(--label "deva.auth_tag=${_rw_auth_tag}")
     fi
 
-    # Label auth method for easier filtering
-    DOCKER_ARGS+=(--label "deva.auth=${AUTH_METHOD}")
-
-    # Export container introspection variables
-    DOCKER_ARGS+=(-e "DEVA_AUTH_METHOD=${AUTH_METHOD}")
-    [ -n "${AUTH_DETAILS:-}" ] && DOCKER_ARGS+=(-e "DEVA_AUTH_DETAILS=${AUTH_DETAILS}")
-fi
+    if [ -n "${AUTH_METHOD:-}" ]; then
+        DOCKER_ARGS+=(--label "deva.auth=${AUTH_METHOD}")
+        DOCKER_ARGS+=(-e "DEVA_AUTH_METHOD=${AUTH_METHOD}")
+        [ -n "${AUTH_DETAILS:-}" ] && DOCKER_ARGS+=(-e "DEVA_AUTH_DETAILS=${AUTH_DETAILS}")
+    fi
+}
 
 # Determine container name early for env injection
 CONTAINER_NAME=""
