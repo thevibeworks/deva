@@ -124,6 +124,20 @@ if grep -F -- "-v $hybrid_root/host/.codex:/home/deva/.codex" <<<"$cli_out" >/de
     exit 1
 fi
 
+mkdir -p "$hybrid_root/home/.agents" "$hybrid_root/cli/.agents"
+agents_out="$(run_hybrid claude --dry-run -v "$hybrid_root/cli/.agents/:/home/deva/.agents" || true)"
+if grep -F -- 'duplicate bind mount target detected' <<<"$agents_out" >/dev/null; then
+    echo "CLI -v override for /home/deva/.agents triggered duplicate-target error" >&2
+    echo "$agents_out" >&2
+    exit 1
+fi
+agents_count="$(count_target /home/deva/.agents "$agents_out")"
+if [[ "$agents_count" -ne 1 ]]; then
+    echo "CLI -v override for /home/deva/.agents emitted $agents_count times (want 1)" >&2
+    echo "$agents_out" >&2
+    exit 1
+fi
+
 # ───── hybrid-by-default coverage ─────
 # Populated per-agent XDG subdirs trigger hybrid mounts automatically,
 # without any .deva VOLUME= entries. --config-home DIR still isolates.

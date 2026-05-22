@@ -47,6 +47,9 @@ jobs:
       - name: Unit tests (release-utils.sh)
         run: bash tests/test_release_utils.sh
 
+      - name: Unit tests (version-upgrade.sh)
+        run: bash tests/version-upgrade.sh
+
   smoke:
     name: Installer Smoke Test
     runs-on: ubuntu-latest

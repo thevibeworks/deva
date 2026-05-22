@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/version-pins.sh"
 # Defaults
 CHECK_IMAGE=${MAIN_IMAGE:-ghcr.io/thevibeworks/deva:latest}
 BUILD_IMAGE=${BUILD_IMAGE:-ghcr.io/thevibeworks/deva:latest}
+CORE_IMAGE=${CORE_IMAGE:-ghcr.io/thevibeworks/deva:core}
 RUST_IMAGE=${RUST_IMAGE:-ghcr.io/thevibeworks/deva:rust}
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
 RUST_DOCKERFILE=${RUST_DOCKERFILE:-Dockerfile.rust}
@@ -42,6 +43,7 @@ Options:
 
 Environment:
   MAIN_IMAGE            Main image name (default: ghcr.io/thevibeworks/deva:latest)
+  CORE_IMAGE            Core image name (default: ghcr.io/thevibeworks/deva:core)
   RUST_IMAGE            Rust image name (default: ghcr.io/thevibeworks/deva:rust)
   VERSION_PINS_FILE     Shared version pin file (default: versions.env)
   CLAUDE_CODE_VERSION   Override claude-code version
@@ -69,7 +71,7 @@ main() {
     echo -e "${CYAN}${BOLD}║  Upgrading to Latest Versions                      ║${RESET}"
     echo -e "${CYAN}${BOLD}╚════════════════════════════════════════════════════╝${RESET}"
     echo -e "${DIM}Time: $(date '+%Y-%m-%d %H:%M:%S')${RESET}"
-    echo -e "${DIM}Check: ${CHECK_IMAGE}  Build: ${BUILD_IMAGE}${RESET}"
+    echo -e "${DIM}Check: ${CHECK_IMAGE}  Build: ${BUILD_IMAGE}  Core: ${CORE_IMAGE}${RESET}"
     echo ""
 
     bash "$SCRIPT_DIR/toolchain-report.sh"
@@ -122,6 +124,19 @@ main() {
         echo ""
     fi
 
+    section "Building Core Image"
+    docker build -f "$DOCKERFILE" \
+        --target agent-base \
+        --build-arg NODE_MAJOR="$NODE_MAJOR" \
+        --build-arg GO_VERSION="$GO_VERSION" \
+        --build-arg PYTHON_VERSION="$PYTHON_VERSION" \
+        --build-arg DELTA_VERSION="$DELTA_VERSION" \
+        --build-arg TMUX_VERSION="$TMUX_VERSION" \
+        --build-arg TMUX_SHA256="$TMUX_SHA256" \
+        --build-arg COPILOT_API_VERSION="$copilot_ver" \
+        -t "$CORE_IMAGE" .
+
+    echo ""
     section "Building Main Image"
     docker build -f "$DOCKERFILE" \
         --build-arg NODE_MAJOR="$NODE_MAJOR" \
@@ -141,7 +156,7 @@ main() {
     echo ""
     section "Building Rust Image"
     docker build -f "$RUST_DOCKERFILE" \
-        --build-arg BASE_IMAGE="$BUILD_IMAGE" \
+        --build-arg BASE_IMAGE="$CORE_IMAGE" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
         --build-arg CLAUDE_TRACE_VERSION="$claude_trace_ver" \
         --build-arg CODEX_VERSION="$codex_ver" \
