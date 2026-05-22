@@ -18,6 +18,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  load-version-pins:
+    name: Load Pinned Toolchain Versions
+    runs-on: ubuntu-latest
+    outputs:
+      node_major: ${{ steps.pins.outputs.node_major }}
+      go_version: ${{ steps.pins.outputs.go_version }}
+      python_version: ${{ steps.pins.outputs.python_version }}
+      delta_version: ${{ steps.pins.outputs.delta_version }}
+      tmux_version: ${{ steps.pins.outputs.tmux_version }}
+      tmux_sha256: ${{ steps.pins.outputs.tmux_sha256 }}
+      claude_trace_version: ${{ steps.pins.outputs.claude_trace_version }}
+      playwright_version: ${{ steps.pins.outputs.playwright_version }}
+      rust_toolchains: ${{ steps.pins.outputs.rust_toolchains }}
+      rust_default_toolchain: ${{ steps.pins.outputs.rust_default_toolchain }}
+      rust_targets: ${{ steps.pins.outputs.rust_targets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load pins
+        id: pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./scripts/version-pins.sh
+          load_version_pins
+          emit_github_outputs "$GITHUB_OUTPUT"
+
   resolve-versions:
     name: Resolve Latest Tool Versions
     runs-on: ubuntu-latest
@@ -59,7 +87,7 @@ jobs:
 
   build-base:
     name: Build Nightly Base Image
-    needs: resolve-versions
+    needs: [load-version-pins, resolve-versions]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -102,7 +130,14 @@ jobs:
           cache-from: type=gha,scope=nightly-base
           cache-to: type=gha,mode=max,scope=nightly-base
           build-args: |
+            NODE_MAJOR=${{ needs.load-version-pins.outputs.node_major }}
+            GO_VERSION=${{ needs.load-version-pins.outputs.go_version }}
+            PYTHON_VERSION=${{ needs.load-version-pins.outputs.python_version }}
+            DELTA_VERSION=${{ needs.load-version-pins.outputs.delta_version }}
+            TMUX_VERSION=${{ needs.load-version-pins.outputs.tmux_version }}
+            TMUX_SHA256=${{ needs.load-version-pins.outputs.tmux_sha256 }}
             CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
+            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
             ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
@@ -110,7 +145,7 @@ jobs:
 
   build-rust:
     name: Build Nightly Rust Image
-    needs: [resolve-versions, build-base]
+    needs: [load-version-pins, resolve-versions, build-base]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -154,6 +189,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=nightly-rust
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ needs.resolve-versions.outputs.stamp }}
+            CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
+            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
+            CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
+            GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
+            ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
+            PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
+            RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}
+            RUST_DEFAULT_TOOLCHAIN=${{ needs.load-version-pins.outputs.rust_default_toolchain }}
+            RUST_TARGETS=${{ needs.load-version-pins.outputs.rust_targets }}
 
   summary:
     name: Nightly Summary

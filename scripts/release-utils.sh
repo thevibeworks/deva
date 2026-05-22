@@ -18,15 +18,21 @@ WHITE='\033[1;37m'
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Tool Registry
-# Each tool: NAME|TYPE|SOURCE|LABEL|URL|CHANGELOG_URL
-# TYPE: npm, github-release, github-commit
+# Each tool: NAME|TYPE|SOURCE|LABEL|URL|CHANGELOG_URL|GROUP|IMAGE
+# TYPE:  npm, github-release, github-commit
+# GROUP: agent, browser, toolchain, runtime
+#        (subsets for `make <group>-up` scoped bumps)
+# IMAGE: base, main, rust
+#        (which Dockerfile stage contains the tool; drives rebuild-skip)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOOL_REGISTRY=(
-    "claude-code|npm|@anthropic-ai/claude-code|org.opencontainers.image.claude_code_version|https://www.npmjs.com/package/@anthropic-ai/claude-code|https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
-    "codex|npm|@openai/codex|org.opencontainers.image.codex_version|https://www.npmjs.com/package/@openai/codex|github:openai/codex"
-    "gemini-cli|npm|@google/gemini-cli|org.opencontainers.image.gemini_cli_version|https://www.npmjs.com/package/@google/gemini-cli|"
-    "atlas-cli|github-release|lroolle/atlas-cli|org.opencontainers.image.atlas_cli_version|https://github.com/lroolle/atlas-cli|github:lroolle/atlas-cli"
-    "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api|"
+    "claude-code|npm|@anthropic-ai/claude-code|org.opencontainers.image.claude_code_version|https://www.npmjs.com/package/@anthropic-ai/claude-code|https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md|agent|main"
+    "codex|npm|@openai/codex|org.opencontainers.image.codex_version|https://www.npmjs.com/package/@openai/codex|github:openai/codex|agent|main"
+    "gemini-cli|npm|@google/gemini-cli|org.opencontainers.image.gemini_cli_version|https://www.npmjs.com/package/@google/gemini-cli||agent|main"
+    "atlas-cli|github-release|lroolle/atlas-cli|org.opencontainers.image.atlas_cli_version|https://github.com/lroolle/atlas-cli|github:lroolle/atlas-cli|agent|main"
+    "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
+    "claude-trace|npm|@mariozechner/claude-trace|org.opencontainers.image.claude_trace_version|https://www.npmjs.com/package/@mariozechner/claude-trace|github:mariozechner/claude-trace|agent|main"
+    "playwright|npm|playwright|org.opencontainers.image.playwright_version|https://www.npmjs.com/package/playwright|github:microsoft/playwright|browser|rust"
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -34,8 +40,9 @@ TOOL_REGISTRY=(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 get_tool_field() {
     local tool=$1 field=$2
+    local name type source label url changelog group image entry
     for entry in "${TOOL_REGISTRY[@]}"; do
-        IFS='|' read -r name type source label url changelog <<< "$entry"
+        IFS='|' read -r name type source label url changelog group image <<< "$entry"
         if [[ $name == "$tool" ]]; then
             case $field in
                 name) echo "$name" ;;
@@ -44,6 +51,8 @@ get_tool_field() {
                 label) echo "$label" ;;
                 url) echo "$url" ;;
                 changelog) echo "$changelog" ;;
+                group) echo "$group" ;;
+                image) echo "$image" ;;
             esac
             return 0
         fi
@@ -52,10 +61,71 @@ get_tool_field() {
 }
 
 get_all_tools() {
+    local name entry
     for entry in "${TOOL_REGISTRY[@]}"; do
         IFS='|' read -r name _ <<< "$entry"
         echo "$name"
     done
+}
+
+get_tools_by_group() {
+    local want=$1
+    local name group entry
+    for entry in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r name _ _ _ _ _ group _ <<< "$entry"
+        [[ $group == "$want" ]] && echo "$name"
+    done
+}
+
+get_tools_by_image() {
+    local want=$1
+    local name image entry
+    for entry in "${TOOL_REGISTRY[@]}"; do
+        IFS='|' read -r name _ _ _ _ _ _ image <<< "$entry"
+        [[ $image == "$want" ]] && echo "$name"
+    done
+}
+
+# Resolve the active tool set honoring exactly one scope knob.
+# Reads GROUP / TOOL / IMAGE from the environment. Setting more than one
+# is a design error — callers must pick a single scope.
+#
+# Output: one tool name per line. Empty output means no tools matched
+# (valid, e.g. IMAGE=base before toolchain pins land).
+filter_tools() {
+    local set_count=0
+    [[ -n ${GROUP:-} ]] && set_count=$((set_count + 1))
+    [[ -n ${TOOL:-}  ]] && set_count=$((set_count + 1))
+    [[ -n ${IMAGE:-} ]] && set_count=$((set_count + 1))
+
+    if [[ $set_count -gt 1 ]]; then
+        echo "error: GROUP, TOOL, and IMAGE are mutually exclusive — pick one" >&2
+        return 2
+    fi
+
+    if [[ -n ${TOOL:-} ]]; then
+        if ! get_tool_field "$TOOL" name >/dev/null; then
+            echo "error: unknown tool: $TOOL" >&2
+            return 2
+        fi
+        echo "$TOOL"
+    elif [[ -n ${GROUP:-} ]]; then
+        get_tools_by_group "$GROUP"
+    elif [[ -n ${IMAGE:-} ]]; then
+        get_tools_by_image "$IMAGE"
+    else
+        get_all_tools
+    fi
+}
+
+# Collect the set of IMAGE values touched by a list of tools on stdin.
+# Drives rebuild-skip logic: only rebuild images whose contents changed.
+images_for_tools() {
+    local tool
+    while IFS= read -r tool; do
+        [[ -z $tool ]] && continue
+        get_tool_field "$tool" image
+    done | sort -u
 }
 
 get_display_name() {
@@ -66,6 +136,7 @@ get_display_name() {
         gemini-cli) echo "Gemini CLI" ;;
         atlas-cli) echo "Atlas CLI" ;;
         copilot-api) echo "Copilot API" ;;
+        playwright) echo "Playwright" ;;
         *) echo "$tool" ;;
     esac
 }
@@ -336,40 +407,32 @@ load_versions() {
     for tool in $(get_all_tools); do
         local label=$(get_tool_field "$tool" label)
 
+        # Rust-only tools are absent from main image; query the rust image instead.
+        local query_image=$image
+        [[ $tool == "playwright" ]] && query_image="${RUST_IMAGE:-ghcr.io/thevibeworks/deva:rust}"
+
         # Current from image
-        if docker inspect "$image" >/dev/null 2>&1; then
-            set_current "$tool" "$(get_image_version "$image" "$label")"
+        if docker inspect "$query_image" >/dev/null 2>&1; then
+            set_current "$tool" "$(get_image_version "$query_image" "$label")"
         else
             set_current "$tool" ""
         fi
 
-        # Latest from source (respect env overrides)
-        local env_var latest_val
-        case $tool in
-            claude-code) env_var="CLAUDE_CODE_VERSION" ;;
-            codex) env_var="CODEX_VERSION" ;;
-            gemini-cli) env_var="GEMINI_CLI_VERSION" ;;
-            atlas-cli) env_var="ATLAS_CLI_VERSION" ;;
-            copilot-api) env_var="COPILOT_API_VERSION" ;;
-        esac
-
-        eval "latest_val=\"\${$env_var:-}\""
-        if [[ -n $latest_val ]]; then
-            set_latest "$tool" "$latest_val"
+        # Always fetch latest from upstream. versions.env populates env vars
+        # unconditionally, so checking them here would compare pin-vs-pin and
+        # always report "up-to-date". CLI overrides are respected at BUILD
+        # time (version-upgrade.sh), not at CHECK time.
+        local fetched
+        fetched=$(fetch_latest_version "$tool")
+        if [[ -n $fetched ]]; then
+            set_latest "$tool" "$fetched"
         else
-            local fetched
-            fetched=$(fetch_latest_version "$tool")
-            if [[ -n $fetched ]]; then
-                set_latest "$tool" "$fetched"
+            local current=$(get_current "$tool")
+            if [[ -n $current ]]; then
+                echo -e "${YELLOW}Warning: Failed to fetch latest $tool, using current: $current${RESET}" >&2
+                set_latest "$tool" "$current"
             else
-                # Network failure - fallback to current image version
-                local current=$(get_current "$tool")
-                if [[ -n $current ]]; then
-                    echo -e "${YELLOW}Warning: Failed to fetch latest $tool, using current: $current${RESET}" >&2
-                    set_latest "$tool" "$current"
-                else
-                    echo -e "${RED}Error: Cannot determine version for $tool${RESET}" >&2
-                fi
+                echo -e "${RED}Error: Cannot determine version for $tool${RESET}" >&2
             fi
         fi
 

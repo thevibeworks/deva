@@ -1,0 +1,165 @@
+* [2026-04-19] Dev Log: hybrid agent mounts via .deva, compose-style future :DESIGN:MOUNTS:CONFIG:
+
+** Context
+Deva launches one container per agent invocation. The container is
+the sandbox. Each agent (claude, codex, gemini) has its own config
+home on the host under =~/.config/deva/<agent>/=, seeded by
+=autolink_legacy_into_deva_root= from legacy =~/.claude=, =~/.codex=,
+=~/.gemini=.
+
+Today's default mount path (=deva.sh= approximately 2711-2730):
+
+#+begin_src bash
+if [ "$QUICK_MODE" = true ]; then
+    : # -Q: no mounts
+elif [ -n "$CONFIG_HOME" ]; then
+    mount_config_home                 # walks only active agent's dir
+else
+    for d in "$CONFIG_ROOT"/*; do
+        mount_dir_contents_into_home "$d"   # walks every agent's dir
+    done
+fi
+#+end_src
+
+In the default (no CLI override) case, =CONFIG_HOME_AUTO=true= and
+=CONFIG_HOME= is auto-set to =~/.config/deva/<active-agent>=. The
+=elif= branch fires. Only the active agent's subdir is mounted.
+Result: =claude= containers do NOT see =.codex= or =.gemini= state.
+
+This was not always true. Before commit 8d81e8a ("feat(cli)!: add
+profiles (-p), XDG config root, Dockerfile.rust", 2025-09-23) the
+default path was a single flat =mount_config_home= walking one
+=CONFIG_HOME=. That was hybrid by accident. The XDG refactor
+introduced per-agent subdirs and per-agent isolation as a side
+effect. No one reverted hybrid; we replaced it with XDG.
+
+** The question
+Users building hybrid agentic workflows (claude invoking codex as a
+subprocess; gemini reading claude's session state) want all agent
+configs mounted into every container. What's the right primitive?
+
+** What we considered, and rejected
+
+*** Rejected: new =MOUNT_POLICY=solo|hybrid= key in .deva
+Invents schema for a decision the user already has primitives to
+express. Rejected.
+
+*** Rejected: multi-arg =--config-home claude=A --config-home codex=B=
+Explodes flag surface. CLI flags should scope to the active agent,
+matching the "one container, one nominal agent" mental model.
+Rejected.
+
+*** Rejected: flipping default to hybrid in =deva.sh=
+Silent behavior change. Users who set up =.codex= for codex-only
+containers would suddenly see it mounted into claude containers. Not
+how we ship. Rejected.
+
+** What we're doing instead
+
+*** Decision 1: =.deva= =VOLUME== is the hybrid recipe
+=.deva= already loads =VOLUME=host:container:mode= lines (see
+=.deva.example= and =load_config_sources= in =deva.sh= around
+1868-1892). That is the entire mechanism. Users who want hybrid add
+two lines to =~/.config/deva/.deva=:
+
+#+begin_src sh
+VOLUME=$HOME/.codex:/home/deva/.codex
+VOLUME=$HOME/.gemini:/home/deva/.gemini
+#+end_src
+
+Zero code change in =deva.sh=. Zero new schema. The primitive already
+exists.
+
+Trade-off: users who want hybrid must know the recipe. We document it
+in =.deva.example= and the README "Hybrid agent setup" section. Not
+auto-magic, but it's literally two lines.
+
+*** Decision 2: CLI scope stays singular
+=--config-home DIR= and =--auth-with MODE= apply to the agent named
+on the CLI. No per-agent qualifier syntax. No multi-arg accumulation.
+If a user wants codex configured differently inside a claude
+container, they set codex's config host-side (=~/.config/deva/codex/=
+or a symlink) and rely on the hybrid =VOLUME== from =.deva=.
+
+This keeps =argparse= surface small and matches the existing mental
+model: one deva invocation names one primary agent.
+
+*** Decision 3: real multi-agent orchestration belongs in a compose file
+The right long-term primitive for declaring an "agent team" is a
+compose-style declarative file, modeled on =docker-compose.yaml=.
+Scope sketch (not yet implemented):
+
+#+begin_src yaml
+# deva-compose.yaml
+team: hybrid-dev
+agents:
+  claude:
+    auth: claude
+    config-home: ~/.config/deva/claude
+  codex:
+    auth: chatgpt
+    config-home: ~/.config/deva/codex
+  gemini:
+    auth: oauth
+shared:
+  volumes:
+    - ~/work:/home/deva/work
+  env:
+    - TEAM=hybrid-dev
+entry-agent: claude
+#+end_src
+
+=deva up= (or =deva compose up hybrid-dev=) launches one container
+with the declared team wired in. Single auth per agent, single source
+of truth, versionable in VCS. This is a separate project and gets its
+own devlog when we pick it up.
+
+** Blast radius of this decision
+None today. No code changes in =deva.sh=.
+
+Docs changes only:
+- =.deva.example=: add "Hybrid agent setup" section showing the
+  =VOLUME== recipe.
+- README or agent-home docs: link to the recipe under a "running
+  multiple agents in one container" heading.
+
+** What to verify before closing the thread
+- =deva.sh claude --dry-run= with the two =VOLUME== lines in
+  =~/.config/deva/.deva= emits the expected =.codex= and =.gemini=
+  bind mounts.
+- =deva.sh codex --dry-run= same check, inverted.
+- Credential handling: =append_auth_credential_overlay= still only
+  overlays the active agent's file. The other agents' loose
+  credentials ride along inside their mounted dirs — same behavior
+  as if the user had used =--config-home= pointing at a flat dir.
+  This is existing, not new.
+- =-Q= still beats everything (no mounts, =.deva= not loaded because
+  =SKIP_CONFIG=true=).
+
+** Open questions (compose-file scope, not this devlog)
+- Does the team-container run one =docker run= with a single primary
+  agent command, or =docker compose= with one service per agent?
+- How does auth-env-var precedence work when multiple agents share a
+  container's environment?
+- Do we need per-agent env namespacing (=CLAUDE_*=, =CODEX_*=) to
+  avoid collisions?
+- Lifecycle: if one agent's subprocess crashes, does the team
+  container stay up?
+
+These are all compose-file concerns. Deferred.
+
+** Lessons for the reviewer (me)
+- Check existing config file schema before proposing new keys. =.deva=
+  already had =VOLUME== and =ENV== as general-purpose primitives.
+  Hybrid mount is expressible today; no new keys needed.
+- CLI flag semantics should match the mental model, not chase
+  feature-completeness. Singular =--config-home= is correct for a
+  "one-container-names-one-agent" model. Multi-arg is a symptom of
+  fighting the model, not extending it.
+- When the user signals "simpler," listen the first time.
+
+** Next
+- Add =.deva.example= "Hybrid agent setup" section.
+- Cross-link from =docs/= agent-home page (if exists) or README.
+- When compose-file design starts, open its own devlog referencing
+  this one.
