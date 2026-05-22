@@ -139,7 +139,7 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
     done && \
     npx playwright --version && \
     ls "$PLAYWRIGHT_BROWSERS_PATH" && \
-    test -n "$(find "$PLAYWRIGHT_BROWSERS_PATH" -path '*/chromium_headless_shell-*/*/headless_shell' -type f -perm /111 -print -quit)" && \
+    test -d "$(find "$PLAYWRIGHT_BROWSERS_PATH" -maxdepth 1 -type d -name 'chromium_headless_shell-*' -print -quit)" && \
     npm cache clean --force
 
 USER root
