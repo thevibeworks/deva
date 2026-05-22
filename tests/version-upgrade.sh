@@ -23,10 +23,12 @@ inspect)
     cat <<'JSON'
 [{"Config":{"Labels":{
   "org.opencontainers.image.claude_code_version":"2.1.81",
+  "org.opencontainers.image.claude_trace_version":"1.0.8",
   "org.opencontainers.image.codex_version":"0.116.0",
   "org.opencontainers.image.gemini_cli_version":"0.35.0",
   "org.opencontainers.image.atlas_cli_version":"v0.1.4",
-  "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1"
+  "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
+  "org.opencontainers.image.playwright_version":"1.59.0"
 }}}]
 JSON
     ;;
@@ -56,6 +58,12 @@ case "${2:-}" in
 @anthropic-ai/claude-code@2.1.87)
     echo '{"2.1.87":"2026-03-29T01:40:00Z"}'
     ;;
+@mariozechner/claude-trace)
+    echo "1.0.9"
+    ;;
+@mariozechner/claude-trace@1.0.9)
+    echo '{"1.0.9":"2026-03-29T01:40:00Z"}'
+    ;;
 @openai/codex)
     echo "0.117.0"
     ;;
@@ -67,6 +75,12 @@ case "${2:-}" in
     ;;
 @google/gemini-cli@0.35.3)
     echo '{"0.35.3":"2026-03-28T03:17:00Z"}'
+    ;;
+playwright)
+    echo "1.60.0"
+    ;;
+playwright@1.60.0)
+    echo '{"1.60.0":"2026-05-14T08:00:00Z"}'
     ;;
 *)
     echo "unexpected npm view args: $*" >&2
@@ -100,6 +114,12 @@ repos/ericc-ch/copilot-api/commits/0ea08febdd7e3e055b03dd298bf57e669500b5c1)
 repos/openai/codex/releases)
     echo '[]'
     ;;
+repos/mariozechner/claude-trace/releases)
+    echo '[]'
+    ;;
+repos/microsoft/playwright/releases)
+    echo '[]'
+    ;;
 *)
     echo "unexpected gh api args: $*" >&2
     exit 1
@@ -123,8 +143,8 @@ BUILD_IMAGE="ghcr.io/thevibeworks/deva:latest" \
 CORE_IMAGE="ghcr.io/thevibeworks/deva:core" \
 RUST_IMAGE="ghcr.io/thevibeworks/deva:rust" \
 GO_VERSION="1.26.2" \
-PLAYWRIGHT_VERSION="1.59.1" \
-PLAYWRIGHT_MCP_VERSION="0.0.70" \
+CLAUDE_TRACE_VERSION="1.0.9" \
+PLAYWRIGHT_VERSION="1.60.0" \
 "$REPO_ROOT/scripts/version-upgrade.sh" >/dev/null
 
 core_build="$(sed -n '1p' "$DOCKER_BUILD_LOG")"
@@ -149,6 +169,7 @@ done
 
 for expected in \
     "--build-arg CLAUDE_CODE_VERSION=2.1.87" \
+    "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg ATLAS_CLI_VERSION=v0.1.4" \
@@ -164,11 +185,11 @@ done
 for expected in \
     "--build-arg BASE_IMAGE=ghcr.io/thevibeworks/deva:core" \
     "--build-arg CLAUDE_CODE_VERSION=2.1.87" \
+    "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg ATLAS_CLI_VERSION=v0.1.4" \
-    "--build-arg PLAYWRIGHT_VERSION=1.59.1" \
-    "--build-arg PLAYWRIGHT_MCP_VERSION=0.0.70"
+    "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do
     [[ "$rust_build" == *"$expected"* ]] || {
         echo "rust build missing expected arg: $expected" >&2

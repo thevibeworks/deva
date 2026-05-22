@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# resolve-tool-versions.sh - Resolve latest upstream agent tool versions
 
 set -euo pipefail
 

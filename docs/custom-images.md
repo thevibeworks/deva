@@ -55,31 +55,49 @@ make build-rust-image
 changes to the agent layer do not force the Rust apt layer to rerun.
 
 Manual `docker build` is still possible, but it is an advanced path now.
-Do not rely on the Dockerfile defaults for release images. Pass explicit
-tool versions, and point the Rust build at the local core image:
+Do not rely on the Dockerfile defaults for release images. The repo pin
+file is `versions.env`. Load it, pass explicit build args, and point the
+Rust build at the local core image:
 
 ```bash
-bash ./scripts/resolve-tool-versions.sh
+source ./scripts/version-pins.sh
+load_version_pins
 
 docker build -t deva-local:latest \
-  --build-arg CLAUDE_CODE_VERSION=<claude_code_version> \
-  --build-arg CODEX_VERSION=<codex_version> \
-  --build-arg GEMINI_CLI_VERSION=<gemini_cli_version> \
-  --build-arg ATLAS_CLI_VERSION=<atlas_cli_version> \
-  --build-arg COPILOT_API_VERSION=<copilot_api_version> \
-  --build-arg GO_VERSION=1.26.2 \
+  --build-arg NODE_MAJOR="$NODE_MAJOR" \
+  --build-arg GO_VERSION="$GO_VERSION" \
+  --build-arg PYTHON_VERSION="$PYTHON_VERSION" \
+  --build-arg DELTA_VERSION="$DELTA_VERSION" \
+  --build-arg TMUX_VERSION="$TMUX_VERSION" \
+  --build-arg TMUX_SHA256="$TMUX_SHA256" \
+  --build-arg CLAUDE_CODE_VERSION="$CLAUDE_CODE_VERSION" \
+  --build-arg CLAUDE_TRACE_VERSION="$CLAUDE_TRACE_VERSION" \
+  --build-arg CODEX_VERSION="$CODEX_VERSION" \
+  --build-arg GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
+  --build-arg ATLAS_CLI_VERSION="$ATLAS_CLI_VERSION" \
+  --build-arg COPILOT_API_VERSION="$COPILOT_API_VERSION" \
   .
 
-docker build -f Dockerfile --target agent-base -t deva-local:core .
+docker build -f Dockerfile --target agent-base -t deva-local:core \
+  --build-arg NODE_MAJOR="$NODE_MAJOR" \
+  --build-arg GO_VERSION="$GO_VERSION" \
+  --build-arg PYTHON_VERSION="$PYTHON_VERSION" \
+  --build-arg DELTA_VERSION="$DELTA_VERSION" \
+  --build-arg TMUX_VERSION="$TMUX_VERSION" \
+  --build-arg TMUX_SHA256="$TMUX_SHA256" \
+  --build-arg COPILOT_API_VERSION="$COPILOT_API_VERSION"
 
 docker build -f Dockerfile.rust -t deva-local:rust \
   --build-arg BASE_IMAGE=deva-local:core \
-  --build-arg CLAUDE_CODE_VERSION=<claude_code_version> \
-  --build-arg CODEX_VERSION=<codex_version> \
-  --build-arg GEMINI_CLI_VERSION=<gemini_cli_version> \
-  --build-arg ATLAS_CLI_VERSION=<atlas_cli_version> \
-  --build-arg PLAYWRIGHT_VERSION=<playwright_version> \
-  --build-arg PLAYWRIGHT_MCP_VERSION=<playwright_mcp_version> \
+  --build-arg CLAUDE_CODE_VERSION="$CLAUDE_CODE_VERSION" \
+  --build-arg CLAUDE_TRACE_VERSION="$CLAUDE_TRACE_VERSION" \
+  --build-arg CODEX_VERSION="$CODEX_VERSION" \
+  --build-arg GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
+  --build-arg ATLAS_CLI_VERSION="$ATLAS_CLI_VERSION" \
+  --build-arg PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
+  --build-arg RUST_TOOLCHAINS="$RUST_TOOLCHAINS" \
+  --build-arg RUST_DEFAULT_TOOLCHAIN="$RUST_DEFAULT_TOOLCHAIN" \
+  --build-arg RUST_TARGETS="$RUST_TARGETS" \
   .
 ```
 
@@ -121,10 +139,6 @@ deva.sh codex
 
 That is the whole trick. This is not Kubernetes. It is just an image
 name plus a tag.
-
-If you want the same fast layering in your own registry for downstream
-profile builds, publish a `core` tag too and make the Rust image inherit
-from that instead of from the full `latest` image.
 
 ## Keep It Personal
 
@@ -172,23 +186,6 @@ DEVA_DOCKER_IMAGE=deva-local DEVA_DOCKER_TAG=extras deva.sh gemini
 ```
 
 That is usually the sane move.
-
-## Rust Image Includes Browser Tooling
-
-The rebuilt `rust` profile now bakes in:
-
-- `bubblewrap` for Claude Code subprocess isolation on Linux
-- Go `1.26.2`
-- Playwright CLI and Playwright MCP
-- Playwright browsers installed in-image
-- Google Chrome stable on `linux/amd64`
-
-Important detail:
-
-- Google Chrome's official Linux `.deb` is available for `amd64`
-- on `arm64`, the image still has Playwright Chromium/Firefox/WebKit, but not `google-chrome-stable`
-
-If you only bump `claude-code`, `codex`, or `gemini`, the Rust build should mostly reuse cached lower layers. The browser/toolchain layers sit below the volatile agent install layer on purpose.
 
 ## What Still Comes From The Wrapper
 

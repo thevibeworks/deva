@@ -1,0 +1,29 @@
+scripts/tmux-bridge is vendored from smux (upstream layer-2 agent comms CLI).
+
+Upstream:   https://github.com/ShawnPana/smux
+Commit:     95bf0b639e64a4c67b4f007b1bedc26395344e01
+Path:       scripts/tmux-bridge
+SHA256:     ed66862bf7d33a607da14b7c0046949d8cbb83b1a582917aca4dc6c93058395d
+License:    MIT (see scripts/THIRD_PARTY_LICENSES/smux-LICENSE)
+
+Byte-identical copy. Do not edit in place. To refresh:
+
+    curl -fsSLo scripts/tmux-bridge \
+      https://raw.githubusercontent.com/ShawnPana/smux/<commit>/scripts/tmux-bridge
+    sha256sum scripts/tmux-bridge
+    # update this file with the new commit + SHA256
+
+Why vendored instead of downloaded at build time:
+- reproducible builds (no network dep at image build)
+- auditable (code review sees exactly what we ship)
+- pinned (upstream moves; we upgrade on our schedule)
+
+What it is:
+- tmux-bridge is a 403-line bash CLI for cross-pane communication between
+  AI agents running in tmux. Read/type/keys/label/envelope primitives.
+- It is transport only; no coordinator, no state store.
+- Inside a deva container, it drives HOST tmux via the existing
+  deva-bridge-tmux socat tunnel. Agents auto-detect the socket from
+  $TMUX when attached, or via $TMUX_BRIDGE_SOCKET override.
+
+See docs/tmux-bridge-agent-comms.md for the full composition.

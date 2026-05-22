@@ -167,34 +167,64 @@ Reality check:
 - if the host socket file is absent, the extension may be installed but not yet connected
 - the published image still needs to be rebuilt with the patched `docker-entrypoint.sh`; otherwise the socket symlink is never created
 
-## Claude Fails With `bubblewrap is required`
+## Codex Browser Support Is Not Claude `--chrome`
 
-Symptom:
+Codex CLI does not have a Claude-style `--chrome` flag or the same host Chrome bridge socket. The Codex Chrome extension documented by OpenAI is a Codex app/plugin feature, not a deva mount target for the CLI container.
 
-- Claude exits early on Linux with:
-  - `bubblewrap is required for subprocess env scrubbing and isolation`
-
-What it means:
-
-- newer Claude Code on Linux expects `bwrap` for subprocess isolation
-- this is not a fake warning; without it, Claude may refuse to start that path
-
-What to do:
-
-- use an image rebuilt from current `Dockerfile` so `bubblewrap` is present
-- verify inside the container:
+For Codex CLI browser automation, use:
 
 ```bash
-bwrap --version
-claude --version
+deva.sh codex --browser-mcp
 ```
 
-Fallback:
+What deva does:
 
-- `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` disables that isolation path
-- that is a downgrade, not a fix
+- switches the default image profile to `rust`, where browser runtime dependencies live
+- injects a session-only Codex MCP override for `mcp_servers.playwright`
+- leaves your host `~/.codex/config.toml` untouched
 
-If `bwrap` exists and Claude still fails, you are debugging Claude's runtime behavior, not a missing package.
+The injected MCP command uses `npx -y`, so the first run may fetch `DEVA_CODEX_BROWSER_MCP_PACKAGE` unless it is already cached in the container.
+
+Check:
+
+```bash
+deva.sh codex --browser-mcp --debug --dry-run
+```
+
+Look for:
+
+- image `ghcr.io/thevibeworks/deva:rust`
+- `DEVA_CODEX_BROWSER_MCP=1`
+- `--config mcp_servers.playwright={command="npx",...}`
+
+To pin or test another Playwright MCP package without changing deva:
+
+```bash
+DEVA_CODEX_BROWSER_MCP_PACKAGE=@playwright/mcp@0.0.75 deva.sh codex --browser-mcp
+```
+
+In `.deva.local`, the same setup is:
+
+```text
+CODEX_BROWSER_MCP=true
+```
+
+If Codex also tries to start host-specific or unrelated MCP servers, add session-only Codex overrides instead of editing `~/.codex/config.toml`:
+
+```text
+CODEX_BROWSER_MCP=true
+CODEX_CONFIG=features.apps=false
+CODEX_CONFIG=features.plugins=false
+CODEX_CONFIG=mcp_servers.hn-research={url="https://hn.1lm.io/mcp",enabled=false}
+```
+
+Tradeoff: `features.plugins=false` disables plugin-provided Codex skills/tools for that session. Use it when a host-only plugin MCP, such as `computer-use`, cannot run inside the deva container.
+
+Common unrelated startup warnings:
+
+- `computer-use`: comes from the `computer-use@openai-bundled` plugin and expects a macOS app bundle, which is host-specific.
+- `codex_apps`: comes from Codex Apps/Connectors and is disabled by `CODEX_CONFIG=features.apps=false`.
+- `hn-research`: comes from a user MCP server entry. Disable it only for this session with the full inline table shown above.
 
 ## Dry-Run Looks Fine But Runtime Fails
 

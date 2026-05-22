@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         openssh-client rsync \
         shellcheck bat fd-find silversearcher-ag \
         vim \
-        procps psmisc zsh socat bubblewrap \
+        procps psmisc zsh socat \
         libevent-dev libncurses-dev bison
 
 # Prevent noisy setlocale warnings at shell startup
@@ -43,7 +43,7 @@ RUN git lfs install --system
 # Install language runtimes in parallel-friendly layers
 FROM base AS runtimes
 
-ARG NODE_MAJOR=24
+ARG NODE_MAJOR=22
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - && \
@@ -58,15 +58,16 @@ RUN curl -fsSL https://bun.sh/install | bash && \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Pre-install Python 3.14t (free-threaded) for uv
-RUN /root/.local/bin/uv python install 3.14t
+ARG PYTHON_VERSION=3.14t
+RUN /root/.local/bin/uv python install "${PYTHON_VERSION}"
 
-ARG GO_VERSION=1.26.2
+ARG GO_VERSION=1.26.3
 RUN --mount=type=cache,target=/tmp/go-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     GO_ARCH=$([ "$ARCH" = "amd64" ] && echo "amd64" || echo "arm64") && \
     cd /tmp/go-cache && \
-    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" && \
-    tar -C /usr/local -xzf "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+    wget -q https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \
+    tar -C /usr/local -xzf go${GO_VERSION}.linux-${GO_ARCH}.tar.gz
 
 # Install Copilot API (ericc-ch fork with latest features)
 # Placed at end of runtimes stage to avoid invalidating cache for stable runtimes
@@ -78,20 +79,7 @@ ARG COPILOT_API_VERSION
 LABEL org.opencontainers.image.copilot_api_version=${COPILOT_API_VERSION}
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    set -eu && \
-    i=0 && \
-    while :; do \
-        i=$((i + 1)) && \
-        if npm install -g npm@latest pnpm; then \
-            break; \
-        fi; \
-        if [ "$i" -ge 5 ]; then \
-            echo "npm install failed after $i attempts" >&2; \
-            exit 1; \
-        fi; \
-        echo "npm install failed (attempt $i), retrying..." >&2; \
-        sleep $((i * 5)); \
-    done && \
+    npm install -g pnpm && \
     git clone --branch "${COPILOT_API_BRANCH}" "${COPILOT_API_REPO}" /tmp/copilot-api && \
     cd /tmp/copilot-api && \
     git checkout "${COPILOT_API_COMMIT}" && \
@@ -134,14 +122,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install -y gh && \
     rm -f /tmp/githubcli-keyring.gpg
 
+ARG DELTA_VERSION=0.19.2
 RUN --mount=type=cache,target=/tmp/delta-cache,sharing=locked \
     ARCH=$(dpkg --print-architecture) && \
     DELTA_ARCH=$([ "$ARCH" = "amd64" ] && echo "x86_64" || echo "aarch64") && \
     cd /tmp/delta-cache && \
-    wget -q https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
-    tar -xzf delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
-    mv delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu/delta /usr/local/bin/ && \
-    rm -rf delta-0.18.2-${DELTA_ARCH}-unknown-linux-gnu*
+    wget -q https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
+    tar -xzf delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu.tar.gz && \
+    mv delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu/delta /usr/local/bin/ && \
+    rm -rf delta-${DELTA_VERSION}-${DELTA_ARCH}-unknown-linux-gnu*
 
 # Install tmux from source (protocol version must match host for socket bridge)
 # Same major.minor usually works; exact match is pragmatic, not required.
@@ -208,19 +197,22 @@ RUN echo 'export ZSH="$HOME/.oh-my-zsh"' > "$DEVA_HOME/.zshrc" && \
     echo 'export PATH=$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/go/bin:/usr/local/go/bin:$PATH' >> "$DEVA_HOME/.zshrc"
 
 # Pre-install uv for deva user and warm Python 3.14t
+ARG PYTHON_VERSION=3.14t
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    $DEVA_HOME/.local/bin/uv python install 3.14t
+    $DEVA_HOME/.local/bin/uv python install "${PYTHON_VERSION}"
 
 # Final image: install volatile agent packages on top of the stable base.
 FROM agent-base AS final
 
 # Declare ARGs immediately before usage to minimize cache invalidation
-ARG CLAUDE_CODE_VERSION=2.1.81
-ARG CODEX_VERSION=0.116.0
-ARG GEMINI_CLI_VERSION=0.35.0
+ARG CLAUDE_CODE_VERSION=2.1.143
+ARG CLAUDE_TRACE_VERSION=1.0.9
+ARG CODEX_VERSION=0.131.0
+ARG GEMINI_CLI_VERSION=0.42.0
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
+LABEL org.opencontainers.image.claude_trace_version=${CLAUDE_TRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 
@@ -238,9 +230,13 @@ USER root
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY scripts/deva-bridge-tmux /usr/local/bin/deva-bridge-tmux
+# tmux-bridge: vendored from smux (layer-2 agent comms CLI over tmux panes)
+# See scripts/tmux-bridge.VENDORED for upstream commit and SHA256 pin.
+COPY scripts/tmux-bridge /usr/local/bin/tmux-bridge
 
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh && \
     chmod 755 /usr/local/bin/deva-bridge-tmux && \
+    chmod 755 /usr/local/bin/tmux-bridge && \
     chmod -R 755 /usr/local/bin/scripts || true
 
 WORKDIR /root

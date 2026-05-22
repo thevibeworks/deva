@@ -8,9 +8,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: thevibeworks/deva
-  GO_VERSION: 1.26.2
-  PLAYWRIGHT_VERSION: 1.59.1
-  PLAYWRIGHT_MCP_VERSION: 0.0.70
 
 permissions:
   contents: read
@@ -21,6 +18,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  load-version-pins:
+    name: Load Pinned Toolchain Versions
+    runs-on: ubuntu-latest
+    outputs:
+      node_major: ${{ steps.pins.outputs.node_major }}
+      go_version: ${{ steps.pins.outputs.go_version }}
+      python_version: ${{ steps.pins.outputs.python_version }}
+      delta_version: ${{ steps.pins.outputs.delta_version }}
+      tmux_version: ${{ steps.pins.outputs.tmux_version }}
+      tmux_sha256: ${{ steps.pins.outputs.tmux_sha256 }}
+      claude_trace_version: ${{ steps.pins.outputs.claude_trace_version }}
+      playwright_version: ${{ steps.pins.outputs.playwright_version }}
+      rust_toolchains: ${{ steps.pins.outputs.rust_toolchains }}
+      rust_default_toolchain: ${{ steps.pins.outputs.rust_default_toolchain }}
+      rust_targets: ${{ steps.pins.outputs.rust_targets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load pins
+        id: pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./scripts/version-pins.sh
+          load_version_pins
+          emit_github_outputs "$GITHUB_OUTPUT"
+
   resolve-versions:
     name: Resolve Latest Tool Versions
     runs-on: ubuntu-latest
@@ -38,7 +63,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "22"
 
       - name: Resolve versions
         id: versions
@@ -62,7 +87,7 @@ jobs:
 
   build-base:
     name: Build Nightly Base Image
-    needs: [resolve-versions, build-core]
+    needs: [load-version-pins, resolve-versions]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -105,65 +130,22 @@ jobs:
           cache-from: type=gha,scope=nightly-base
           cache-to: type=gha,mode=max,scope=nightly-base
           build-args: |
+            NODE_MAJOR=${{ needs.load-version-pins.outputs.node_major }}
+            GO_VERSION=${{ needs.load-version-pins.outputs.go_version }}
+            PYTHON_VERSION=${{ needs.load-version-pins.outputs.python_version }}
+            DELTA_VERSION=${{ needs.load-version-pins.outputs.delta_version }}
+            TMUX_VERSION=${{ needs.load-version-pins.outputs.tmux_version }}
+            TMUX_SHA256=${{ needs.load-version-pins.outputs.tmux_sha256 }}
             CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
+            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
             ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
             COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
-            GO_VERSION=${{ env.GO_VERSION }}
-
-  build-core:
-    name: Build Nightly Core Image
-    needs: resolve-versions
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta-core
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=nightly-core
-            type=raw,value=nightly-${{ needs.resolve-versions.outputs.stamp }}-core
-          labels: |
-            org.opencontainers.image.title=deva-nightly-core
-            org.opencontainers.image.description=Nightly deva core image for downstream profile builds
-
-      - name: Build and push core image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: agent-base
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta-core.outputs.tags }}
-          labels: ${{ steps.meta-core.outputs.labels }}
-          cache-from: type=gha,scope=nightly-core
-          cache-to: type=gha,mode=max,scope=nightly-core
-          build-args: |
-            COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
-            GO_VERSION=${{ env.GO_VERSION }}
 
   build-rust:
     name: Build Nightly Rust Image
-    needs: [resolve-versions, build-core]
+    needs: [load-version-pins, resolve-versions, build-base]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -206,17 +188,20 @@ jobs:
           cache-from: type=gha,scope=nightly-rust
           cache-to: type=gha,mode=max,scope=nightly-rust
           build-args: |
-            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ needs.resolve-versions.outputs.stamp }}-core
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ needs.resolve-versions.outputs.stamp }}
             CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
+            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
             ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
-            PLAYWRIGHT_VERSION=${{ env.PLAYWRIGHT_VERSION }}
-            PLAYWRIGHT_MCP_VERSION=${{ env.PLAYWRIGHT_MCP_VERSION }}
+            PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
+            RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}
+            RUST_DEFAULT_TOOLCHAIN=${{ needs.load-version-pins.outputs.rust_default_toolchain }}
+            RUST_TARGETS=${{ needs.load-version-pins.outputs.rust_targets }}
 
   summary:
     name: Nightly Summary
-    needs: [resolve-versions, build-core, build-base, build-rust]
+    needs: [resolve-versions, build-base, build-rust]
     runs-on: ubuntu-latest
     steps:
       - name: Publish summary
@@ -224,8 +209,6 @@ jobs:
           cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           ## Published Nightly Images
 
-          - \`ghcr.io/thevibeworks/deva:nightly-core\`
-          - \`ghcr.io/thevibeworks/deva:nightly-${{ needs.resolve-versions.outputs.stamp }}-core\`
           - \`ghcr.io/thevibeworks/deva:nightly\`
           - \`ghcr.io/thevibeworks/deva:nightly-${{ needs.resolve-versions.outputs.stamp }}\`
           - \`ghcr.io/thevibeworks/deva:nightly-rust\`
