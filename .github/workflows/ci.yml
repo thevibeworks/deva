@@ -44,6 +44,9 @@ jobs:
           chmod +x scripts/version-check.sh
           ./scripts/version-check.sh
 
+      - name: Unit tests (release-utils.sh)
+        run: bash tests/test_release_utils.sh
+
   smoke:
     name: Installer Smoke Test
     runs-on: ubuntu-latest
@@ -51,25 +54,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Resolve tool versions
-        id: versions
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash ./scripts/resolve-tool-versions.sh
+      - name: Load pinned versions
+        id: pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./scripts/version-pins.sh
+          load_version_pins
+          emit_github_outputs "$GITHUB_OUTPUT"
 
       - name: Build local smoke image
         run: |
           docker build -t deva-smoke:ci \
-            --build-arg CLAUDE_CODE_VERSION="${{ steps.versions.outputs.claude_code_version }}" \
-            --build-arg CODEX_VERSION="${{ steps.versions.outputs.codex_version }}" \
-            --build-arg GEMINI_CLI_VERSION="${{ steps.versions.outputs.gemini_cli_version }}" \
-            --build-arg ATLAS_CLI_VERSION="${{ steps.versions.outputs.atlas_cli_version }}" \
-            --build-arg COPILOT_API_VERSION="${{ steps.versions.outputs.copilot_api_version }}" \
+            --build-arg NODE_MAJOR="${{ steps.pins.outputs.node_major }}" \
+            --build-arg GO_VERSION="${{ steps.pins.outputs.go_version }}" \
+            --build-arg PYTHON_VERSION="${{ steps.pins.outputs.python_version }}" \
+            --build-arg DELTA_VERSION="${{ steps.pins.outputs.delta_version }}" \
+            --build-arg TMUX_VERSION="${{ steps.pins.outputs.tmux_version }}" \
+            --build-arg TMUX_SHA256="${{ steps.pins.outputs.tmux_sha256 }}" \
+            --build-arg CLAUDE_CODE_VERSION="${{ steps.pins.outputs.claude_code_version }}" \
+            --build-arg CLAUDE_TRACE_VERSION="${{ steps.pins.outputs.claude_trace_version }}" \
+            --build-arg CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
+            --build-arg GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
+            --build-arg ATLAS_CLI_VERSION="${{ steps.pins.outputs.atlas_cli_version }}" \
+            --build-arg COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             .
 
       - name: Build core and rust images via Makefile
@@ -79,11 +87,22 @@ jobs:
             TAG=ci \
             CORE_TAG=ci-core \
             RUST_TAG=ci-rust \
-            CLAUDE_CODE_VERSION="${{ steps.versions.outputs.claude_code_version }}" \
-            CODEX_VERSION="${{ steps.versions.outputs.codex_version }}" \
-            GEMINI_CLI_VERSION="${{ steps.versions.outputs.gemini_cli_version }}" \
-            ATLAS_CLI_VERSION="${{ steps.versions.outputs.atlas_cli_version }}" \
-            COPILOT_API_VERSION="${{ steps.versions.outputs.copilot_api_version }}"
+            NODE_MAJOR="${{ steps.pins.outputs.node_major }}" \
+            GO_VERSION="${{ steps.pins.outputs.go_version }}" \
+            PYTHON_VERSION="${{ steps.pins.outputs.python_version }}" \
+            DELTA_VERSION="${{ steps.pins.outputs.delta_version }}" \
+            TMUX_VERSION="${{ steps.pins.outputs.tmux_version }}" \
+            TMUX_SHA256="${{ steps.pins.outputs.tmux_sha256 }}" \
+            CLAUDE_CODE_VERSION="${{ steps.pins.outputs.claude_code_version }}" \
+            CLAUDE_TRACE_VERSION="${{ steps.pins.outputs.claude_trace_version }}" \
+            CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
+            GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
+            ATLAS_CLI_VERSION="${{ steps.pins.outputs.atlas_cli_version }}" \
+            COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
+            PLAYWRIGHT_VERSION="${{ steps.pins.outputs.playwright_version }}" \
+            RUST_TOOLCHAINS="${{ steps.pins.outputs.rust_toolchains }}" \
+            RUST_DEFAULT_TOOLCHAIN="${{ steps.pins.outputs.rust_default_toolchain }}" \
+            RUST_TARGETS="${{ steps.pins.outputs.rust_targets }}"
 
       - name: Install and launch each agent without a TTY
         shell: bash
@@ -126,6 +145,26 @@ jobs:
           printf '%s\n' "$dry_run"
           grep -F -- "$bridge_dir:/deva-host-chrome-bridge" <<<"$dry_run"
           grep -F -- "$profile_dir/Extensions:/home/deva/.config/google-chrome/Default/Extensions:ro" <<<"$dry_run"
+
+      - name: Smoke bind mount shape guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVA_DOCKER_IMAGE=deva-smoke \
+          DEVA_DOCKER_TAG=ci \
+          ./scripts/test-mount-shape.sh
+
+      - name: Smoke agent tooling installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test-install-agent-tooling.sh
+
+      - name: Smoke version targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test-version-targets.sh
 
       - name: Smoke Chrome bridge entrypoint symlink
         shell: bash

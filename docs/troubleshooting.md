@@ -167,6 +167,65 @@ Reality check:
 - if the host socket file is absent, the extension may be installed but not yet connected
 - the published image still needs to be rebuilt with the patched `docker-entrypoint.sh`; otherwise the socket symlink is never created
 
+## Codex Browser Support Is Not Claude `--chrome`
+
+Codex CLI does not have a Claude-style `--chrome` flag or the same host Chrome bridge socket. The Codex Chrome extension documented by OpenAI is a Codex app/plugin feature, not a deva mount target for the CLI container.
+
+For Codex CLI browser automation, use:
+
+```bash
+deva.sh codex --browser-mcp
+```
+
+What deva does:
+
+- switches the default image profile to `rust`, where browser runtime dependencies live
+- injects a session-only Codex MCP override for `mcp_servers.playwright`
+- leaves your host `~/.codex/config.toml` untouched
+
+The injected MCP command uses `npx -y`, so the first run may fetch `DEVA_CODEX_BROWSER_MCP_PACKAGE` unless it is already cached in the container.
+
+Check:
+
+```bash
+deva.sh codex --browser-mcp --debug --dry-run
+```
+
+Look for:
+
+- image `ghcr.io/thevibeworks/deva:rust`
+- `DEVA_CODEX_BROWSER_MCP=1`
+- `--config mcp_servers.playwright={command="npx",...}`
+
+To pin or test another Playwright MCP package without changing deva:
+
+```bash
+DEVA_CODEX_BROWSER_MCP_PACKAGE=@playwright/mcp@0.0.75 deva.sh codex --browser-mcp
+```
+
+In `.deva.local`, the same setup is:
+
+```text
+CODEX_BROWSER_MCP=true
+```
+
+If Codex also tries to start host-specific or unrelated MCP servers, add session-only Codex overrides instead of editing `~/.codex/config.toml`:
+
+```text
+CODEX_BROWSER_MCP=true
+CODEX_CONFIG=features.apps=false
+CODEX_CONFIG=features.plugins=false
+CODEX_CONFIG=mcp_servers.hn-research={url="https://hn.1lm.io/mcp",enabled=false}
+```
+
+Tradeoff: `features.plugins=false` disables plugin-provided Codex skills/tools for that session. Use it when a host-only plugin MCP, such as `computer-use`, cannot run inside the deva container.
+
+Common unrelated startup warnings:
+
+- `computer-use`: comes from the `computer-use@openai-bundled` plugin and expects a macOS app bundle, which is host-specific.
+- `codex_apps`: comes from Codex Apps/Connectors and is disabled by `CODEX_CONFIG=features.apps=false`.
+- `hn-research`: comes from a user MCP server entry. Disable it only for this session with the full inline table shown above.
+
 ## Dry-Run Looks Fine But Runtime Fails
 
 That is normal in at least three cases:

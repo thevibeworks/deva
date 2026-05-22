@@ -18,6 +18,8 @@ DEVA_DOCKER_IMAGE="${DEVA_DOCKER_IMAGE:-ghcr.io/thevibeworks/deva}"
 DEVA_DOCKER_TAG="${DEVA_DOCKER_TAG:-latest}"
 DEVA_CONTAINER_PREFIX="${DEVA_CONTAINER_PREFIX:-deva}"
 DEFAULT_AGENT="${DEVA_DEFAULT_AGENT:-claude}"
+DEVA_CODEX_BROWSER_MCP_PACKAGE="${DEVA_CODEX_BROWSER_MCP_PACKAGE:-${DEVA_PLAYWRIGHT_MCP_PACKAGE:-@playwright/mcp@0.0.75}}"
+DEVA_PLAYWRIGHT_MCP_PACKAGE="${DEVA_PLAYWRIGHT_MCP_PACKAGE:-$DEVA_CODEX_BROWSER_MCP_PACKAGE}"
 
 PROFILE="${DEVA_PROFILE:-${DEVA_IMAGE_PROFILE:-}}"
 
@@ -25,6 +27,7 @@ CONFIG_ROOT=""
 
 USER_VOLUMES=()
 USER_ENVS=()
+CODEX_CONFIG_OVERRIDES=()
 EXTRA_DOCKER_ARGS=()
 DOCKER_TERMINAL_ARGS=()
 CONFIG_HOME=""
@@ -75,12 +78,25 @@ QUICK_MODE=false
 GLOBAL_MODE=false
 DEBUG_MODE=false
 DRY_RUN=false
+CODEX_BROWSER_MCP=false
 
 if [ -t 0 ] && [ -t 1 ]; then
     DOCKER_TERMINAL_ARGS=(-it)
 elif [ ! -t 0 ]; then
     DOCKER_TERMINAL_ARGS=(-i)
 fi
+
+# Progressive breadcrumbs for --debug: prints phase name + seconds elapsed
+# since the previous breadcrumb. Users can eyeball which phase is the hot
+# one without firing a profiler.
+_DEVA_STEP_LAST=$SECONDS
+_step() {
+    [ "$DEBUG_MODE" = true ] || return 0
+    local now=$SECONDS
+    local elapsed=$((now - _DEVA_STEP_LAST))
+    _DEVA_STEP_LAST=$now
+    printf '[deva:step +%3ds] %s\n' "$elapsed" "$*" >&2
+}
 
 usage() {
     cat <<'USAGE'
@@ -114,6 +130,9 @@ Deva flags:
   -Q, --quick             Bare mode: no host config mounts, no .deva loading, no autolink,
                           implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
+  --browser-mcp           Codex only: wire Playwright MCP through Codex config overrides.
+                          Uses the rust profile because browser runtime deps live there.
+                          Alias: --with-browser
   --no-docker             Disable auto-mount of Docker socket (default: auto-mount if present)
   --dry-run               Show docker command without executing the container (implies --debug)
   --verbose, --debug      Print full docker command before execution
@@ -129,6 +148,14 @@ Chrome integration for `claude -- --chrome`:
                           Scan `Default`/`Profile *` and mount only `Extensions/`
   DEVA_HOST_CHROME_BRIDGE_DIR=/path/to/claude-mcp-browser-bridge-$USER
                           Override the exact host bridge directory if needed
+
+Browser MCP for `codex --browser-mcp`:
+  CODEX_BROWSER_MCP=true
+                          Enable the injected Playwright MCP entry from .deva config
+  CODEX_CONFIG=features.apps=false
+                          Repeatable Codex CLI --config override for this session
+  DEVA_CODEX_BROWSER_MCP_PACKAGE=@playwright/mcp@0.0.75
+                          Override the Playwright MCP package used by the injected Codex MCP entry
 
 Container Behavior (NEW in v0.8.0):
   Default (persistent):   Shared per project by default, but split when container shape changes
@@ -183,18 +210,131 @@ expand_tilde() {
     printf '%s' "$path"
 }
 
+# Pure-bash path ops. Previously shelled out to python3 per call, which cost
+# ~100-150ms of cold-start per invocation on macOS — validate_bind_mount_shape
+# alone could fork 30+ python processes for a single --dry-run. These
+# replacements are filesystem-touch-free (except canonical_path) and keep the
+# exact semantics the python versions implemented: abspath, normpath, relpath,
+# and commonpath-based descendancy.
+
+_normalize_path() {
+    # os.path.normpath-equivalent: collapse '.', '..', and '//' without hitting
+    # the filesystem. Absolute-ness is preserved; '..' that would escape '/'
+    # is dropped (matches python).
+    local input="$1"
+    # POSIX: exactly-two leading slashes are implementation-defined and
+    # preserved by python. Three or more collapse to one.
+    local prefix=""
+    if [ "$input" = "//" ] || [[ "$input" == //[!/]* ]]; then
+        prefix="//"
+        input="${input#//}"
+    fi
+    local absolute=0
+    case "$input" in /*) absolute=1 ;; esac
+
+    while [[ "$input" == *//* ]]; do
+        input="${input//\/\//\/}"
+    done
+
+    local -a stack=()
+    local IFS=/
+    local -a parts
+    # shellcheck disable=SC2206
+    parts=($input)
+    IFS=$' \t\n'
+
+    local seg len top
+    for seg in "${parts[@]}"; do
+        case "$seg" in
+            '' | '.') ;;
+            '..')
+                len=${#stack[@]}
+                if [ "$len" -gt 0 ]; then
+                    top="${stack[$((len - 1))]}"
+                    if [ "$top" = '..' ]; then
+                        stack+=("..")
+                    elif [ "$len" -eq 1 ]; then
+                        stack=()
+                    else
+                        stack=("${stack[@]:0:$((len - 1))}")
+                    fi
+                elif [ "$absolute" = 0 ]; then
+                    stack+=("..")
+                fi
+                ;;
+            *)
+                stack+=("$seg")
+                ;;
+        esac
+    done
+
+    IFS=/
+    local joined="${stack[*]-}"
+    IFS=$' \t\n'
+
+    if [ -n "$prefix" ]; then
+        printf '%s%s\n' "$prefix" "$joined"
+    elif [ "$absolute" = 1 ]; then
+        printf '/%s\n' "$joined"
+    elif [ -n "$joined" ]; then
+        printf '%s\n' "$joined"
+    else
+        printf '.\n'
+    fi
+}
+
 absolute_path() {
-    python3 - "$1" <<'PY'
-import os, sys
-print(os.path.abspath(sys.argv[1]))
-PY
+    # os.path.abspath-equivalent: absolute + normalized, no symlink resolution.
+    local p="$1"
+    case "$p" in
+        /*) _normalize_path "$p" ;;
+        *) _normalize_path "$PWD/$p" ;;
+    esac
 }
 
 canonical_path() {
-    python3 - "$1" <<'PY'
-import os, sys
-print(os.path.realpath(sys.argv[1]))
-PY
+    # os.path.realpath-equivalent: resolve symlinks, absolute, normalized.
+    # Prefers coreutils `realpath` when present (covers Linux, macOS ≥ 12.3).
+    # Falls back to `cd -P && pwd -P` which works on every POSIX shell.
+    local p="$1"
+    [ -z "$p" ] && return
+
+    if command -v realpath >/dev/null 2>&1; then
+        local out
+        if out="$(realpath "$p" 2>/dev/null)"; then
+            printf '%s\n' "$out"
+            return
+        fi
+    fi
+
+    if [ -d "$p" ]; then
+        local out
+        if out="$(cd -P "$p" 2>/dev/null && pwd -P)"; then
+            printf '%s\n' "$out"
+            return
+        fi
+    elif [ -e "$p" ] || [ -L "$p" ]; then
+        local dir base d
+        dir="$(dirname -- "$p")"
+        base="$(basename -- "$p")"
+        if [ -d "$dir" ] && d="$(cd -P "$dir" 2>/dev/null && pwd -P)"; then
+            if [ -L "$d/$base" ]; then
+                local tgt
+                tgt="$(readlink "$d/$base" 2>/dev/null || true)"
+                if [ -n "$tgt" ]; then
+                    case "$tgt" in
+                        /*) canonical_path "$tgt" ;;
+                        *) canonical_path "$d/$tgt" ;;
+                    esac
+                    return
+                fi
+            fi
+            printf '%s\n' "$d/$base"
+            return
+        fi
+    fi
+
+    absolute_path "$p"
 }
 
 default_config_home_for_agent() {
@@ -356,25 +496,11 @@ claude_args_request_chrome() {
 }
 
 get_host_tmpdir() {
-    local tmpdir=""
-
-    if command -v node >/dev/null 2>&1; then
-        tmpdir=$(node -p 'require("os").tmpdir()' 2>/dev/null || true)
-    fi
-
-    if [ -z "$tmpdir" ] && command -v python3 >/dev/null 2>&1; then
-        tmpdir=$(python3 - <<'PY'
-import tempfile
-print(tempfile.gettempdir())
-PY
-        )
-    fi
-
-    if [ -z "$tmpdir" ]; then
-        tmpdir="${TMPDIR:-/tmp}"
-    fi
-
-    printf '%s' "$tmpdir"
+    # macOS: $TMPDIR is already set to /var/folders/... by launchd.
+    # Linux/WSL: $TMPDIR is usually unset, fall through to /tmp.
+    # Node/Python probes previously lived here — they cost one cold-start
+    # each and told us nothing $TMPDIR couldn't.
+    printf '%s' "${TMPDIR:-/tmp}"
 }
 
 normalize_host_bind_path() {
@@ -410,6 +536,31 @@ configured_env_value() {
     fi
 
     return 1
+}
+
+set_user_env_value() {
+    local name="$1"
+    local value="$2"
+    local -a retained=()
+    local spec spec_name
+
+    for spec in "${USER_ENVS[@]+"${USER_ENVS[@]}"}"; do
+        if [[ "$spec" == *"="* ]]; then
+            spec_name="${spec%%=*}"
+        else
+            spec_name="$spec"
+        fi
+        [ "$spec_name" = "$name" ] && continue
+        retained+=("$spec")
+    done
+
+    if [ ${#retained[@]} -gt 0 ]; then
+        USER_ENVS=("${retained[@]}")
+    else
+        USER_ENVS=()
+    fi
+    USER_ENVS+=("$name=$value")
+    export "$name=$value"
 }
 
 user_volume_mounts_target() {
@@ -567,6 +718,37 @@ prepare_claude_chrome_bridge() {
     USER_ENVS+=("DEVA_CHROME_HOST_BRIDGE_DIR=$bridge_mount")
 }
 
+prepare_browser_integration() {
+    [ "$CODEX_BROWSER_MCP" = true ] || return 0
+
+    if [ "$ACTIVE_AGENT" != "codex" ]; then
+        echo "error: --browser-mcp is currently supported for codex only" >&2
+        echo "hint: for Claude host Chrome, use: deva.sh claude -- --chrome" >&2
+        exit 1
+    fi
+
+    case "${PROFILE:-}" in
+    "" | base)
+        PROFILE="rust"
+        ;;
+    rust)
+        ;;
+    *)
+        echo "warning: --browser-mcp assumes the selected image contains node/npx and browser runtime deps" >&2
+        ;;
+    esac
+
+    local mcp_package
+    mcp_package="$(configured_env_value DEVA_CODEX_BROWSER_MCP_PACKAGE || true)"
+    [ -n "$mcp_package" ] || mcp_package="$(configured_env_value DEVA_PLAYWRIGHT_MCP_PACKAGE || true)"
+    [ -n "$mcp_package" ] || mcp_package="$DEVA_CODEX_BROWSER_MCP_PACKAGE"
+
+    set_user_env_value "DEVA_CODEX_BROWSER_MCP" "1"
+    set_user_env_value "DEVA_WITH_BROWSER" "1"
+    set_user_env_value "DEVA_CODEX_BROWSER_MCP_PACKAGE" "$mcp_package"
+    set_user_env_value "DEVA_PLAYWRIGHT_MCP_PACKAGE" "$mcp_package"
+}
+
 append_unique_line() {
     local list="$1"
     local item="$2"
@@ -641,6 +823,94 @@ generate_container_slug_for_path() {
 
 generate_container_slug() {
     generate_container_slug_for_path "$(pwd)"
+}
+
+extract_auth_file_stem() {
+    local path="$1"
+    local base
+    base="$(basename "$path")"
+    base="${base%.credentials.json}"
+    base="${base%.json}"
+    base="$(sanitize_slug_component "$base")"
+    printf '%s' "${base:0:20}"
+}
+
+generate_auth_tag() {
+    local agent="$1"
+    local auth_method="${2:-}"
+    local creds_file="${3:-}"
+    local env_override="${4:-false}"
+
+    if [ "$env_override" = true ]; then
+        printf '%s' "env"
+        return
+    fi
+
+    if [ -z "$auth_method" ]; then
+        printf '%s' "auth-default"
+        return
+    fi
+
+    case "$agent:$auth_method" in
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth)
+            printf '%s' "auth-default"
+            return
+            ;;
+    esac
+
+    case "$auth_method" in
+        credentials-file)
+            if [ -n "$creds_file" ]; then
+                local stem
+                stem="$(extract_auth_file_stem "$creds_file")"
+                printf '%s' "auth-file-${stem}"
+            else
+                printf '%s' "auth-file"
+            fi
+            ;;
+        api-key|gemini-api-key)
+            local key_val=""
+            case "$agent" in
+                claude) key_val="${ANTHROPIC_API_KEY:-}" ;;
+                codex)  key_val="${OPENAI_API_KEY:-}" ;;
+                gemini) key_val="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}" ;;
+            esac
+            if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
+                printf '%s' "api-key-${key_val: -4}"
+            else
+                printf '%s' "api-key"
+            fi
+            ;;
+        *)
+            printf '%s' "$(sanitize_slug_component "$auth_method")"
+            ;;
+    esac
+}
+
+compute_shape_hash() {
+    local image_ref="$1"
+    local volume_input="${2:-}"
+    local config_input="${3:-}"
+    local combined="$image_ref"
+    [ -n "$volume_input" ] && combined="${combined}|${volume_input}"
+    [ -n "$config_input" ] && combined="${combined}|${config_input}"
+    short_hash "$combined" 8
+}
+
+build_container_name() {
+    local prefix="$1"
+    local agent="$2"
+    local auth_tag="$3"
+    local slug="$4"
+    local shape_hash="$5"
+    local ephemeral="${6:-false}"
+    local pid="${7:-}"
+
+    local name="${prefix}--${agent}--${auth_tag}--${slug}..${shape_hash}"
+    if [ "$ephemeral" = true ] && [ -n "$pid" ]; then
+        name="${name}--${pid}"
+    fi
+    printf '%s' "$name"
 }
 
 slug_candidates_for_path() {
@@ -740,15 +1010,19 @@ project_container_rows() {
         return
     fi
 
+    local esc_prefix
+    esc_prefix=$(printf '%s' "$DEVA_CONTAINER_PREFIX" | sed -e 's/[.[\\^$*+?{}()|]/\\&/g')
     local pattern=""
     local slug escaped
     for slug in $slugs; do
         [ -n "$slug" ] || continue
         escaped=$(printf '%s' "$slug" | sed -e 's/[.[\\^$*+?{}()|]/\\&/g')
+        local new_fmt="^${esc_prefix}--.*--${escaped}([.-]|$)"
+        local old_fmt="^${esc_prefix}-${escaped}([.-]|$)"
         if [ -n "$pattern" ]; then
-            pattern="${pattern}|-${escaped}([.-]|$)"
+            pattern="${pattern}|(${new_fmt})|(${old_fmt})"
         else
-            pattern="-${escaped}([.-]|$)"
+            pattern="(${new_fmt})|(${old_fmt})"
         fi
     done
 
@@ -769,15 +1043,21 @@ project_container_rows() {
 
 extract_agent_from_name() {
     local name="$1"
-    local rest="${name#"${DEVA_CONTAINER_PREFIX}"-}"
+    local rest="${name#"${DEVA_CONTAINER_PREFIX}"}"
 
-    # Ephemeral pattern: ends with -<agent>-<pid> where pid is all digits
-    if [[ "$rest" =~ -([a-z]+)-([0-9]+)$ ]]; then
-        local agent="${BASH_REMATCH[1]}"
-        printf '%s' "$agent"
-    else
-        printf 'share'
+    # New format: deva--<agent>--<auth>--<slug>..<hash>
+    if [[ "$rest" =~ ^--([a-z]+)-- ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return
     fi
+
+    # Legacy ephemeral: deva-<slug>...-<agent>-<pid>
+    if [[ "$rest" =~ -([a-z]+)-([0-9]+)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return
+    fi
+
+    printf 'share'
 }
 
 pick_container() {
@@ -893,6 +1173,14 @@ show_config() {
     fi
     echo ""
 
+    if [ ${#CODEX_CONFIG_OVERRIDES[@]} -gt 0 ]; then
+        echo "Codex config overrides:"
+        for cfg in "${CODEX_CONFIG_OVERRIDES[@]}"; do
+            echo "  --config $cfg"
+        done
+        echo ""
+    fi
+
     echo "Docker image: $(docker_image_ref)"
     echo "Container prefix: $DEVA_CONTAINER_PREFIX"
 }
@@ -902,37 +1190,33 @@ prepare_base_docker_args() {
     local slug
     slug="$(generate_container_slug)"
 
-    local volume_hash=""
+    local volume_input=""
     if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
-        volume_hash=$(compute_volume_hash)
+        volume_input=$(printf '%s\n' "${USER_VOLUMES[@]}" | sort | tr '\n' '|')
     fi
 
-    # Include config-home in container identity when explicit.
-    # Use CONFIG_HOME if set, else CONFIG_ROOT (root mode clears CONFIG_HOME).
-    local config_hash=""
-    local config_hash_source=""
+    local config_input=""
     if [ "$CONFIG_HOME_FROM_CLI" = true ]; then
         if [ -n "$CONFIG_HOME" ]; then
-            config_hash_source="$CONFIG_HOME"
+            config_input="$CONFIG_HOME"
         elif [ -n "$CONFIG_ROOT" ]; then
-            config_hash_source="$CONFIG_ROOT"
+            config_input="$CONFIG_ROOT"
         fi
     fi
-    [ -n "$config_hash_source" ] && config_hash=$(short_hash "$config_hash_source" 6)
 
-    local image_hash=""
-    image_hash=$(short_hash "$(docker_image_ref)" 6)
+    local image_ref
+    image_ref="$(docker_image_ref)"
+    local shape_hash
+    shape_hash=$(compute_shape_hash "$image_ref" "$volume_input" "$config_input")
 
-    local suffix=""
-    [ -n "$image_hash" ] && suffix="..i${image_hash}"
-    [ -n "$volume_hash" ] && suffix="${suffix}..v${volume_hash}"
-    [ -n "$config_hash" ] && suffix="${suffix}..c${config_hash}"
+    local auth_tag="auth-default"
+    container_name=$(build_container_name \
+        "$DEVA_CONTAINER_PREFIX" "$ACTIVE_AGENT" "$auth_tag" \
+        "$slug" "$shape_hash" "$EPHEMERAL_MODE" "$$")
 
     if [ "$EPHEMERAL_MODE" = true ]; then
-        container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}-${ACTIVE_AGENT}-$$"
         DOCKER_ARGS=(run --rm "${DOCKER_TERMINAL_ARGS[@]}")
     else
-        container_name="${DEVA_CONTAINER_PREFIX}-${slug}${suffix}"
         DOCKER_ARGS=(run -d)
     fi
 
@@ -944,10 +1228,10 @@ prepare_base_docker_args() {
         -e "DEVA_AGENT=${ACTIVE_AGENT}"
         -e "DEVA_UID=$(id -u)"
         -e "DEVA_GID=$(id -g)"
+        --shm-size=2g
         --add-host host.docker.internal:host-gateway
     )
 
-    # Attach labels to identify workspace and container grouping
     local ws_hash
     ws_hash=$(workspace_hash)
     DOCKER_ARGS+=(
@@ -957,14 +1241,9 @@ prepare_base_docker_args() {
         --label "deva.workspace_hash=${ws_hash}"
         --label "deva.agent=${ACTIVE_AGENT}"
         --label "deva.ephemeral=${EPHEMERAL_MODE}"
-        --label "deva.image=$(docker_image_ref)"
+        --label "deva.image=$image_ref"
+        --label "deva.shape_hash=${shape_hash}"
     )
-    if [ -n "$volume_hash" ]; then
-        DOCKER_ARGS+=(--label "deva.volhash=${volume_hash}")
-    fi
-    if [ -n "$image_hash" ]; then
-        DOCKER_ARGS+=(--label "deva.image_hash=${image_hash}")
-    fi
 
     if [ -n "${LANG:-}" ]; then DOCKER_ARGS+=(-e "LANG=$LANG"); fi
     if [ -n "${LC_ALL:-}" ]; then DOCKER_ARGS+=(-e "LC_ALL=$LC_ALL"); fi
@@ -1032,6 +1311,47 @@ prepare_base_docker_args() {
     elif [ -n "${no_proxy:-}" ]; then
         DOCKER_ARGS+=(-e "NO_PROXY=$no_proxy")
     fi
+}
+
+volume_spec_target() {
+    local spec="$1"
+    [[ "$spec" == *:* ]] || return 1
+    local remainder="${spec#*:}"
+    printf '%s' "${remainder%%:*}"
+}
+
+user_volumes_declares_target() {
+    local target="$1" spec declared
+    for spec in "${USER_VOLUMES[@]+"${USER_VOLUMES[@]}"}"; do
+        declared="$(volume_spec_target "$spec")" || continue
+        [ "$declared" = "$target" ] && return 0
+    done
+    return 1
+}
+
+# First-writer-wins dedup over USER_VOLUMES by container target.
+# parse_wrapper_args (CLI -v) runs before load_config_sources (.deva
+# VOLUME=), so CLI entries land at lower indices. Keeping the first
+# occurrence per target means CLI overrides .deva at the same path.
+dedup_user_volumes() {
+    [ ${#USER_VOLUMES[@]} -gt 1 ] || return 0
+    local -a result=()
+    local i j keep spec_i spec_j tgt_i tgt_j
+    for ((i = 0; i < ${#USER_VOLUMES[@]}; i++)); do
+        spec_i="${USER_VOLUMES[$i]}"
+        tgt_i="$(volume_spec_target "$spec_i")" || { result+=("$spec_i"); continue; }
+        keep=1
+        for ((j = 0; j < i; j++)); do
+            spec_j="${USER_VOLUMES[$j]}"
+            tgt_j="$(volume_spec_target "$spec_j")" || continue
+            if [ "$tgt_j" = "$tgt_i" ]; then
+                keep=0
+                break
+            fi
+        done
+        [ "$keep" = 1 ] && result+=("$spec_i")
+    done
+    USER_VOLUMES=("${result[@]}")
 }
 
 append_user_volumes() {
@@ -1220,45 +1540,55 @@ append_extra_docker_args() {
     done
 }
 
-mount_config_home() {
-    if [ -z "$CONFIG_HOME" ]; then
-        return
-    fi
-
-    local item
-    for item in "$CONFIG_HOME"/.* "$CONFIG_HOME"/*; do
-        [ -e "$item" ] || continue
-        local name
-        name="$(basename "$item")"
-        if ! should_mount_home_item "$item" "$name"; then
-            continue
-        fi
-        DOCKER_ARGS+=(-v "$item:/home/deva/$name")
-    done
+# Canonical dotfile-entries per agent. These are the ONLY items deva should
+# rehome into the container from an agent's config subdir. Everything else
+# sitting loose under ~/.config/deva/<agent>/ is agent runtime state
+# (sessions, statsig, shell snapshots, backup files, stray auth.json
+# variants) that belongs to the agent itself — not siblings to surface at
+# the container's $HOME root.
+agent_canonical_basenames() {
+    case "$1" in
+    claude) printf '%s\n' '.claude' '.claude.json' ;;
+    codex)  printf '%s\n' '.codex' ;;
+    gemini) printf '%s\n' '.gemini' ;;
+    *)      return 0 ;;
+    esac
 }
 
-should_mount_home_item() {
-    local item="$1"
-    local name="$2"
+# Mount the canonical entries for one agent from a source directory.
+# Host-side CLI -v or .deva VOLUME= at the same container target wins
+# (user_volumes_declares_target suppression; first-writer-wins holds).
+mount_agent_canonical() {
+    local agent="$1"
+    local src_dir="$2"
+    [ -n "$agent" ] && [ -d "$src_dir" ] || return 0
 
-    case "$name" in
-    . | .. | .DS_Store | .git | .gitignore)
-        return 1
-        ;;
-    .claude.json.backup | .claude.json.backup.* | .claude.json.bak.after-corrupted.*)
-        return 1
-        ;;
-    *.credentials.json | auth.json | mcp-oauth-tokens-v2.json)
-        # Loose credential files should only enter the container through explicit auth mounts.
-        [ -f "$item" ] && return 1
-        ;;
-    esac
+    local entry src
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        src="$src_dir/$entry"
+        [ -e "$src" ] || continue
+        if user_volumes_declares_target "/home/deva/$entry"; then
+            continue
+        fi
+        DOCKER_ARGS+=(-v "$src:/home/deva/$entry")
+    done < <(agent_canonical_basenames "$agent")
+}
 
-    if [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ] && [ "$item" = "$CUSTOM_CREDENTIALS_FILE" ]; then
-        return 1
-    fi
+# Return 0 if the subdir name corresponds to a known agent (agents/<name>.sh
+# exists). Anything else under CONFIG_ROOT (sessions/, cache/, adhoc dirs)
+# is NOT an agent home and must not be walked.
+is_known_agent_subdir() {
+    local name="$1"
+    [ -n "$AGENTS_DIR" ] || return 1
+    [ -f "$AGENTS_DIR/$name.sh" ]
+}
 
-    return 0
+mount_config_home() {
+    # Explicit --config-home DIR: treat DIR as the active agent's home and
+    # emit only its canonical entries.
+    [ -n "$CONFIG_HOME" ] || return 0
+    mount_agent_canonical "$ACTIVE_AGENT" "$CONFIG_HOME"
 }
 
 # Effective config base: where agent config dirs (.claude/, .codex/, .gemini/) live.
@@ -1378,26 +1708,6 @@ append_auth_credential_overlay() {
     DOCKER_ARGS+=("-v" "$overlay_file:$target_path")
 }
 
-mount_loose_home_item() {
-    local item="$1"
-    local name
-    name="$(basename "$item")"
-    if ! should_mount_home_item "$item" "$name"; then
-        return
-    fi
-    DOCKER_ARGS+=(-v "$item:/home/deva/$name")
-}
-
-mount_dir_contents_into_home() {
-    local base="$1"
-    [ -d "$base" ] || return
-    local item
-    for item in "$base"/.* "$base"/*; do
-        [ -e "$item" ] || continue
-        mount_loose_home_item "$item"
-    done
-}
-
 normalize_volume_spec() {
     local spec="$1"
     if [[ "$spec" != *:* ]]; then
@@ -1423,16 +1733,190 @@ normalize_volume_spec() {
     echo "$src:$remainder"
 }
 
+normalize_path_for_comparison() {
+    _normalize_path "$1"
+}
+
+normalize_bind_source_for_comparison() {
+    local path="$1"
+    if [ -e "$path" ]; then
+        canonical_path "$path"
+        return
+    fi
+    normalize_path_for_comparison "$path"
+}
+
+path_is_strict_descendant() {
+    # Python os.path.commonpath raises ValueError when mixing absolute and
+    # relative inputs. Mirror that here: treat the mix as "not descendant".
+    local parent child parent_abs=0 child_abs=0
+    parent="$(_normalize_path "$1")"
+    child="$(_normalize_path "$2")"
+    case "$parent" in /*) parent_abs=1 ;; esac
+    case "$child" in /*) child_abs=1 ;; esac
+
+    [ "$parent_abs" = "$child_abs" ] || return 1
+    [ "$parent" = "$child" ] && return 1
+
+    if [ "$parent" = "/" ]; then
+        case "$child" in /*) return 0 ;; *) return 1 ;; esac
+    fi
+    case "$child" in
+        "$parent"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+relative_subpath() {
+    # os.path.relpath(to, from) with inputs pre-normalized. Walks the common
+    # prefix, emits '..' for each remaining from-segment, then appends what's
+    # left of to. Python raises when mixing absolute/relative — we return 'to'
+    # unchanged in that case (no current caller passes mixed kinds).
+    local from to from_abs=0 to_abs=0
+    from="$(_normalize_path "$1")"
+    to="$(_normalize_path "$2")"
+
+    case "$from" in /*) from_abs=1 ;; esac
+    case "$to" in /*) to_abs=1 ;; esac
+
+    if [ "$from_abs" != "$to_abs" ]; then
+        printf '%s\n' "$to"
+        return
+    fi
+
+    if [ "$from" = "$to" ]; then
+        printf '.\n'
+        return
+    fi
+
+    local fnorm tnorm
+    if [ "$from_abs" = 1 ]; then
+        fnorm="${from#/}"
+        tnorm="${to#/}"
+    else
+        fnorm="$from"
+        tnorm="$to"
+    fi
+
+    local IFS=/
+    local -a fparts tparts
+    # shellcheck disable=SC2206
+    fparts=($fnorm)
+    # shellcheck disable=SC2206
+    tparts=($tnorm)
+    IFS=$' \t\n'
+
+    local i=0 max_i
+    if [ "${#fparts[@]}" -lt "${#tparts[@]}" ]; then
+        max_i="${#fparts[@]}"
+    else
+        max_i="${#tparts[@]}"
+    fi
+    while [ "$i" -lt "$max_i" ] && [ "${fparts[$i]}" = "${tparts[$i]}" ]; do
+        i=$((i + 1))
+    done
+
+    local result="" j
+    for ((j = i; j < ${#fparts[@]}; j++)); do
+        if [ -z "$result" ]; then
+            result=".."
+        else
+            result="$result/.."
+        fi
+    done
+    for ((j = i; j < ${#tparts[@]}; j++)); do
+        if [ -z "$result" ]; then
+            result="${tparts[$j]}"
+        else
+            result="$result/${tparts[$j]}"
+        fi
+    done
+
+    [ -z "$result" ] && result="."
+    printf '%s\n' "$result"
+}
+
+is_recursive_bind_rebind() {
+    local parent_src="$1"
+    local parent_dest="$2"
+    local child_src="$3"
+    local child_dest="$4"
+
+    if ! path_is_strict_descendant "$parent_src" "$child_src"; then
+        return 1
+    fi
+    if ! path_is_strict_descendant "$parent_dest" "$child_dest"; then
+        return 1
+    fi
+
+    [ "$(relative_subpath "$parent_src" "$child_src")" = "$(relative_subpath "$parent_dest" "$child_dest")" ]
+}
+
+validate_bind_mount_shape() {
+    local mount_specs=()
+    local mount_sources=()
+    local mount_targets=()
+    local i spec src remainder dest normalized_src normalized_dest
+
+    for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
+        if [ "${DOCKER_ARGS[$i]}" != "-v" ] || [ $((i + 1)) -ge ${#DOCKER_ARGS[@]} ]; then
+            continue
+        fi
+
+        spec="${DOCKER_ARGS[$((i + 1))]}"
+        src="${spec%%:*}"
+        remainder="${spec#*:}"
+        dest="${remainder%%:*}"
+
+        if [[ "$src" != /* ]] || [[ "$dest" != /* ]]; then
+            continue
+        fi
+
+        normalized_src="$(normalize_bind_source_for_comparison "$src")"
+        normalized_dest="$(normalize_path_for_comparison "$dest")"
+
+        mount_specs+=("$spec")
+        mount_sources+=("$normalized_src")
+        mount_targets+=("$normalized_dest")
+    done
+
+    local j
+    for ((i = 0; i < ${#mount_specs[@]}; i++)); do
+        for ((j = i + 1; j < ${#mount_specs[@]}; j++)); do
+            if [ "${mount_targets[$i]}" = "${mount_targets[$j]}" ]; then
+                echo "error: duplicate bind mount target detected before container start" >&2
+                echo "  ${mount_specs[$i]}" >&2
+                echo "  ${mount_specs[$j]}" >&2
+                exit 1
+            fi
+
+            if is_recursive_bind_rebind "${mount_sources[$i]}" "${mount_targets[$i]}" "${mount_sources[$j]}" "${mount_targets[$j]}"; then
+                echo "error: recursive bind mount already covered by parent bind mount" >&2
+                echo "  parent: ${mount_specs[$i]}" >&2
+                echo "  child:  ${mount_specs[$j]}" >&2
+                exit 1
+            fi
+
+            if is_recursive_bind_rebind "${mount_sources[$j]}" "${mount_targets[$j]}" "${mount_sources[$i]}" "${mount_targets[$i]}"; then
+                echo "error: recursive bind mount already covered by parent bind mount" >&2
+                echo "  parent: ${mount_specs[$j]}" >&2
+                echo "  child:  ${mount_specs[$i]}" >&2
+                exit 1
+            fi
+        done
+    done
+}
+
 short_hash() {
     local input="$1"
     local length="${2:-8}"
 
-    if command -v md5sum >/dev/null 2>&1; then
-        printf '%s' "$input" | md5sum | cut -c1-"$length"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$input" | sha256sum | cut -c1-"$length"
     elif command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$input" | shasum | cut -c1-"$length"
+        printf '%s' "$input" | shasum -a 256 | cut -c1-"$length"
     else
-        printf '%s' "$input" | cksum | cut -d' ' -f1 | cut -c1-"$length"
+        printf '%s' "$input" | md5sum | cut -c1-"$length"
     fi
 }
 
@@ -1666,7 +2150,16 @@ process_env_config() {
 process_var_config() {
     local name="$1"
     local value="$2"
-    value="${value//\"/}"
+    case "$name" in
+    CODEX_CONFIG | CODEX_CLI_CONFIG)
+        if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+        ;;
+    *)
+        value="${value//\"/}"
+        ;;
+    esac
 
     if ! validate_config_value "$name" "$value"; then
         CONFIG_ERRORS+=("Validation failed for $name=$value")
@@ -1704,6 +2197,16 @@ process_var_config() {
         ;;
     IMAGE_PROFILE)
         PROFILE="$value"
+        ;;
+    CODEX_BROWSER_MCP | CODEX_BROWSER | WITH_BROWSER | DEVA_CODEX_BROWSER_MCP | DEVA_WITH_BROWSER)
+        if [[ "$value" =~ ^(true|1|yes)$ ]]; then
+            CODEX_BROWSER_MCP=true
+        else
+            CODEX_BROWSER_MCP=false
+        fi
+        ;;
+    CODEX_CONFIG | CODEX_CLI_CONFIG)
+        CODEX_CONFIG_OVERRIDES+=("$value")
         ;;
     AUTOLINK)
         if [[ "$value" =~ ^(false|0|no)$ ]]; then AUTOLINK=false; else AUTOLINK=true; fi
@@ -1881,6 +2384,11 @@ parse_wrapper_args() {
             ;;
         --host-net)
             EXTRA_DOCKER_ARGS+=("--net" "host")
+            i=$((i + 1))
+            continue
+            ;;
+        --browser-mcp | --codex-browser-mcp | --with-browser)
+            CODEX_BROWSER_MCP=true
             i=$((i + 1))
             continue
             ;;
@@ -2097,7 +2605,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
             else
                 slug="$(generate_container_slug)"
                 escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
-                rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|-|$)"
+                rgx="^${DEVA_CONTAINER_PREFIX}(--.*--${escaped_slug}|-${escaped_slug})(\\.\\.|-|$)"
                 all_names=$(docker ps -a --format '{{.Names}}')
                 matching_names=$(echo "$all_names" | grep -E -- "$rgx" || true)
             fi
@@ -2164,7 +2672,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
             if [ -z "$matching_stopped" ]; then
                 slug="$(generate_container_slug)"
                 escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
-                rgx="^${DEVA_CONTAINER_PREFIX}-${escaped_slug}(\\.\\.|-|$)"
+                rgx="^${DEVA_CONTAINER_PREFIX}(--.*--${escaped_slug}|-${escaped_slug})(\\.\\.|-|$)"
                 all_stopped=$(docker ps -a --filter "status=exited" --format '{{.Names}}')
                 matching_stopped=$(echo "$all_stopped" | grep -E -- "$rgx" || true)
             fi
@@ -2343,7 +2851,9 @@ if [ ${#AGENT_ARGS[@]} -gt 0 ]; then
     fi
 fi
 
+_step "start"
 load_config_sources
+_step "load_config_sources"
 
 if [ "$AGENT_EXPLICIT" = false ]; then
     ACTIVE_AGENT="$DEFAULT_AGENT"
@@ -2424,6 +2934,7 @@ autolink_legacy_into_deva_root() {
 }
 
 check_agent "$ACTIVE_AGENT"
+prepare_browser_integration
 prepare_claude_chrome_bridge
 
 if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
@@ -2482,10 +2993,13 @@ fi
 resolve_profile
 check_image
 prepare_base_docker_args
+dedup_user_volumes
 append_user_volumes
 append_extra_docker_args
+_step "base docker args + user volumes"
 
 autolink_legacy_into_deva_root
+_step "autolink"
 load_agent_module
 AGENT_COMMAND=()
 if [ ${#AGENT_ARGV[@]} -gt 0 ]; then
@@ -2493,92 +3007,62 @@ if [ ${#AGENT_ARGV[@]} -gt 0 ]; then
 else
     agent_prepare
 fi
+_step "agent_prepare"
 
-# Update container name based on auth method
-if [ -n "${AUTH_METHOD:-}" ]; then
-    # Determine if we need auth suffix
-    needs_auth_suffix=false
+# Rewrite container name now that AUTH_METHOD is known from agent_prepare().
+# prepare_base_docker_args used auth-default; update if auth is non-default.
+{
+    _needs_rewrite=false
     _env_auth_override=false
-    if [ "$ACTIVE_AGENT" = "claude" ] && [ "$AUTH_METHOD" != "claude" ]; then
-        needs_auth_suffix=true
-    elif [ "$ACTIVE_AGENT" = "codex" ] && [ "$AUTH_METHOD" != "chatgpt" ]; then
-        needs_auth_suffix=true
-    elif [ "$ACTIVE_AGENT" = "gemini" ] && [ "$AUTH_METHOD" != "oauth" ] && [ "$AUTH_METHOD" != "gemini-app-oauth" ]; then
-        needs_auth_suffix=true
+
+    if [ -n "${AUTH_METHOD:-}" ]; then
+        case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth) ;;
+            *) _needs_rewrite=true ;;
+        esac
+
+        if [ "$_needs_rewrite" = false ] && has_auth_override; then
+            _needs_rewrite=true
+            _env_auth_override=true
+        fi
     fi
 
-    # Env-var auth override: default method but auth env vars reaching container.
-    # Container name must change when effective auth source changes.
-    if [ "$needs_auth_suffix" = false ] && has_auth_override; then
-        needs_auth_suffix=true
-        _env_auth_override=true
-    fi
+    if [ "$_needs_rewrite" = true ]; then
+        _rw_slug="$(generate_container_slug)"
 
-    if [ "$needs_auth_suffix" = true ]; then
-        slug="$(generate_container_slug)"
-        volume_hash=""
+        _rw_vol_input=""
         if [ ${#USER_VOLUMES[@]} -gt 0 ]; then
-            volume_hash=$(compute_volume_hash)
+            _rw_vol_input=$(printf '%s\n' "${USER_VOLUMES[@]}" | sort | tr '\n' '|')
         fi
-
-        # Recompute config hash to preserve in auth-rewritten name
-        auth_config_hash=""
-        auth_config_src=""
+        _rw_cfg_input=""
         if [ "$CONFIG_HOME_FROM_CLI" = true ]; then
-            if [ -n "$CONFIG_HOME" ]; then
-                auth_config_src="$CONFIG_HOME"
-            elif [ -n "$CONFIG_ROOT" ]; then
-                auth_config_src="$CONFIG_ROOT"
-            fi
-        fi
-        [ -n "$auth_config_src" ] && auth_config_hash=$(short_hash "$auth_config_src" 6)
-
-        image_hash=$(short_hash "$(docker_image_ref)" 6)
-
-        # Hash credential file path for credentials-file auth
-        creds_hash=""
-        if [ "$AUTH_METHOD" = "credentials-file" ] && [ -n "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
-            creds_hash=$(short_hash "$CUSTOM_CREDENTIALS_FILE" 8)
+            [ -n "$CONFIG_HOME" ] && _rw_cfg_input="$CONFIG_HOME"
+            [ -z "$_rw_cfg_input" ] && [ -n "$CONFIG_ROOT" ] && _rw_cfg_input="$CONFIG_ROOT"
         fi
 
-        new_container_name=""
-        if [ "$_env_auth_override" = true ]; then
-            auth_suffix="env"
-        else
-            auth_suffix="${AUTH_METHOD}"
-        fi
-        [ -n "$creds_hash" ] && auth_suffix="${AUTH_METHOD}-${creds_hash}"
-        auth_suffix="${auth_suffix}-${ACTIVE_AGENT}"
+        _rw_shape=$(compute_shape_hash "$(docker_image_ref)" "$_rw_vol_input" "$_rw_cfg_input")
+        _rw_auth_tag=$(generate_auth_tag "$ACTIVE_AGENT" "$AUTH_METHOD" "${CUSTOM_CREDENTIALS_FILE:-}" "$_env_auth_override")
 
-        # Build suffix chain: volume + config + auth
-        name_suffix=""
-        [ -n "$image_hash" ] && name_suffix="..i${image_hash}"
-        [ -n "$volume_hash" ] && name_suffix="${name_suffix}..v${volume_hash}"
-        [ -n "$auth_config_hash" ] && name_suffix="${name_suffix}..c${auth_config_hash}"
-        name_suffix="${name_suffix}..${auth_suffix}"
+        _rw_name=$(build_container_name \
+            "$DEVA_CONTAINER_PREFIX" "$ACTIVE_AGENT" "$_rw_auth_tag" \
+            "$_rw_slug" "$_rw_shape" "$EPHEMERAL_MODE" "$$")
 
-        if [ "$EPHEMERAL_MODE" = true ]; then
-            new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}${name_suffix}-${ACTIVE_AGENT}-$$"
-        else
-            new_container_name="${DEVA_CONTAINER_PREFIX}-${slug}${name_suffix}"
-        fi
-
-        # Update container name in DOCKER_ARGS
         for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
             if [ "${DOCKER_ARGS[$i]}" = "--name" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ]; then
-                DOCKER_ARGS[i + 1]="$new_container_name"
+                DOCKER_ARGS[i + 1]="$_rw_name"
                 break
             fi
         done
+
+        DOCKER_ARGS+=(--label "deva.auth_tag=${_rw_auth_tag}")
     fi
 
-    # Label auth method for easier filtering
-    DOCKER_ARGS+=(--label "deva.auth=${AUTH_METHOD}")
-
-    # Export container introspection variables
-    DOCKER_ARGS+=(-e "DEVA_AUTH_METHOD=${AUTH_METHOD}")
-    [ -n "${AUTH_DETAILS:-}" ] && DOCKER_ARGS+=(-e "DEVA_AUTH_DETAILS=${AUTH_DETAILS}")
-fi
+    if [ -n "${AUTH_METHOD:-}" ]; then
+        DOCKER_ARGS+=(--label "deva.auth=${AUTH_METHOD}")
+        DOCKER_ARGS+=(-e "DEVA_AUTH_METHOD=${AUTH_METHOD}")
+        [ -n "${AUTH_DETAILS:-}" ] && DOCKER_ARGS+=(-e "DEVA_AUTH_DETAILS=${AUTH_DETAILS}")
+    fi
+}
 
 # Determine container name early for env injection
 CONTAINER_NAME=""
@@ -2602,24 +3086,37 @@ fi
 
 # Centralized mounting logic.
 # -Q bare mode: skip all config/auth mounts entirely.
+# Explicit --config-home DIR: isolate to that single home (no sibling agents).
+# Default: walk CONFIG_ROOT but only for KNOWN AGENT subdirs, and within each
+# mount only the CANONICAL entries (.claude/.claude.json/.codex/.gemini). Non-
+# agent subdirs (sessions/, cache/, adhoc state) are skipped. This keeps the
+# mount count bounded at ~4 regardless of how much state agents accumulate
+# under their home dirs — the old unfiltered walk could emit 200+ mounts and
+# turn validate_bind_mount_shape's O(N²) into a several-minute stall.
+_step "mount dispatch: begin"
 if [ "$QUICK_MODE" = true ]; then
     : # bare mode: no config mounts
-elif [ -n "$CONFIG_HOME" ]; then
+elif [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
     mount_config_home
 else
     if [ -n "$CONFIG_ROOT" ] && [ -d "$CONFIG_ROOT" ]; then
-        for d in "$CONFIG_ROOT"/*; do
-            [ -d "$d" ] || continue
-            [ "$(basename "$d")" = "_shared" ] && continue
-            mount_dir_contents_into_home "$d"
+        _d_name=""
+        for _d in "$CONFIG_ROOT"/*; do
+            [ -d "$_d" ] || continue
+            _d_name="$(basename "$_d")"
+            is_known_agent_subdir "$_d_name" || continue
+            mount_agent_canonical "$_d_name" "$_d"
         done
+        unset _d _d_name
     else
         # Fallback: direct mount from $HOME (CONFIG_ROOT should always be set)
         [ -d "$HOME/.claude" ] && DOCKER_ARGS+=("-v" "$HOME/.claude:/home/deva/.claude")
         [ -f "$HOME/.claude.json" ] && DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
         [ -d "$HOME/.codex" ] && DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
+        [ -d "$HOME/.gemini" ] && DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
     fi
 fi
+_step "mount dispatch: done"
 
 # Hide default OAuth credential files for non-default auth modes.
 # For credentials-file auth on Claude/Codex, the agent-specific file mount already overlays the path.
@@ -2640,13 +3137,15 @@ if [ "$CONFIG_HOME_FROM_CLI" = false ] && [ "$QUICK_MODE" = false ]; then
     if [ -d "$HOME/.cache/deva" ]; then
         DOCKER_ARGS+=("-v" "$HOME/.cache/deva:/home/deva/.cache/deva")
     fi
+    if [ -d "$HOME/.agents" ]; then
+        DOCKER_ARGS+=("-v" "$HOME/.agents:/home/deva/.agents")
+    fi
 fi
 
-# Mount project-local .claude directory if exists (skip in bare mode)
 append_user_envs
-if [ "$QUICK_MODE" = false ] && [ -d "$(pwd)/.claude" ]; then
-    DOCKER_ARGS+=("-v" "$(pwd)/.claude:$(pwd)/.claude")
-fi
+_step "append_user_envs"
+validate_bind_mount_shape
+_step "validate_bind_mount_shape"
 
 DOCKER_ARGS+=("$(docker_image_ref)")
 

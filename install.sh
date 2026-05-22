@@ -71,7 +71,6 @@ if [ -n "${DEVA_DOCKER_IMAGE_FALLBACK+x}" ]; then
 else
     DOCKER_IMAGE_FALLBACK="$(image_ref "thevibeworks/deva" "${DEVA_DOCKER_IMAGE_FALLBACK_TAG:-$SOURCE_DOCKER_TAG}" "latest")"
 fi
- 5d3298f (fix(deva): support full docker image refs)
 echo "deva installer"
 echo "=============="
 echo ""

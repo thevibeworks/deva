@@ -33,6 +33,7 @@ nav:
   - Authentication: authentication.md
   - Philosophy: philosophy.md
   - Advanced Usage: advanced-usage.md
+  - Tmux Bridge: tmux-bridge-agent-comms.md
   - Custom Images: custom-images.md
   - Troubleshooting: troubleshooting.md
   - Research:

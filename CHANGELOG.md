@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/tmux-bridge-agent-comms.md` explaining the two-layer bridge composition, read-before-act guard, and socket detection order
 - CI smoke test exercising the full `tmux-bridge` CLI surface (list/name/resolve/read/type/read-guard) against an ephemeral tmux server inside the built image
 
+### Fixed
+- deva no longer adds a redundant project-local `.claude` child bind mount on top of the workspace mount
+- startup now rejects recursive child bind mounts that simply rebind a subtree already covered by a parent bind mount
+- shared agent tooling installs now switch out of inaccessible working directories before pinned atlas go-install fallback
+- `claude-trace` installs are now pinned instead of silently following the latest npm publish
+- atlas-cli installs now honor `ATLAS_CLI_VERSION` exactly instead of drifting to upstream `latest`
+
+### Changed
+- default Makefile builds now use pinned tool versions; `versions-up` remains the explicit upgrade path
+- Rust image rebuild paths now forward the selected agent CLI versions instead of silently reinstalling Dockerfile defaults
+- `versions` and `versions-up` now treat Makefile defaults as defaults instead of forcing them as fake "latest" overrides
+
 ## [0.10.0] - 2026-03-24
 
 ### Added

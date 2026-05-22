@@ -1,0 +1,310 @@
+* [2026-04-16] Dev Log: scoped version bumps, pin everything :DESIGN:VERSIONS:BUILD:REGISTRY:
+
+** Context
+=make versions-up= today is an all-or-nothing monolith. It bumps
+every tool in =TOOL_REGISTRY= to latest and rebuilds main + rust
+images. Five consequences:
+
+1. Wanting a claude-code patch means accepting codex, gemini, atlas,
+   copilot-api, and playwright bumps in the same commit
+2. Bumping playwright rebuilds main image (no playwright in main) and
+   rust image (where it lives) — half the rebuild is waste
+3. Tools outside =TOOL_REGISTRY= (Go 1.22 baked into base Dockerfile,
+   Delta 0.18.2 baked into base Dockerfile, bun/uv/rustup/aws-cli
+   installed via upstream =curl | bash=) are invisible to the flow
+4. "Pin every tool" kept losing to "but bun releases weekly" because
+   we only had one knob and that knob fires everything at once
+5. The registry's shape (6 scalar fields per row: name, type, source,
+   label, url, changelog) can't express "which group does this belong
+   to" or "which image is this cooked into" — so we pick up one-off
+   special cases like =[[ $tool == "playwright" ]] && query_image=...=
+   that should be schema, not code
+
+** Why
+Two principles from =CLAUDE.md= are in tension *only* because the
+current design forces them into one knob:
+
+- "Ship the best version we can make, not the thinnest version we can
+  justify" — argues pin everything, every byte has provenance
+- "Ship the smallest thing that FULLY solves one user problem" —
+  argues don't bump bun when the user asked for a claude patch
+
+They are only in tension because =versions-up= collapses "track" and
+"bump" and "rebuild" into a single verb. Decouple those axes and both
+principles win: we track everything (provenance), user bumps only the
+scope they asked for (minimalism), build system only rebuilds images
+whose contents changed (efficiency).
+
+The missing scope knob is the reason we kept saying "cost" as an
+excuse to not pin bucket-2 tools. The cost isn't pinning; the cost is
+forcing a full rebuild for each tool's release cadence. Scoped bumps
+drop that to zero for tools the user didn't ask about.
+
+** What
+Extend =TOOL_REGISTRY= with two columns, add three filter knobs to
+=version-upgrade.sh=, add ~8 small =make= targets. Backward
+compatible: =make versions-up= still bumps everything, but now every
+tool in the image is visible to that everything.
+
+*** Schema extension
+Current row format:
+#+BEGIN_SRC text
+name|type|source|label|url|changelog
+#+END_SRC
+
+New row format — two columns appended, both required:
+#+BEGIN_SRC text
+name|type|source|label|url|changelog|group|image
+#+END_SRC
+
+- =group= ∈ ={agent, browser, toolchain, runtime}=
+  - =agent=: claude-code, codex, gemini-cli, claude-trace, atlas-cli,
+    copilot-api
+  - =browser=: playwright
+  - =toolchain=: go, delta, tmux, node
+  - =runtime=: bun, uv, rustup, aws-cli, oh-my-zsh
+- =image= ∈ ={base, main, rust}= — which Dockerfile stage this tool
+  lands in. Drives which =docker build= gets rerun.
+  - =base=: baked into =Dockerfile= target =agent-base= or earlier;
+    rebuilds main image which cascades into rust
+  - =main=: baked into =Dockerfile= target =final= (npm agent
+    tooling); rebuilds main, cascades into rust
+  - =rust=: baked into =Dockerfile.rust= only; rebuilds rust only
+
+*** New source types
+Expand =fetch_latest_version()= in =release-utils.sh= to handle
+tool families we currently cannot pin cleanly:
+
+| source type     | fetch strategy                                               | applies to               |
+|-----------------|--------------------------------------------------------------|--------------------------|
+| =npm=           | =npm view <pkg> version=  (current)                          | claude-code, codex, ...  |
+| =github-release=| =gh api repos/<slug>/releases/latest=  (current)             | atlas-cli, delta, tmux   |
+| =github-commit= | =gh api repos/<slug>/branches/master=  (current)             | copilot-api              |
+| =go-release=    | =curl https://go.dev/dl/?mode=json=, first stable            | go                       |
+| =installer-github= | github-release but normalize tag like =bun-v1.2.3= → =1.2.3= | bun                    |
+| =installer-pypi=| =curl https://pypi.org/pypi/<pkg>/json=, =info.version=      | uv                       |
+| =rustup-github= | github-release from =rust-lang/rustup=                       | rustup                   |
+| =aws-cli-rss=   | parse AWS docs changelog / GitHub releases                   | aws-cli                  |
+| =github-commit-master= | like github-commit but pin SHA                        | oh-my-zsh, zsh-*         |
+| =apt-tracked=   | no fetch; documents "rides distro repo, not pinned"          | gh, docker-ce-cli, etc.  |
+
+=apt-tracked= is a deliberate non-fetch — the registry documents
+that we know these are unpinned, instead of pretending they don't
+exist. Lists them. Makes the audit surface honest.
+
+*** Filter knobs on =version-upgrade.sh=
+Three scoping env vars, alternatives not combinable:
+
+| env var | effect                                             |
+|---------|----------------------------------------------------|
+| =GROUP= | bump only tools where =group= matches              |
+| =TOOL=  | bump only the named tool (single entry)            |
+| =IMAGE= | bump only tools where =image= matches              |
+
+Setting multiple is an error: "pick one scope, not many."
+
+Default (none set) preserves current =versions-up= behavior.
+
+*** Build-skip logic
+=version-upgrade.sh= after selecting the bump set:
+1. compute =images_touched= = set of =image= values across selected
+   tools (minus unchanged)
+2. if =base= in =images_touched=: docker build main + rust (cascade)
+3. else if =main= in =images_touched=: docker build main; cascade to
+   rust if user didn't set =IMAGE=main=
+4. else if =rust= in =images_touched=: docker build rust only
+5. else: "no image contains a changed tool, skipping build"
+
+A claude-code bump touches =main=, so rebuild main + rust (cascade).
+A playwright bump touches =rust= only, skip main. Go/Delta touch
+=base=, so main + rust rebuild. Future unpinned tools added to the
+registry automatically get this treatment.
+
+*** New =make= targets
+All route through =version-upgrade.sh= by setting the scope env var:
+
+#+BEGIN_SRC make
+# existing, preserved
+make versions-up        # GROUP= TOOL= IMAGE= (everything)
+
+# group scopes
+make agents-up          # GROUP=agent
+make browser-up         # GROUP=browser
+make toolchain-up       # GROUP=toolchain
+make runtime-up         # GROUP=runtime
+
+# image scopes
+make base-up            # IMAGE=base
+make main-up            # IMAGE=main
+make rust-up            # IMAGE=rust
+
+# single-tool: parameterized, one recipe
+make tool-up TOOL=claude-code
+make tool-up TOOL=playwright
+make tool-up TOOL=go
+# convenience aliases for the ones we type most
+make claude-up          # TOOL=claude-code
+make playwright-up      # TOOL=playwright
+make go-up              # TOOL=go
+
+# audit-only, no build
+make versions-check     # print table, exit
+make versions-check GROUP=agent
+#+END_SRC
+
+Single-tool convenience aliases are not required — they're ergonomic
+shortcuts. The canonical form is =make tool-up TOOL=<name>=.
+
+** How
+Five change sets, sequenced so each is independently testable and
+shippable:
+
+*** Step 1: extend TOOL_REGISTRY schema
+- add =group= and =image= columns to every existing row
+- update =get_tool_field= to accept =group= and =image= as field names
+- add =get_tools_by_group=, =get_tools_by_image=, =filter_tools= helpers
+- update =print_version_summary= to accept filter args
+- preserve existing 5-tool registry rows, mark their new columns
+
+Tests:
+- every existing =TOOL_REGISTRY= row parses with 8 fields
+- =get_tools_by_group agent= returns exactly {claude-code, codex,
+  gemini-cli, claude-trace, atlas-cli, copilot-api}
+- =get_tools_by_image rust= returns {playwright}
+- =get_tools_by_image base= returns {} today, {go, delta} after step 3
+- =filter_tools= with both GROUP and TOOL errors out
+
+*** Step 2: add filter knobs to version-upgrade.sh
+- read =GROUP=, =TOOL=, =IMAGE= env vars
+- error if multiple are set
+- iterate =filter_tools= result, not =get_all_tools=
+- skip docker build invocations where =image= is not in the changed set
+- update usage/help text
+
+Tests:
+- =TOOL=claude-code ./scripts/version-upgrade.sh= fetches only
+  claude-code, rebuilds main (which cascades to rust)
+- =TOOL=playwright ./scripts/version-upgrade.sh= fetches only
+  playwright, rebuilds rust only, does NOT rebuild main
+- =GROUP=agent ./scripts/version-upgrade.sh= fetches 6 agent tools
+- setting both =GROUP= and =TOOL= exits 1 with readable error
+- setting neither = current behavior (regression test)
+
+*** Step 3: pin bucket-1 forgotten tools (go, delta, tmux, node)
+- convert =wget go1.22.0...= literal to =ARG GO_VERSION= + URL
+- convert =delta 0.18.2= literal to =ARG DELTA_VERSION=
+- =tmux=, =NODE_MAJOR= already ARGs; add to Makefile + TOOL_REGISTRY
+- add 4 rows to TOOL_REGISTRY with =group=toolchain=, =image=base=
+- add new =go-release= source type to =fetch_latest_version=
+- pass =--build-arg GO_VERSION= etc. through all =docker build= calls
+  in =version-upgrade.sh= and =Makefile=
+
+Tests:
+- =fetch_latest_version go= returns a valid =x.y.z= (no =go= prefix)
+- =make go-up= rebuilds main + rust with new Go
+- =make base-up= picks up all 4 toolchain tools together
+- tmux version landing in image matches =ARG TMUX_VERSION=
+
+*** Step 4: pin bucket-2 installer tools (bun, uv, rustup, aws-cli)
+- convert =curl bun.sh/install | bash= to pinned installer invocation
+  using =bun-v${BUN_VERSION}= arg (installer supports it)
+- convert =astral.sh/uv/install.sh= to =astral.sh/uv/${UV_VERSION}/install.sh=
+- convert rustup bootstrap to =static.rust-lang.org/rustup/archive/
+  ${RUSTUP_VERSION}/<triple>/rustup-init= + SHA256 verify
+- convert AWS CLI v2 installer to versioned URL with SHA256
+- add 4 rows to TOOL_REGISTRY with =group=runtime=, =image= appropriate
+- add =installer-github=, =installer-pypi=, =rustup-github=,
+  =aws-cli-rss= source types to =fetch_latest_version=
+
+Tests:
+- each tool, at pinned version, installs and reports =--version=
+  matching the pin
+- =make runtime-up= bumps all four together
+- =make tool-up TOOL=bun= rebuilds main + rust (bun lands in base)
+- SHA256 mismatch on tampered artifact fails build early
+
+*** Step 5: pin oh-my-zsh + document apt
+- convert =git clone --depth=1 ohmyzsh= to pinned SHA
+- add 3 rows to TOOL_REGISTRY (oh-my-zsh, zsh-autosuggestions,
+  zsh-syntax-highlighting) with =group=runtime=, =type=github-commit-master=
+- add =apt-tracked= source type entries for apt packages we ship
+  (gh, docker-ce-cli, clickhouse-client, etc.) — these have no fetch,
+  they just exist in the registry so =versions-check= can print them
+  with a "rides upstream" marker
+- document the pinning/drift policy in =AGENTS.md=
+
+Tests:
+- =make versions-check= prints every tool in the image, with its
+  current pinned version and upstream latest where knowable
+- =apt-tracked= entries show as "(apt: rides upstream)" without
+  triggering a fetch
+
+** Open Questions
+1. =IMAGE=base= bump — do we rebuild =deva:core= alongside main? Core
+   is currently =agent-base= target. Nightly workflow already builds
+   core. Probably yes to keep parity, but confirm against
+   =.github/workflows/nightly-images.yml=.
+2. Naming: =make runtime-up= vs =make installers-up=. "Runtime" is
+   ambiguous with "runtime dependency" from apt world. Lean
+   =installers-up= for precision; =runtime= if we prefer alignment
+   with Dockerfile stage naming.
+3. SHA256 enforcement for bucket 2 — required (hard failure) or
+   soft-fail with warning? Rustup and AWS CLI publish checksums; bun
+   and uv have them in release artifacts. Lean required; a soft-fail
+   SHA check is worse than no SHA check.
+4. =apt-tracked= scope — list every single apt package or only the
+   "interesting" ones (gh, docker-ce-cli, clickhouse-client, tmux
+   build deps)? Lean interesting-only; listing every libXXX-dev is
+   noise.
+5. Lockfile: single =versions.lock= at repo root vs pins inside
+   Dockerfiles? Lean pins-in-Dockerfile as source of truth; lockfile
+   is a generated artifact of the pins. Keeps one place authoritative.
+6. CI coverage: does the test matrix need to exercise every
+   =GROUP/TOOL/IMAGE= combination on every PR? Lean no — smoke-test
+   the filter logic once + full =versions-up= on nightly only.
+
+** Non-goals
+- replacing =versions-up= default behavior (it stays; scoping is
+  additive)
+- supporting user-defined groups (=group= stays enum, not arbitrary)
+- pinning to non-stable versions (=next=, =beta=) from upstream
+- automatic CVE triage / advisory subscription (= separate feature)
+- rebuilding nightly workflow — reuse existing =version-upgrade.sh=
+
+** Test Plan (summary)
+| Area                    | Coverage                                              |
+|-------------------------|-------------------------------------------------------|
+| Schema                  | row parse, field retrieval, filter helpers            |
+| Filter knobs            | GROUP/TOOL/IMAGE exclusivity, empty selection, default|
+| Build-skip              | main-only path, rust-only path, base cascade          |
+| Source types            | each new type against a real upstream, offline cached |
+| SHA256                  | happy path + tampered artifact fails                  |
+| Regression              | =make versions-up= bumps everything, like before      |
+| End-to-end              | =make claude-up=, =make playwright-up=, =make go-up=  |
+|                         | each produces a working image with the expected pin   |
+
+CI: unit tests for =release-utils.sh= helpers via a tiny bats-style
+harness. Integration: =make versions-check= as a required PR check.
+Full image build on nightly only (too expensive per-PR).
+
+** Prior Art In This Repo
+- =scripts/release-utils.sh= TOOL_REGISTRY pattern — this proposal
+  is a direct evolution, not a rewrite
+- =2025-07-04= DEV-LOGS.md Docker Compose analysis — rejected then,
+  still rejected. This proposal keeps =deva.sh= as the orchestrator,
+  not docker-compose.
+- =2026-04-13= tmux-bridge layer model — same "one axis at a time,
+  compose cleanly" philosophy applied to version management
+- =.github/workflows/nightly-images.yml= — already calls
+  =scripts/version-upgrade.sh= for the full-registry bump; will
+  continue to work unchanged because scope defaults to "everything"
+
+** Connection To Other In-Flight Work
+- =20260416-browser-mcp-composition.org= (this same day): Phase 2
+  introduces =--with-browser= sidecar. If sidecar image is pinned,
+  its Playwright version must lock-step with agent-side Playwright.
+  This registry design already supports that: they share the
+  =playwright= entry, both get bumped together by =make browser-up=.
+- Current open PR branch with Playwright + chromium + shm-size: stays
+  as is. Steps 1-2 here land next; Steps 3-5 are separate, each
+  behind its own PR.
