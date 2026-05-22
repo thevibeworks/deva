@@ -3,6 +3,23 @@
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/shared_auth.sh"
 
+toml_escape_string() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '%s' "$value"
+}
+
+codex_browser_mcp_config_override() {
+    local package
+    package="$(configured_env_value DEVA_CODEX_BROWSER_MCP_PACKAGE || true)"
+    [ -n "$package" ] || package="$(configured_env_value DEVA_PLAYWRIGHT_MCP_PACKAGE || true)"
+    [ -n "$package" ] || package="${DEVA_CODEX_BROWSER_MCP_PACKAGE:-${DEVA_PLAYWRIGHT_MCP_PACKAGE:-@playwright/mcp@0.0.75}}"
+    package="$(toml_escape_string "$package")"
+
+    printf '%s' "mcp_servers.playwright={command=\"npx\",args=[\"-y\",\"${package}\",\"--headless\",\"--browser\",\"chromium\",\"--no-sandbox\",\"--isolated\"],startup_timeout_sec=30}"
+}
+
 agent_prepare() {
     local -a args
     if [ $# -gt 0 ]; then
@@ -45,6 +62,15 @@ agent_prepare() {
     if [ "$has_model" = false ]; then
         AGENT_COMMAND+=("-m" "${DEVA_DEFAULT_CODEX_MODEL:-gpt-5-codex}")
     fi
+
+    if [ "${DEVA_CODEX_BROWSER_MCP:-${DEVA_WITH_BROWSER:-0}}" = "1" ]; then
+        AGENT_COMMAND+=("--config" "$(codex_browser_mcp_config_override)")
+    fi
+
+    local codex_config
+    for codex_config in "${CODEX_CONFIG_OVERRIDES[@]+"${CODEX_CONFIG_OVERRIDES[@]}"}"; do
+        AGENT_COMMAND+=("--config" "$codex_config")
+    done
 
     AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
 

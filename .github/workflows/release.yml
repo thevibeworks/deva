@@ -35,45 +35,64 @@ jobs:
           [ -n "$release_tag" ] || { echo "error: empty release tag" >&2; exit 1; }
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
-  resolve-versions:
-    name: Resolve Tool Versions
+  load-version-pins:
+    name: Load Pinned Tool Versions
     runs-on: ubuntu-latest
+    needs: prepare
     outputs:
-      claude_code_version: ${{ steps.versions.outputs.claude_code_version }}
-      codex_version: ${{ steps.versions.outputs.codex_version }}
-      gemini_cli_version: ${{ steps.versions.outputs.gemini_cli_version }}
-      atlas_cli_version: ${{ steps.versions.outputs.atlas_cli_version }}
-      copilot_api_version: ${{ steps.versions.outputs.copilot_api_version }}
+      node_major: ${{ steps.pins.outputs.node_major }}
+      go_version: ${{ steps.pins.outputs.go_version }}
+      python_version: ${{ steps.pins.outputs.python_version }}
+      delta_version: ${{ steps.pins.outputs.delta_version }}
+      tmux_version: ${{ steps.pins.outputs.tmux_version }}
+      tmux_sha256: ${{ steps.pins.outputs.tmux_sha256 }}
+      claude_code_version: ${{ steps.pins.outputs.claude_code_version }}
+      claude_trace_version: ${{ steps.pins.outputs.claude_trace_version }}
+      codex_version: ${{ steps.pins.outputs.codex_version }}
+      gemini_cli_version: ${{ steps.pins.outputs.gemini_cli_version }}
+      atlas_cli_version: ${{ steps.pins.outputs.atlas_cli_version }}
+      copilot_api_version: ${{ steps.pins.outputs.copilot_api_version }}
+      playwright_version: ${{ steps.pins.outputs.playwright_version }}
+      rust_toolchains: ${{ steps.pins.outputs.rust_toolchains }}
+      rust_default_toolchain: ${{ steps.pins.outputs.rust_default_toolchain }}
+      rust_targets: ${{ steps.pins.outputs.rust_targets }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          ref: ${{ needs.prepare.outputs.release_tag }}
 
-      - name: Resolve versions
-        id: versions
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash ./scripts/resolve-tool-versions.sh
+      - name: Load pins
+        id: pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./scripts/version-pins.sh
+          load_version_pins
+          emit_github_outputs "$GITHUB_OUTPUT"
 
       - name: Summary
         run: |
           cat <<EOF >> "$GITHUB_STEP_SUMMARY"
-          ## Release Tool Versions
+          ## Release Tool Versions (Pinned)
 
-          - Claude Code: \`${{ steps.versions.outputs.claude_code_version }}\`
-          - Codex: \`${{ steps.versions.outputs.codex_version }}\`
-          - Gemini CLI: \`${{ steps.versions.outputs.gemini_cli_version }}\`
-          - Atlas CLI: \`${{ steps.versions.outputs.atlas_cli_version }}\`
-          - Copilot API: \`${{ steps.versions.outputs.copilot_api_version }}\`
+          - Node major: \`${{ steps.pins.outputs.node_major }}\`
+          - Go: \`${{ steps.pins.outputs.go_version }}\`
+          - Python: \`${{ steps.pins.outputs.python_version }}\`
+          - Delta: \`${{ steps.pins.outputs.delta_version }}\`
+          - Claude Code: \`${{ steps.pins.outputs.claude_code_version }}\`
+          - Claude Trace: \`${{ steps.pins.outputs.claude_trace_version }}\`
+          - Codex: \`${{ steps.pins.outputs.codex_version }}\`
+          - Gemini CLI: \`${{ steps.pins.outputs.gemini_cli_version }}\`
+          - Atlas CLI: \`${{ steps.pins.outputs.atlas_cli_version }}\`
+          - Copilot API: \`${{ steps.pins.outputs.copilot_api_version }}\`
+          - Playwright: \`${{ steps.pins.outputs.playwright_version }}\`
+          - Rust toolchains: \`${{ steps.pins.outputs.rust_toolchains }}\`
           EOF
 
   build-and-push:
     name: Build and Push Docker Image
-    needs: [prepare, resolve-versions]
+    needs: [prepare, load-version-pins]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -118,16 +137,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
-            CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
-            GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
-            ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
-            COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
+            NODE_MAJOR=${{ needs.load-version-pins.outputs.node_major }}
+            GO_VERSION=${{ needs.load-version-pins.outputs.go_version }}
+            PYTHON_VERSION=${{ needs.load-version-pins.outputs.python_version }}
+            DELTA_VERSION=${{ needs.load-version-pins.outputs.delta_version }}
+            TMUX_VERSION=${{ needs.load-version-pins.outputs.tmux_version }}
+            TMUX_SHA256=${{ needs.load-version-pins.outputs.tmux_sha256 }}
+            CLAUDE_CODE_VERSION=${{ needs.load-version-pins.outputs.claude_code_version }}
+            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
+            CODEX_VERSION=${{ needs.load-version-pins.outputs.codex_version }}
+            GEMINI_CLI_VERSION=${{ needs.load-version-pins.outputs.gemini_cli_version }}
+            ATLAS_CLI_VERSION=${{ needs.load-version-pins.outputs.atlas_cli_version }}
+            COPILOT_API_VERSION=${{ needs.load-version-pins.outputs.copilot_api_version }}
 
   build-and-push-rust:
     name: Build and Push Rust Profile Image
     runs-on: ubuntu-latest
-    needs: [prepare, build-and-push]
+    needs: [prepare, load-version-pins, build-and-push]
     permissions:
       contents: read
       packages: write
@@ -172,6 +198,15 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.release_tag }}
+            CLAUDE_CODE_VERSION=${{ needs.load-version-pins.outputs.claude_code_version }}
+            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
+            CODEX_VERSION=${{ needs.load-version-pins.outputs.codex_version }}
+            GEMINI_CLI_VERSION=${{ needs.load-version-pins.outputs.gemini_cli_version }}
+            ATLAS_CLI_VERSION=${{ needs.load-version-pins.outputs.atlas_cli_version }}
+            PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
+            RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}
+            RUST_DEFAULT_TOOLCHAIN=${{ needs.load-version-pins.outputs.rust_default_toolchain }}
+            RUST_TARGETS=${{ needs.load-version-pins.outputs.rust_targets }}
 
   release:
     name: Create GitHub Release

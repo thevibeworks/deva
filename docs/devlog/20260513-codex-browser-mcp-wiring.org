@@ -1,0 +1,60 @@
+* [2026-05-13] Dev Log: Codex browser MCP wiring              :BROWSER:MCP:CODEX:
+
+** Context
+Deva already supports Claude host Chrome via =deva.sh claude -- --chrome=; Codex CLI does not consume that bridge.
+
+** Why
+Codex browser automation needs Codex MCP configuration, not Claude's host Chrome socket and profile-extension mounts.
+
+** What
+- Added =deva.sh codex --browser-mcp=.
+- The flag switches default/base profile selection to =rust= because browser runtime dependencies live in the rust image.
+- The flag injects a session-only Codex CLI override for =mcp_servers.playwright=.
+- The flag does not edit or mount over =~/.codex/config.toml=.
+- =deva.sh claude --browser-mcp= now fails with a direct error; Claude host Chrome remains =deva.sh claude -- --chrome=.
+- Added =CODEX_BROWSER_MCP=true= and repeatable =CODEX_CONFIG=key=value= support for =.deva= files.
+- Added dry-run shape coverage in =scripts/test-codex-browser-shape.sh=.
+- Documented the distinction in =docs/how-it-works.md= and =docs/troubleshooting.md=.
+
+** How
+*** Commands
+#+BEGIN_SRC bash
+bash scripts/test-codex-browser-shape.sh
+bash scripts/test-mount-shape.sh
+bash -n deva.sh agents/codex.sh scripts/test-codex-browser-shape.sh scripts/test-mount-shape.sh
+git diff --check
+tmp="$(mktemp -d)"; CODEX_HOME="$tmp" codex mcp list --config 'mcp_servers.playwright={command="npx",args=["-y","@playwright/mcp@0.0.75","--headless","--browser","chromium","--no-sandbox","--isolated"],startup_timeout_sec=30}'; rm -rf "$tmp"
+#+END_SRC
+
+** Result
+*** Outcome
+=codex --browser-mcp --debug --dry-run= emits image =ghcr.io/thevibeworks/deva:rust=, =DEVA_CODEX_BROWSER_MCP=1=, and a Codex =--config mcp_servers.playwright={...}= override.
+
+*** Tests
+- Added: =scripts/test-codex-browser-shape.sh=
+- Verified: =scripts/test-mount-shape.sh=
+- Verified: =bash -n= for touched shell files
+- Verified: =git diff --check=
+- Verified: installed Codex CLI accepts the injected MCP override via =codex mcp list=
+
+** Decisions
+| Decision | Alternatives | Rationale | DRI | Timestamp (UTC) |
+|----------+--------------+-----------+-----+-----------------|
+| Use Codex CLI =--config= override instead of writing =~/.codex/config.toml= | Patch host config, generate overlay config, copy Claude chrome bridge | Session-only override is reversible and respects user config ownership | deva | 2026-05-13T03:28:43Z |
+| Rename the public switch to =--browser-mcp= / =CODEX_BROWSER_MCP= | Keep generic =--with-browser= / =WITH_BROWSER= | The browser path is Codex MCP wiring, not a general browser mount | deva | 2026-05-13T08:30:00Z |
+| Keep Claude =--chrome= separate from Codex =--browser-mcp= | Reuse Chrome bridge mounts for Codex | Upstream Codex CLI exposes MCP config; no Claude-compatible =--chrome= bridge contract exists | deva | 2026-05-13T03:28:43Z |
+
+** Risks                                                            :OPS:
+| Risk | Mitigation | Owner | Status |
+|------+------------+-------+--------|
+| First MCP run may fetch =DEVA_CODEX_BROWSER_MCP_PACKAGE= through =npx -y= | Package is pinned by default to =@playwright/mcp@0.0.75= and can be overridden | deva | documented |
+| Playwright MCP package/browser version drift | Keep =DEVA_CODEX_BROWSER_MCP_PACKAGE= explicit; revisit sidecar/image pinning before making this the only browser path | deva | open |
+| Host Codex config can start unrelated MCP servers such as =computer-use=, =codex_apps=, or =hn-research= | =CODEX_CONFIG= allows session-only disable overrides without editing =~/.codex/config.toml= | deva | documented |
+
+** Rollback
+*** Trigger
+=deva.sh codex --browser-mcp= fails before Codex starts, or Codex cannot initialize the =playwright= MCP server.
+
+*** Procedure
+1. Revert =deva.sh=, =agents/codex.sh=, =scripts/test-codex-browser-shape.sh=, =docs/how-it-works.md=, =docs/troubleshooting.md=, and this dev log.
+2. Data impact: none; host Codex config is not modified.
