@@ -3,6 +3,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/thevibeworks/deva/ci.yml?branch=main&label=ci)](https://github.com/thevibeworks/deva/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-docs.deva.sh-111111)](https://docs.deva.sh)
 [![Release](https://img.shields.io/github/v/release/thevibeworks/deva?sort=semver)](https://github.com/thevibeworks/deva/releases)
+[![Checks](https://img.shields.io/badge/checks-shellcheck%20%7C%20docs%20%7C%20smoke-222222)](#development)
 [![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-thevibeworks%2Fdeva-blue)](https://github.com/thevibeworks/deva/pkgs/container/deva)
 [![Agents](https://img.shields.io/badge/agents-codex%20%7C%20claude%20%7C%20gemini-222222)](#what-this-is)
@@ -68,6 +69,7 @@ Read these if you want to understand the machinery instead of cargo-culting comm
 - [How It Works](docs/how-it-works.md)
 - [Philosophy](docs/philosophy.md)
 - [Advanced Usage](docs/advanced-usage.md)
+- [Tmux Bridge](docs/tmux-bridge-agent-comms.md)
 - [Custom Images](docs/custom-images.md)
 - [Docs Home](docs/index.md)
 
@@ -157,6 +159,12 @@ Basic checks:
 ./deva.sh --version
 ./claude-yolo --help
 ./scripts/version-check.sh
+bash tests/test_release_utils.sh
+bash tests/version-upgrade.sh
+./scripts/test-mount-shape.sh
+./scripts/test-version-targets.sh
+bash scripts/test-container-slug.sh
+uv run --with mkdocs --with mkdocs-material --with pymdown-extensions mkdocs build --strict
 ```
 
 If you changed auth, mounts, or container lifecycle, run the real path. Do not ship "should work".

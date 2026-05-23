@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-22
+
 ### Added
 - `scripts/tmux-bridge` vendored from upstream smux (commit 95bf0b6, MIT) for layer-2 agent-to-agent communication over tmux panes: read/type/keys/label/envelope/doctor
 - `tmux-bridge` installed at `/usr/local/bin/tmux-bridge` in container images; composes with existing `deva-bridge-tmux` (layer 1, kernel boundary)
 - `scripts/THIRD_PARTY_LICENSES/smux-LICENSE` and `scripts/tmux-bridge.VENDORED` provenance metadata pinning upstream commit + SHA256
 - `docs/tmux-bridge-agent-comms.md` explaining the two-layer bridge composition, read-before-act guard, and socket detection order
 - CI smoke test exercising the full `tmux-bridge` CLI surface (list/name/resolve/read/type/read-guard) against an ephemeral tmux server inside the built image
+- Codex `--browser-mcp` wiring for Playwright MCP sessions on the rust image profile
+- `scripts/test-container-slug.sh` regression coverage for the `deva--agent--auth--slug..hash` container naming format
+- `tests/version-upgrade.sh` fake-Docker coverage for `versions-up` build argument routing
 
 ### Fixed
 - deva no longer adds a redundant project-local `.claude` child bind mount on top of the workspace mount
@@ -20,11 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - shared agent tooling installs now switch out of inaccessible working directories before pinned atlas go-install fallback
 - `claude-trace` installs are now pinned instead of silently following the latest npm publish
 - atlas-cli installs now honor `ATLAS_CLI_VERSION` exactly instead of drifting to upstream `latest`
+- user-specified `.agents` mounts no longer collide with deva's shared-agent mount
+- Docker installer smoke no longer fails on npm self-upgrade or Playwright headless-shell path changes
 
 ### Changed
 - default Makefile builds now use pinned tool versions; `versions-up` remains the explicit upgrade path
 - Rust image rebuild paths now forward the selected agent CLI versions instead of silently reinstalling Dockerfile defaults
 - `versions` and `versions-up` now treat Makefile defaults as defaults instead of forcing them as fake "latest" overrides
+- persistent container names now include agent, auth tag, workspace slug, and shape hash to avoid cross-auth/container-shape reuse
+- `versions-up` now builds the stable core image and uses it as the Rust image base, matching `make build-rust-image`
 
 ## [0.10.0] - 2026-03-24
 
