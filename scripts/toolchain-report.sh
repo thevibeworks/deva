@@ -33,7 +33,7 @@ main() {
     line "Claude Trace:" "$CLAUDE_TRACE_VERSION"
     line "Codex:" "$CODEX_VERSION"
     line "Gemini CLI:" "$GEMINI_CLI_VERSION"
-    line "Atlas CLI:" "$ATLAS_CLI_VERSION"
+    line "CCX:" "$CCX_VERSION"
     line "Copilot API:" "$COPILOT_API_VERSION"
 
     heading "Browser Tooling (pinned — edit versions.env to bump)"

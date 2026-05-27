@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-27
+
+### Added
+- `deva status` command: Docker-native workspace inspection showing
+  containers, categorized mounts (workspace/config/bridge/user),
+  agent homes, and health checks. Flags: `-g` global, `--verbose`
+  for env vars
+- Agent context injection: deva.sh writes container-awareness
+  instructions to `.claude/CLAUDE.md` and `AGENTS.md` before agent
+  start. Dynamic content (Docker socket, ephemeral mode). Replace
+  semantics on each startup. Sentinel markers for recovery
+- `scripts/test-status-helpers.sh` (22 tests) and
+  `scripts/test-workspace-context.sh` (25 tests)
+
+### Changed
+- Replace atlas-cli (lroolle/atlas-cli) with ccx (thevibeworks/ccx)
+  as the session viewer. Binary renamed `atl` -> `ccx`. Skill
+  installed from `.skill` zip archive
+- `deva status` replaces the old session-file-only implementation
+  with `docker inspect` queries for live container state
+
 ## [0.11.0] - 2026-05-22
 
 ### Added

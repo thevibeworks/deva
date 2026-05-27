@@ -26,7 +26,7 @@ inspect)
   "org.opencontainers.image.claude_trace_version":"1.0.8",
   "org.opencontainers.image.codex_version":"0.116.0",
   "org.opencontainers.image.gemini_cli_version":"0.35.0",
-  "org.opencontainers.image.atlas_cli_version":"v0.1.4",
+  "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
 }}}]
@@ -99,13 +99,13 @@ if [[ "${1:-}" != "api" ]]; then
 fi
 
 case "${2:-}" in
-repos/lroolle/atlas-cli/releases/latest)
-    echo "v0.1.4"
+repos/lroolle/ccx/releases/latest)
+    echo "v0.7.0"
     ;;
 repos/ericc-ch/copilot-api/branches/master)
     echo "0ea08febdd7e3e055b03dd298bf57e669500b5c1"
     ;;
-repos/lroolle/atlas-cli/releases/tags/v0.1.4)
+repos/lroolle/ccx/releases/tags/v0.1.4)
     echo "2026-01-16T05:42:00Z"
     ;;
 repos/ericc-ch/copilot-api/commits/0ea08febdd7e3e055b03dd298bf57e669500b5c1)
@@ -172,7 +172,7 @@ for expected in \
     "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
-    "--build-arg ATLAS_CLI_VERSION=v0.1.4" \
+    "--build-arg CCX_VERSION=v0.1.4" \
     "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "--build-arg GO_VERSION=1.26.2"
 do
@@ -188,7 +188,7 @@ for expected in \
     "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
-    "--build-arg ATLAS_CLI_VERSION=v0.1.4" \
+    "--build-arg CCX_VERSION=v0.1.4" \
     "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do
     [[ "$rust_build" == *"$expected"* ]] || {

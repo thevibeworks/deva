@@ -30,7 +30,7 @@ main() {
     resolve_tool "claude_code_version" "claude-code"
     resolve_tool "codex_version" "codex"
     resolve_tool "gemini_cli_version" "gemini-cli"
-    resolve_tool "atlas_cli_version" "atlas-cli"
+    resolve_tool "ccx_version" "ccx"
     resolve_tool "copilot_api_version" "copilot-api"
 }
 
