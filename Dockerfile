@@ -151,9 +151,11 @@ RUN --mount=type=cache,target=/tmp/tmux-cache,sharing=locked \
     hash -r && \
     tmux -V
 
-ENV NPM_CONFIG_FETCH_RETRIES=5 \
+ENV NPM_CONFIG_FETCH_RETRIES=2 \
     NPM_CONFIG_FETCH_RETRY_FACTOR=2 \
-    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=10000
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=1000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=10000 \
+    NPM_CONFIG_FETCH_TIMEOUT=30000
 
 # Stable agent base: user, shell, and shared runtimes.
 # Keep volatile agent package installs out of this stage so downstream

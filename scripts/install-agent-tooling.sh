@@ -47,6 +47,38 @@ retry_cmd() {
     done
 }
 
+check_npm_registry_dns() {
+    local host="${NPM_REGISTRY_HOST:-registry.npmjs.org}"
+
+    if [ "${DEVA_SKIP_NPM_REGISTRY_CHECK:-}" = "1" ]; then
+        return 0
+    fi
+
+    command -v node >/dev/null 2>&1 || return 0
+
+    log "Checking npm registry DNS: $host"
+    if node - "$host" <<'NODE' >/dev/null
+const dns = require("dns");
+const host = process.argv[2];
+dns.lookup(host, { all: true }, (err) => {
+  if (err) {
+    console.error(`${err.code || "DNS_ERROR"} ${host}: ${err.message}`);
+    process.exit(1);
+  }
+});
+NODE
+    then
+        return 0
+    fi
+
+    warn "Cannot resolve $host from this container."
+    warn "This is a Docker/VM DNS problem, not an npm package/version problem."
+    if [ -f /etc/resolv.conf ]; then
+        sed 's/^/resolv.conf: /' /etc/resolv.conf >&2 || true
+    fi
+    die "npm registry DNS lookup failed"
+}
+
 ensure_safe_cwd() {
     if stat . >/dev/null 2>&1; then
         return
@@ -91,6 +123,7 @@ install_npm_agent_tooling() {
 
     mkdir -p "$DEVA_HOME/.npm-global" "$DEVA_HOME/.local/bin"
     npm config set prefix "$DEVA_HOME/.npm-global"
+    check_npm_registry_dns
 
     retry_cmd 3 "npm install agent tooling" \
         npm install -g --verbose --no-audit --no-fund \

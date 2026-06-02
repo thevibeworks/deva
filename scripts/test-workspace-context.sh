@@ -15,11 +15,7 @@ tmp_root="$(mktemp -d)"
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT
 
-source_inject() {
-    eval "$(sed -n '/^inject_workspace_context()/,/^}/p' "$REPO_ROOT/deva.sh")"
-}
-
-source_inject
+eval "$(sed -n '/^inject_workspace_context()/,/^}/p' "$REPO_ROOT/deva.sh")"
 
 echo "=== Both files created from empty workspace ==="
 
