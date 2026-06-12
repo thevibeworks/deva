@@ -3452,11 +3452,13 @@ if [ "$QUICK_MODE" = false ]; then
     append_auth_credential_overlay
 fi
 
-# Set statusline log paths via env vars (XDG-compliant)
-DOCKER_ARGS+=("-e" "CLAUDE_DATA_DIR=/home/deva/.config/deva/claude")
-DOCKER_ARGS+=("-e" "CLAUDE_CACHE_DIR=/home/deva/.cache/deva/claude/sessions")
+# Statusline state intentionally NOT redirected: it defaults to
+# ~/.claude/statusline inside the mounted ~/.claude, so the host and every
+# container share one quota cache and one log dir. Hard-coding
+# CLAUDE_DATA_DIR/CLAUDE_CACHE_DIR here split state from the host and from
+# the logs (#388).
 
-# Mount deva config and cache directories for statusline usage tracking
+# Mount deva config and cache directories (auth credential files etc.)
 # Skip when --config-home is explicit or -Q bare mode to preserve isolation
 if [ "$CONFIG_HOME_FROM_CLI" = false ] && [ "$QUICK_MODE" = false ]; then
     if [ -d "$HOME/.config/deva" ]; then
