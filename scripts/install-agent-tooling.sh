@@ -8,7 +8,7 @@ set -euo pipefail
 : "${CODEX_VERSION:?CODEX_VERSION is required}"
 : "${GEMINI_CLI_VERSION:?GEMINI_CLI_VERSION is required}"
 
-CLAUDE_TRACE_VERSION="${CLAUDE_TRACE_VERSION:-1.0.9}"
+CCTRACE_VERSION="${CCTRACE_VERSION:-0.4.0}"
 CCX_VERSION="${CCX_VERSION:-v0.7.0}"
 CCX_REPO="${CCX_REPO:-thevibeworks/ccx}"
 
@@ -119,7 +119,7 @@ download_to() {
 
 install_npm_agent_tooling() {
     log "Installing npm agent tooling"
-    log "Requested versions: claude=${CLAUDE_CODE_VERSION} claude-trace=${CLAUDE_TRACE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION}"
+    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION}"
 
     mkdir -p "$DEVA_HOME/.npm-global" "$DEVA_HOME/.local/bin"
     npm config set prefix "$DEVA_HOME/.npm-global"
@@ -128,7 +128,6 @@ install_npm_agent_tooling() {
     retry_cmd 3 "npm install agent tooling" \
         npm install -g --verbose --no-audit --no-fund \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-        "@mariozechner/claude-trace@${CLAUDE_TRACE_VERSION}" \
         "@openai/codex@${CODEX_VERSION}" \
         "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
         || die "npm install failed"
@@ -139,7 +138,6 @@ install_npm_agent_tooling() {
     "$DEVA_HOME/.npm-global/bin/claude" --version
     "$DEVA_HOME/.npm-global/bin/codex" --version
     "$DEVA_HOME/.npm-global/bin/gemini" --version
-    "$DEVA_HOME/.npm-global/bin/claude-trace" --help >/dev/null
     (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true)
 }
 
@@ -245,11 +243,39 @@ install_ccx() {
     log "ccx installed"
 }
 
+# cctrace ships no prebuilt binaries; compile the standalone binary with bun.
+# The compiled binary receives argv directly, so `cctrace -- <claude args>`
+# works (bun's CLI would eat the leading "--").
+install_cctrace() {
+    ensure_safe_cwd
+    mkdir -p "$DEVA_HOME/.local/bin"
+
+    log "Installing cctrace pinned to ${CCTRACE_VERSION}"
+    command -v bun >/dev/null 2>&1 || die "bun is required to build cctrace"
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    (
+        cd "$tmp_dir"
+        retry_cmd 3 "npm pack cctrace" \
+            npm pack "@thevibeworks/cctrace@${CCTRACE_VERSION}" \
+            || die "npm pack @thevibeworks/cctrace failed"
+        tar -xzf thevibeworks-cctrace-*.tgz
+        cd package
+        bun build --compile --outfile "$DEVA_HOME/.local/bin/cctrace" src/cli.ts
+    )
+    rm -rf "$tmp_dir"
+
+    "$DEVA_HOME/.local/bin/cctrace" --help >/dev/null || die "cctrace verification failed"
+    log "cctrace installed"
+}
+
 main() {
     ensure_safe_cwd
     log "Installing shared agent tooling into $DEVA_HOME"
     install_npm_agent_tooling
     install_ccx
+    install_cctrace
 }
 
 main "$@"

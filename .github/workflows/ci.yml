@@ -76,7 +76,7 @@ jobs:
             --build-arg TMUX_VERSION="${{ steps.pins.outputs.tmux_version }}" \
             --build-arg TMUX_SHA256="${{ steps.pins.outputs.tmux_sha256 }}" \
             --build-arg CLAUDE_CODE_VERSION="${{ steps.pins.outputs.claude_code_version }}" \
-            --build-arg CLAUDE_TRACE_VERSION="${{ steps.pins.outputs.claude_trace_version }}" \
+            --build-arg CCTRACE_VERSION="${{ steps.pins.outputs.cctrace_version }}" \
             --build-arg CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
             --build-arg GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
             --build-arg ATLAS_CLI_VERSION="${{ steps.pins.outputs.atlas_cli_version }}" \
@@ -97,7 +97,7 @@ jobs:
             TMUX_VERSION="${{ steps.pins.outputs.tmux_version }}" \
             TMUX_SHA256="${{ steps.pins.outputs.tmux_sha256 }}" \
             CLAUDE_CODE_VERSION="${{ steps.pins.outputs.claude_code_version }}" \
-            CLAUDE_TRACE_VERSION="${{ steps.pins.outputs.claude_trace_version }}" \
+            CCTRACE_VERSION="${{ steps.pins.outputs.cctrace_version }}" \
             CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
             GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
             ATLAS_CLI_VERSION="${{ steps.pins.outputs.atlas_cli_version }}" \

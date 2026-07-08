@@ -15,9 +15,8 @@ agent_prepare() {
     AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
-    # Detect --trace flag and extract trace options
+    # Detect --trace flag
     local use_trace=false
-    local -a trace_args=()
     local -a claude_args=()
 
     if [ ${#remaining_args[@]} -gt 0 ]; then
@@ -27,8 +26,6 @@ agent_prepare() {
             case "$arg" in
                 --trace)
                     use_trace=true
-                    # Default trace options - include all requests for visibility
-                    trace_args+=("--include-all-requests")
                     ;;
                 *)
                     claude_args+=("$arg")
@@ -48,10 +45,9 @@ agent_prepare() {
     done
 
     if [ "$use_trace" = true ]; then
-        # Use claude-trace wrapper
-        AGENT_COMMAND=("claude-trace")
-        AGENT_COMMAND+=("${trace_args[@]}")
-        AGENT_COMMAND+=("--run-with")
+        # Use cctrace wrapper: captures everything by default,
+        # claude args go after "--"
+        AGENT_COMMAND=("cctrace" "--no-open" "--")
         if [ "$has_dangerously" = false ]; then
             AGENT_COMMAND+=("--dangerously-skip-permissions")
         fi

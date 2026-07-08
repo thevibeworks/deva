@@ -19,7 +19,7 @@ show_help() {
     echo "This script runs Claude CLI either locally or in a Docker container with YOLO mode."
     echo ""
     echo "Options:"
-    echo "  --trace                     Use claude-trace for logging"
+    echo "  --trace                     Use cctrace for request tracing"
     echo "  --verbose                   Show verbose output including environment info"
     echo "  --help, -h                  Show this help message"
     echo "  --version                   Show version information"
@@ -837,7 +837,7 @@ done
 
 run_claude_local() {
     CLAUDE_PATH=""
-    CLAUDE_TRACE_PATH=""
+    CCTRACE_PATH=""
 
     # 1. Check if claude is in PATH (global install)
     if command -v claude >/dev/null 2>&1; then
@@ -863,18 +863,15 @@ run_claude_local() {
         exit 1
     fi
 
-    # Try to find claude-trace in similar order
-    if command -v claude-trace >/dev/null 2>&1; then
-        CLAUDE_TRACE_PATH="claude-trace"
-    elif command -v npm >/dev/null 2>&1; then
-        NPM_PREFIX=$(npm prefix -g 2>/dev/null || echo "")
-        if [ -n "$NPM_PREFIX" ] && [ -x "$NPM_PREFIX/bin/claude-trace" ]; then
-            CLAUDE_TRACE_PATH="$NPM_PREFIX/bin/claude-trace"
-        fi
+    # Try to find cctrace in similar order
+    if command -v cctrace >/dev/null 2>&1; then
+        CCTRACE_PATH="cctrace"
+    elif [ -x "$HOME/.local/bin/cctrace" ]; then
+        CCTRACE_PATH="$HOME/.local/bin/cctrace"
     fi
 
-    # Fallback to just "claude-trace" if not found but trace requested
-    [ -z "$CLAUDE_TRACE_PATH" ] && CLAUDE_TRACE_PATH="claude-trace"
+    # Fallback to just "cctrace" if not found but trace requested
+    [ -z "$CCTRACE_PATH" ] && CCTRACE_PATH="cctrace"
 
     case "$AUTH_MODE" in
     "bedrock")
@@ -1078,12 +1075,12 @@ run_claude_local() {
     fi
 
     if [ "$USE_TRACE" = true ]; then
-        if command -v "$CLAUDE_TRACE_PATH" >/dev/null 2>&1; then
-            CLAUDE_CMD="$CLAUDE_TRACE_PATH"
-            FINAL_ARGS=("--include-all-requests" "--run-with" "${CLAUDE_ARGS[@]}")
+        if command -v "$CCTRACE_PATH" >/dev/null 2>&1; then
+            CLAUDE_CMD="$CCTRACE_PATH"
+            FINAL_ARGS=("--" "${CLAUDE_ARGS[@]}")
         else
-            echo "error: claude-trace not found but --trace was requested" >&2
-            echo "install claude-trace with: npm install -g @mariozechner/claude-trace" >&2
+            echo "error: cctrace not found but --trace was requested" >&2
+            echo "install cctrace: https://github.com/thevibeworks/cctrace (make install)" >&2
             exit 1
         fi
     else
@@ -1681,7 +1678,7 @@ fi
 if [ "$OPEN_SHELL" = true ]; then
     DOCKER_ARGS+=("/bin/zsh")
 elif [ "$USE_TRACE" = true ]; then
-    DOCKER_ARGS+=("claude-trace" "--include-all-requests" "--run-with" "${CLAUDE_ARGS[@]}")
+    DOCKER_ARGS+=("cctrace" "--no-open" "--" "${CLAUDE_ARGS[@]}")
 else
     DOCKER_ARGS+=("claude" "${CLAUDE_ARGS[@]}")
 fi

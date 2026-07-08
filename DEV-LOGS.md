@@ -13,6 +13,15 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-07] Dev Log: switch --trace default from claude-trace to cctrace
+- Why: claude-trace's node --require fetch hook only sees /v1/messages and dies on native Claude binaries; cctrace (thevibeworks/cctrace) MITM-captures everything (OAuth, usage/credits, MCP) and auto-detects npm vs native installs
+- What:
+  - `--trace` now runs `cctrace --no-open -- <claude args>` in agents/claude.sh, claude.sh (local + docker), and docker-entrypoint.sh (dsp injected after the first `--` instead of after `--run-with`)
+  - install-agent-tooling.sh compiles cctrace from the npm tarball with `bun build --compile` into `~/.local/bin/cctrace`; compiled binary is required because bun's CLI eats the leading `--` separator
+  - bun now installed system-wide via `BUN_INSTALL=/usr/local` (was a symlink into /root/.bun, unusable by the deva user)
+  - pin renamed CLAUDE_TRACE_VERSION -> CCTRACE_VERSION=0.4.0 across versions.env, Makefile, Dockerfiles, CI workflows, release-utils registry, and tests
+- Result: `deva.sh claude -- --trace` captures the full request surface; snapshots persist to `.cctrace/` in the workspace mount; claude-trace fully removed from images
+
 # [2026-04-28] Dev Log: agent-context consolidation — ~/.claude as single source of truth [WIP]
 - Why: agent customizations are scattered across three directories (=~/.claude/=, =~/.codex/=, =~/.agents/=), 10 concepts are duplicated between Claude Code agents and Codex skills and are already diverging, and the shared global instructions (GENERAL-AGENTS.md) copied into both =~/.claude/CLAUDE.md= and =~/.codex/AGENTS.md= are 30 lines out of sync
 - What:
