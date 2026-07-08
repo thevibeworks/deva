@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-07
+
 ### Changed
 - Replace claude-trace (@mariozechner/claude-trace) with cctrace
   (thevibeworks/cctrace) as the `--trace` backend. cctrace is a
@@ -22,6 +24,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that non-root users could not execute. cctrace is compiled with it
   at image build into a standalone binary at
   `~/.local/bin/cctrace` (no bun needed at runtime)
+
+### Added
+- Docker build DNS preflight checks and tunable build args
+- `deva.sh sessions` / `deva.sh insight` / raw `ccx` passthrough
+  commands routed through deva.sh
+- Container context generated dynamically into `.claude/CLAUDE.md`
+  and `AGENTS.md` (replaces the stale checked-in copy)
+
+### Fixed
+- Statusline data dir no longer hard-coded into containers;
+  state defaults to `~/.claude/statusline`, ending split-brain
+  quota caches between host and container (#388)
+- `CCX_VERSION` build-arg was never passed to image builds (dead
+  `ATLAS_CLI_VERSION` wiring); released images silently pinned ccx
+  from Dockerfile ARG defaults instead of versions.env
+- `--debug` output no longer crashes on empty `USER_VOLUMES`
+  under `set -u` on bash < 4.4 (#397)
+- Stale `lroolle/ccx` mocks in the version-upgrade test that
+  failed CI at HEAD since the ccx migration
+
+### Docs
+- Request Tracing section for `--trace`/cctrace in advanced-usage
+- Codex `--browser-mcp` clarifications: runs an isolated
+  in-container Chromium; the desktop Chrome plugin is host-only
+  and cannot be mounted into the container (#397)
 
 ## [0.12.0] - 2026-05-27
 
