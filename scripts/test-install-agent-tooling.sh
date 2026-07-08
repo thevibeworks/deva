@@ -136,15 +136,15 @@ mkdir -p "$tmp_root/deny"
         CLAUDE_TRACE_VERSION="$CLAUDE_TRACE_VERSION" \
         CODEX_VERSION="$CODEX_VERSION" \
         GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
-        ATLAS_CLI_VERSION="$ATLAS_CLI_VERSION" \
+        CCX_VERSION="$CCX_VERSION" \
         bash "$REPO_ROOT/scripts/install-agent-tooling.sh" 2>&1
     )"
 
     grep -F "Current working directory is not accessible; switching to $fake_home" <<<"$output" >/dev/null
     grep -F "Installing npm agent tooling" <<<"$output" >/dev/null
     grep -F "claude-trace=$CLAUDE_TRACE_VERSION" <<<"$output" >/dev/null
-    grep -F "Installing atlas-cli pinned to $ATLAS_CLI_VERSION" <<<"$output" >/dev/null
+    grep -F "Installing ccx pinned to $CCX_VERSION" <<<"$output" >/dev/null
     grep -F "falling back to pinned go install" <<<"$output" >/dev/null
-    grep -F "atlas-cli installed" <<<"$output" >/dev/null
+    grep -F "ccx installed" <<<"$output" >/dev/null
     test -x "$fake_home/.local/bin/atl"
 )

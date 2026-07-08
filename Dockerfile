@@ -216,9 +216,9 @@ LABEL org.opencontainers.image.claude_trace_version=${CLAUDE_TRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 
-ARG ATLAS_CLI_VERSION=v0.1.4
+ARG CCX_VERSION=v0.7.0
 
-LABEL org.opencontainers.image.atlas_cli_version=${ATLAS_CLI_VERSION}
+LABEL org.opencontainers.image.ccx_version=${CCX_VERSION}
 
 COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
 

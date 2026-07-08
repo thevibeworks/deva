@@ -100,12 +100,12 @@ assert_eq "claude-code group"    "agent"   "$(get_tool_field claude-code group)"
 assert_eq "claude-code image"    "main"    "$(get_tool_field claude-code image)"
 assert_eq "playwright group"     "browser" "$(get_tool_field playwright  group)"
 assert_eq "playwright image"     "rust"    "$(get_tool_field playwright  image)"
-assert_eq "atlas-cli group"      "agent"   "$(get_tool_field atlas-cli   group)"
+assert_eq "ccx group"      "agent"   "$(get_tool_field ccx   group)"
 assert_eq "copilot-api image"    "main"    "$(get_tool_field copilot-api image)"
 
 section "get_tool_field: existing fields still work"
 assert_eq "claude-code type"     "npm"                         "$(get_tool_field claude-code type)"
-assert_eq "atlas-cli type"       "github-release"              "$(get_tool_field atlas-cli  type)"
+assert_eq "ccx type"       "github-release"              "$(get_tool_field ccx  type)"
 assert_eq "playwright source"    "playwright"                  "$(get_tool_field playwright source)"
 assert_eq "copilot-api label"    "org.opencontainers.image.copilot_api_version" "$(get_tool_field copilot-api label)"
 
@@ -129,7 +129,7 @@ assert_eq "caller 'image' not clobbered"  "caller-image" "${leak_after##*|}"
 # ───── get_tools_by_group ─────
 section "get_tools_by_group"
 agent_tools="$(get_tools_by_group agent | sort | tr '\n' ' ' | sed 's/ $//')"
-expected_agent="atlas-cli claude-code claude-trace codex copilot-api gemini-cli"
+expected_agent="ccx claude-code claude-trace codex copilot-api gemini-cli"
 assert_eq "group=agent" "$expected_agent" "$agent_tools"
 
 browser_tools="$(get_tools_by_group browser | sort | tr '\n' ' ' | sed 's/ $//')"
@@ -144,7 +144,7 @@ assert_eq "group=does-not-exist" "" "$nonexistent_group"
 # ───── get_tools_by_image ─────
 section "get_tools_by_image"
 main_tools="$(get_tools_by_image main | sort | tr '\n' ' ' | sed 's/ $//')"
-expected_main="atlas-cli claude-code claude-trace codex copilot-api gemini-cli"
+expected_main="ccx claude-code claude-trace codex copilot-api gemini-cli"
 assert_eq "image=main" "$expected_main" "$main_tools"
 
 rust_tools="$(get_tools_by_image rust | sort | tr '\n' ' ' | sed 's/ $//')"
@@ -156,7 +156,7 @@ assert_eq "image=base (empty until Step 3)" "" "$base_tools"
 # ───── filter_tools: scope resolution ─────
 section "filter_tools: default (no scope)"
 default_all="$(unset GROUP TOOL IMAGE; filter_tools | sort | tr '\n' ' ' | sed 's/ $//')"
-expected_all="atlas-cli claude-code claude-trace codex copilot-api gemini-cli playwright"
+expected_all="ccx claude-code claude-trace codex copilot-api gemini-cli playwright"
 assert_eq "default returns all 7" "$expected_all" "$default_all"
 
 section "filter_tools: TOOL= scope"

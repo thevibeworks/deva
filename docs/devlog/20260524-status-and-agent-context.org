@@ -1,0 +1,138 @@
+* [2026-05-24] deva status + workspace agent context injection  :FEAT:DX:
+
+** Tension
+
+Two gaps in day-to-day deva usage:
+
+1. No single command to answer "what does my workspace look like
+   right now?" -- mounts, running containers, auth, health. The
+   existing =deva status= was a thin session-file reader that missed
+   containers without session files and showed zero mount/bridge info.
+   Debugging mount issues meant running =docker inspect= by hand.
+
+2. Agents inside the container routinely assume macOS host environment
+   because workspace paths look like =/Users/eric/...=. Hard links
+   fail across bind-mount boundaries, agents try =open= / =pbcopy=,
+   and they default to absolute paths that only make sense inside the
+   container's mount namespace.
+
+** Observation
+
+=deva status= (lines 2721-2823 pre-change) read JSON session files
+from =~/.config/deva/sessions/=. Session files are written at
+container launch but go stale -- containers killed externally, PID
+reuse, etc. Docker itself is the source of truth for container state.
+
+For agent context: Claude Code has =--append-system-prompt-file= and
+a managed policy path at =/etc/claude-code/CLAUDE.md=. Codex has no
+equivalent -- its instruction path is =~/.codex/AGENTS.md= (mounted
+from host) and project-root =AGENTS.md=.
+
+Both agents read instruction files from the workspace root:
+- Claude: =.claude/CLAUDE.md= (project private, gitignored)
+- Codex: =AGENTS.md= (project root)
+
+** Decision
+
+*** deva status: Docker-native, not session-file
+
+Replaced the session-file reader with =docker inspect= queries.
+
+Added four helper functions:
+- =format_uptime()= -- human-readable duration from ISO timestamp
+- =categorize_mount()= -- classify each bind mount as workspace /
+  config / bridge / user (maps directly to the security boundary)
+- =shorten_path()= -- =$HOME= to =~= for output readability
+- =cmd_status()= -- main status logic, ~200 lines
+
+Flags: =-g= global across workspaces, =--verbose= adds env vars.
+
+Rejected: =deva tree= (tree format wastes vertical space and uses
+unicode pipes the project avoids). Flat sectioned output scans faster.
+
+*** Agent context: workspace injection, not system policy
+
+First attempt: bake =/etc/claude-code/CLAUDE.md= managed policy into
+the Docker image for Claude, create a =CODEX_HOME= overlay directory
+(symlink everything except AGENTS.md) for Codex. Two separate
+mechanisms, ~40 lines of overlay logic.
+
+Rejected because:
+- Over-engineered. Two different injection paths for the same content.
+- The overlay creates a shadow =~/.codex-overlay= with symlinks,
+  meaning Codex writes (sessions, state) go to the overlay instead of
+  the mounted home. Subtle breakage risk.
+- Divorced from the workspace -- agent context belongs with the project,
+  not in system paths.
+
+Replaced with workspace injection (=inject_workspace_context()=, 27
+lines in docker-entrypoint.sh):
+- Claude: append marked block to =.claude/CLAUDE.md= (gitignored)
+- Codex: append to existing =AGENTS.md= (only if file exists)
+- Idempotent: =grep -qF= checks sentinel before writing
+- Recoverable: HTML comment markers =<!-- deva:container-context -->=
+
+Source content lives at =/etc/deva/agent-context.md= in the image
+(COPY from =scripts/agent-context.md=), so it ships with the image
+but gets injected into the workspace at runtime.
+
+** Tradeoff
+
+1. Workspace injection writes to bind-mounted files. For Claude this
+   is =.claude/CLAUDE.md= which is gitignored. For Codex, =AGENTS.md=
+   is typically tracked -- the append will show in =git status=.
+   Accepted because the block is clearly marked and the alternative
+   (CODEX_HOME overlay) had worse failure modes.
+
+2. Codex injection is skipped when =AGENTS.md= doesn't exist. This
+   means new projects without an =AGENTS.md= won't get container
+   context for Codex. Could create one, but adding unasked-for files
+   to a user's project is worse than missing context.
+
+3. =deva status= calls =docker inspect= per container, which is ~50ms
+   each. With 20+ containers in =-g= mode, that's a full second.
+   Acceptable for a diagnostic command; would need batching if it
+   became hot.
+
+4. The context file is static (baked into image). Dynamic info like
+   "which volumes are actually mounted" isn't in the prompt. Could be
+   generated at runtime by the entrypoint, but the static content
+   covers the high-value cases (Linux not macOS, hard links, relative
+   paths).
+
+** Next
+
+- Build the image with the new agent-context.md and verify Claude
+  actually picks up =/etc/deva/agent-context.md= -> =.claude/CLAUDE.md=
+  injection inside a live container.
+- Consider whether Codex's workspace =AGENTS.md= injection should
+  also add =.gitignore= entries or use a =.codex/= directory if
+  Codex ever gets project-private instruction support.
+- The 368 stale session files surfaced by =deva status= suggest
+  =deva clean= should also run =cleanup_stale_sessions=.
+
+** Artifacts
+
+*** Files changed
+- =deva.sh= -- =cmd_status()=, =format_uptime()=, =categorize_mount()=,
+  =shorten_path()=, updated usage text (+292 -102)
+- =docker-entrypoint.sh= -- =inject_workspace_context()= (+28)
+- =Dockerfile= / =Dockerfile.rust= -- COPY agent-context.md (+2 each)
+- =scripts/agent-context.md= -- container context content (new, 15 lines)
+- =scripts/test-status-helpers.sh= -- 22 tests (new)
+- =scripts/test-workspace-context.sh= -- 15 tests (new)
+
+*** Verification
+#+BEGIN_SRC bash
+bash -n deva.sh docker-entrypoint.sh
+bash scripts/test-status-helpers.sh         # 22/22
+bash scripts/test-workspace-context.sh      # 15/15
+bash scripts/test-container-slug.sh         # 59/59 (regression)
+bash tests/test_release_utils.sh            # 55/55 (regression)
+deva.sh status                              # local workspace
+deva.sh status -g                           # global
+deva.sh status -g --verbose                 # with env vars
+deva.sh --help && deva.sh --version         # sanity
+deva.sh ps                                  # existing command unbroken
+deva.sh --show-config                       # existing command unbroken
+#+END_SRC

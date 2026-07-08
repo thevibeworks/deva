@@ -13,7 +13,7 @@ if [ -n "${DEVA_DOCKER_TAG+x}" ]; then
     DEVA_DOCKER_TAG_ENV_SET=true
 fi
 
-VERSION="0.11.0"
+VERSION="0.12.0"
 DEVA_DOCKER_IMAGE="${DEVA_DOCKER_IMAGE:-ghcr.io/thevibeworks/deva}"
 DEVA_DOCKER_TAG="${DEVA_DOCKER_TAG:-latest}"
 DEVA_CONTAINER_PREFIX="${DEVA_CONTAINER_PREFIX:-deva}"
@@ -109,7 +109,8 @@ Usage:
 
 Container management commands (docker/tmux-style):
   deva.sh ps [-g]            List containers (current project or --all)
-  deva.sh status [-g]        Show session info (current workspace or --all)
+  deva.sh status [-g] [--verbose]
+                              Inspect workspace: containers, mounts, agent homes, health
   deva.sh shell [-g]         Open zsh shell for inspection (pick if multiple)
   deva.sh stop [-g]          Stop container (pick if multiple)
   deva.sh rm [-g] [--all]    Remove container (pick if multiple), or all for this workspace
@@ -1207,6 +1208,360 @@ show_config() {
 
     echo "Docker image: $(docker_image_ref)"
     echo "Container prefix: $DEVA_CONTAINER_PREFIX"
+}
+
+format_uptime() {
+    local started="$1"
+    local start_epoch now_epoch diff
+    now_epoch=$(date +%s 2>/dev/null) || return 1
+
+    if start_epoch=$(date -d "$started" +%s 2>/dev/null); then
+        :
+    elif start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${started%%.*}" +%s 2>/dev/null); then
+        :
+    else
+        printf '%s' "${started%%T*}"
+        return
+    fi
+
+    diff=$((now_epoch - start_epoch))
+    [ $diff -ge 0 ] || diff=0
+
+    if [ $diff -lt 60 ]; then
+        printf '%ds' "$diff"
+    elif [ $diff -lt 3600 ]; then
+        printf '%dm' "$((diff / 60))"
+    elif [ $diff -lt 86400 ]; then
+        local h=$((diff / 3600)) m=$(((diff % 3600) / 60))
+        if [ $m -gt 0 ]; then printf '%dh %dm' "$h" "$m"; else printf '%dh' "$h"; fi
+    else
+        local d=$((diff / 86400)) h=$(((diff % 86400) / 3600))
+        if [ $h -gt 0 ]; then printf '%dd %dh' "$d" "$h"; else printf '%dd' "$d"; fi
+    fi
+}
+
+categorize_mount() {
+    local dest="$1" ws="$2"
+    if [ "$dest" = "$ws" ]; then printf 'workspace'
+    elif [ "$dest" = "/var/run/docker.sock" ]; then printf 'bridge'
+    elif [[ "$dest" == /deva-host-chrome-bridge* ]]; then printf 'bridge'
+    elif [[ "$dest" == /home/deva/.claude* ]] || [[ "$dest" == /home/deva/.codex* ]] || \
+         [[ "$dest" == /home/deva/.gemini* ]] || [ "$dest" = "/home/deva/.agents" ]; then
+        printf 'config'
+    else printf 'user'
+    fi
+}
+
+shorten_path() {
+    local p="$1"
+    if [[ "$p" == "$HOME"/* ]]; then
+        printf '~/%s' "${p#"$HOME"/}"
+    elif [ "$p" = "$HOME" ]; then
+        printf '~'
+    else
+        printf '%s' "$p"
+    fi
+}
+
+cmd_status() {
+    local show_all=false verbose=false
+
+    for tok in "${PRE_ARGS[@]}"; do
+        case "$tok" in
+            -g|--all|--global) show_all=true ;;
+            --verbose) verbose=true ;;
+        esac
+    done
+
+    if ! docker info >/dev/null 2>&1; then
+        echo "[!!] Docker daemon is not running"
+        exit 1
+    fi
+
+    local ws ws_hash slug
+    ws="$(pwd)"
+    ws_hash=$(workspace_hash)
+    slug="$(generate_container_slug)"
+
+    if [ "$show_all" = true ]; then
+        printf 'deva status --global (v%s)\n\n' "$VERSION"
+    else
+        printf 'Workspace: %s\n' "$ws"
+        printf '  hash %s  slug %s\n' "$ws_hash" "$slug"
+
+        local xdg_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+        local config_files=(
+            "$xdg_home/deva/.deva" "$HOME/.deva" ".deva" ".deva.local"
+        )
+        local found_configs=()
+        for f in "${config_files[@]}"; do
+            [ -f "$f" ] && found_configs+=("$(shorten_path "$f")")
+        done
+        if [ ${#found_configs[@]} -gt 0 ]; then
+            printf '  config: %s\n' "${found_configs[*]}"
+        fi
+        echo ""
+    fi
+
+    local containers
+    if [ "$show_all" = true ]; then
+        containers=$(docker ps -a --filter "name=${DEVA_CONTAINER_PREFIX}--" --format '{{.Names}}' 2>/dev/null | sort)
+    else
+        containers=$(docker ps -a --filter "label=deva.workspace_hash=$ws_hash" --format '{{.Names}}' 2>/dev/null | sort)
+        if [ -z "$containers" ]; then
+            local escaped_slug
+            escaped_slug=$(printf '%s' "$slug" | sed 's/[.[\\^$*+?{}()|]/\\&/g')
+            containers=$(docker ps -a --format '{{.Names}}' 2>/dev/null | \
+                grep -E "^${DEVA_CONTAINER_PREFIX}(--.*--${escaped_slug})(\\.\\.|-|$)" | sort || true)
+        fi
+    fi
+
+    if [ -z "$containers" ]; then
+        echo "Containers: (none)"
+        echo ""
+    else
+        echo "Containers:"
+
+        local has_jq=false
+        command -v jq >/dev/null 2>&1 && has_jq=true
+
+        while IFS= read -r name; do
+            [ -n "$name" ] || continue
+
+            if [ "$has_jq" = false ]; then
+                local state_simple
+                state_simple=$(docker inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "?")
+                printf '  %s  [%s]\n' "$name" "$state_simple"
+                continue
+            fi
+
+            local inspect_json
+            inspect_json=$(docker inspect "$name" 2>/dev/null) || continue
+
+            local state agent shape image_label started_at
+            state=$(printf '%s' "$inspect_json" | jq -r '.[0].State.Status')
+            agent=$(printf '%s' "$inspect_json" | jq -r '.[0].Config.Labels["deva.agent"] // "?"')
+            shape=$(printf '%s' "$inspect_json" | jq -r '.[0].Config.Labels["deva.shape_hash"] // "--"')
+            image_label=$(printf '%s' "$inspect_json" | jq -r '.[0].Config.Labels["deva.image"] // .[0].Config.Image')
+            started_at=$(printf '%s' "$inspect_json" | jq -r '.[0].State.StartedAt')
+
+            local auth_tag="--"
+            local session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+            local session_file="$session_dir/${name}.json"
+            if [ -f "$session_file" ]; then
+                auth_tag=$(jq -r '.auth.method // "--"' "$session_file" 2>/dev/null)
+            else
+                local namerest="${name#"${DEVA_CONTAINER_PREFIX}--"}"
+                namerest="${namerest#*--}"
+                auth_tag="${namerest%%--*}"
+            fi
+
+            local uptime_str="--"
+            if [ "$state" = "running" ]; then
+                uptime_str=$(format_uptime "$started_at")
+            fi
+
+            echo ""
+            printf '  %s\n' "$name"
+            printf '    agent: %-10s auth: %-16s status: %-8s' "$agent" "$auth_tag" "$state"
+            [ "$state" = "running" ] && printf '  up: %s' "$uptime_str"
+            echo ""
+
+            if [ "$show_all" = true ]; then
+                local ws_label
+                ws_label=$(printf '%s' "$inspect_json" | jq -r '.[0].Config.Labels["deva.workspace"] // "--"')
+                printf '    workspace: %s\n' "$ws_label"
+            fi
+
+            if [ "$state" = "running" ] || [ "$verbose" = true ]; then
+                local mount_count
+                mount_count=$(printf '%s' "$inspect_json" | jq '.[0].Mounts | length' 2>/dev/null)
+
+                if [ "${mount_count:-0}" -gt 0 ] 2>/dev/null; then
+                    local container_ws
+                    if [ "$show_all" = true ]; then
+                        container_ws=$(printf '%s' "$inspect_json" | jq -r '.[0].Config.Labels["deva.workspace"] // ""')
+                    fi
+                    : "${container_ws:=$ws}"
+
+                    echo "    mounts:"
+                    printf '%s' "$inspect_json" | jq -r '.[0].Mounts[] | "\(.Source)\t\(.Destination)\t\(.RW)"' 2>/dev/null | \
+                    while IFS=$'\t' read -r src dest rw; do
+                        local mode="rw"
+                        [ "$rw" = "true" ] || mode="ro"
+                        local cat
+                        cat=$(categorize_mount "$dest" "$container_ws")
+                        printf '      %-42s -> %-30s %s  (%s)\n' "$(shorten_path "$src")" "$dest" "$mode" "$cat"
+                    done | sort -t'(' -k2
+                fi
+
+                if [ "$verbose" = true ]; then
+                    echo "    env:"
+                    printf '%s' "$inspect_json" | jq -r '.[0].Config.Env[]' 2>/dev/null | sort | \
+                    while IFS= read -r env_line; do
+                        local env_name="${env_line%%=*}"
+                        case "$env_name" in
+                            *KEY*|*TOKEN*|*SECRET*|*PASSWORD*|*CREDENTIALS*)
+                                printf '      %s=<redacted>\n' "$env_name"
+                                ;;
+                            PATH|HOME|HOSTNAME|TERM|DEBIAN_FRONTEND|SHELL)
+                                ;;
+                            *)
+                                printf '      %s\n' "$env_line"
+                                ;;
+                        esac
+                    done
+                fi
+            fi
+        done <<< "$containers"
+        echo ""
+    fi
+
+    local config_root
+    if [ -n "${CONFIG_ROOT:-}" ]; then
+        config_root="$CONFIG_ROOT"
+    else
+        config_root="${XDG_CONFIG_HOME:-$HOME/.config}/deva"
+    fi
+
+    if [ -d "$config_root" ]; then
+        echo "Agent Homes ($(shorten_path "$config_root")):"
+        for agent_name in claude codex gemini; do
+            local agent_dir="$config_root/$agent_name"
+            if [ -d "$agent_dir" ]; then
+                local canonical="" other_count=0 entry is_canonical
+                while IFS= read -r entry; do
+                    [ -n "$entry" ] || continue
+                    is_canonical=false
+                    case "$agent_name:$entry" in
+                        claude:.claude|claude:.claude.json) is_canonical=true ;;
+                        codex:.codex) is_canonical=true ;;
+                        gemini:.gemini) is_canonical=true ;;
+                    esac
+                    if [ "$is_canonical" = true ]; then
+                        if [ -L "$agent_dir/$entry" ]; then
+                            canonical="${canonical} ${entry}@"
+                        else
+                            canonical="${canonical} ${entry}"
+                        fi
+                    else
+                        other_count=$((other_count + 1))
+                    fi
+                done < <(ls -1A "$agent_dir" 2>/dev/null)
+                local line="${canonical:- (no canonical entries)}"
+                [ "$other_count" -gt 0 ] && line="${line}  (+${other_count} other)"
+                printf '  %-10s%s\n' "$agent_name" "$line"
+            else
+                printf '  %-10s--\n' "$agent_name"
+            fi
+        done
+        echo ""
+    fi
+
+    echo "Health:"
+
+    local docker_version
+    docker_version=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "?")
+    printf '  [ok] Docker %s\n' "$docker_version"
+
+    local img_ref
+    img_ref="$(docker_image_ref)"
+    if docker image inspect "$img_ref" >/dev/null 2>&1; then
+        local img_created img_size
+        img_created=$(docker image inspect "$img_ref" --format '{{.Created}}' 2>/dev/null)
+        img_created="${img_created%%T*}"
+        img_size=$(docker image inspect "$img_ref" --format '{{.Size}}' 2>/dev/null)
+        if [ -n "$img_size" ] && [ "$img_size" -gt 0 ] 2>/dev/null; then
+            img_size="$(( img_size / 1048576 ))MB"
+        fi
+        printf '  [ok] Image %s (%s' "$img_ref" "$img_created"
+        [ -n "${img_size:-}" ] && printf ', %s' "$img_size"
+        printf ')\n'
+    else
+        printf '  [!!] Image %s not found locally\n' "$img_ref"
+    fi
+
+    if [ -S /var/run/docker.sock ]; then
+        if [ -z "${DEVA_NO_DOCKER:-}" ]; then
+            printf '  [ok] Docker socket (auto-mounted)\n'
+        else
+            printf '  [--] Docker socket (DEVA_NO_DOCKER set)\n'
+        fi
+    else
+        printf '  [--] Docker socket not found\n'
+    fi
+
+    local session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
+    if [ -d "$session_dir" ]; then
+        local session_count
+        session_count=$(find "$session_dir" -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')
+        [ "${session_count:-0}" -gt 0 ] && printf '  [ok] %s session file(s)\n' "$session_count"
+    fi
+}
+
+inject_workspace_context() {
+    local ws="$(pwd)"
+    local marker="<!-- deva:container-context -->"
+    local end_marker="<!-- /deva:container-context -->"
+    local docker_available=false
+    local ephemeral="$EPHEMERAL_MODE"
+
+    [ -z "${DEVA_NO_DOCKER:-}" ] && [ -S /var/run/docker.sock ] && docker_available=true
+
+    _gen_context() {
+        cat <<'CTX'
+# Container Environment (deva)
+
+You are inside a Docker container running Ubuntu Linux 24.04 LTS
+(Noble Numbat), not on the host machine. The workspace is a
+bind-mount from the host at the same absolute path, but the
+runtime is Linux.
+
+- This is Linux. Host-only tools (open, pbcopy, pbpaste, sw_vers,
+  diskutil, defaults, launchctl) are not available.
+- No display server. Browsers and GUI tools will not work.
+- Hard links (`ln` without -s) fail across mount boundaries.
+  Use `cp` or relative symbolic links (`ln -sr`).
+- Prefer relative paths for project-internal references.
+  Absolute paths work here but are container-specific.
+- $HOME is /home/deva (not /root). sudo works without password.
+- Pre-installed: Node.js, Python (use `uv`, not pip), Go, git,
+  gh, make, curl. pip is NOT in PATH.
+CTX
+        [ "$docker_available" = true ] && echo "- Docker is available (socket mounted from host)."
+        if [ "$ephemeral" = true ]; then
+            echo "- Ephemeral container. Installed packages will not persist."
+        else
+            echo "- System packages and build caches persist across sessions."
+        fi
+        echo "- Container details are in DEVA_* environment variables."
+    }
+
+    _strip_and_write() {
+        local target="$1" content="$2"
+
+        if [ -f "$target" ] && grep -qF "$marker" "$target"; then
+            awk -v m="$marker" -v e="$end_marker" \
+                '$0==m{skip=1;next} $0==e{skip=0;next} !skip' \
+                "$target" > "${target}.deva.tmp" && mv "${target}.deva.tmp" "$target"
+        fi
+
+        {
+            [ -s "$target" ] && printf '\n'
+            printf '%s\n' "$marker"
+            printf '%s\n' "$content"
+            printf '%s\n' "$end_marker"
+        } >> "$target"
+    }
+
+    local context
+    context="$(_gen_context)"
+
+    mkdir -p "$ws/.claude" 2>/dev/null || true
+    _strip_and_write "$ws/.claude/CLAUDE.md" "$context"
+    _strip_and_write "$ws/AGENTS.md" "$context"
+
+    unset -f _gen_context _strip_and_write
 }
 
 prepare_base_docker_args() {
@@ -2719,107 +3074,7 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
     fi
 
     if [ "$MANAGEMENT_MODE" = "status" ]; then
-        session_dir="${DEVA_CONFIG_HOME:-$HOME/.config/deva}/sessions"
-        show_all=false
-
-        # Check for -g/--all flag
-        for tok in "${PRE_ARGS[@]}"; do
-            case "$tok" in
-            -g | --all) show_all=true ;;
-            esac
-        done
-
-        if [ "$show_all" = true ]; then
-            # Show all sessions
-            if [ ! -d "$session_dir" ] || [ -z "$(ls -A "$session_dir" 2>/dev/null)" ]; then
-                echo "No active sessions found"
-                exit 0
-            fi
-
-            echo "=== All Active Sessions ==="
-            echo
-            for session in "$session_dir"/*.json; do
-                [ -f "$session" ] || continue
-                if command -v jq >/dev/null 2>&1; then
-                    container=$(jq -r '.container' "$session" 2>/dev/null)
-                    agent=$(jq -r '.agent' "$session" 2>/dev/null)
-                    workspace=$(jq -r '.workspace' "$session" 2>/dev/null)
-                    auth_method=$(jq -r '.auth.method' "$session" 2>/dev/null)
-                    auth_details=$(jq -r '.auth.details' "$session" 2>/dev/null)
-                    ephemeral=$(jq -r '.ephemeral' "$session" 2>/dev/null)
-                    started=$(jq -r '.started_at' "$session" 2>/dev/null)
-
-                    # Check if container is still running
-                    if docker ps -q --filter "name=^${container}$" | grep -q .; then
-                        status="running"
-                    elif docker ps -aq --filter "name=^${container}$" | grep -q .; then
-                        status="stopped"
-                    else
-                        status="removed"
-                    fi
-
-                    echo "Container: $container"
-                    echo "  Agent:     $agent"
-                    echo "  Status:    $status"
-                    echo "  Workspace: $workspace"
-                    echo "  Auth:      $auth_method"
-                    [ "$auth_details" != "null" ] && [ -n "$auth_details" ] && echo "  Details:   $auth_details"
-                    echo "  Ephemeral: $ephemeral"
-                    echo "  Started:   $started"
-                    echo
-                fi
-            done
-        else
-            # Show current workspace sessions
-            ws_hash=$(workspace_hash)
-            found=false
-
-            if [ -d "$session_dir" ]; then
-                for session in "$session_dir"/*.json; do
-                    [ -f "$session" ] || continue
-                    if command -v jq >/dev/null 2>&1; then
-                        session_ws_hash=$(jq -r '.workspace_hash' "$session" 2>/dev/null)
-                        if [ "$session_ws_hash" = "$ws_hash" ]; then
-                            found=true
-                            container=$(jq -r '.container' "$session" 2>/dev/null)
-                            agent=$(jq -r '.agent' "$session" 2>/dev/null)
-                            workspace=$(jq -r '.workspace' "$session" 2>/dev/null)
-                            auth_method=$(jq -r '.auth.method' "$session" 2>/dev/null)
-                            auth_details=$(jq -r '.auth.details' "$session" 2>/dev/null)
-                            ephemeral=$(jq -r '.ephemeral' "$session" 2>/dev/null)
-                            started=$(jq -r '.started_at' "$session" 2>/dev/null)
-                            last_seen=$(jq -r '.last_seen' "$session" 2>/dev/null)
-
-                            # Check if container is still running
-                            if docker ps -q --filter "name=^${container}$" | grep -q .; then
-                                status="running"
-                            elif docker ps -aq --filter "name=^${container}$" | grep -q .; then
-                                status="stopped"
-                            else
-                                status="removed"
-                            fi
-
-                            echo "=== Container Status ==="
-                            echo
-                            echo "Container: $container"
-                            echo "Agent:     $agent"
-                            echo "Status:    $status"
-                            echo "Workspace: $workspace"
-                            echo "Auth:      $auth_method"
-                            [ "$auth_details" != "null" ] && [ -n "$auth_details" ] && echo "Details:   $auth_details"
-                            echo "Ephemeral: $ephemeral"
-                            echo "Started:   $started"
-                            echo "Last Seen: $last_seen"
-                        fi
-                    fi
-                done
-            fi
-
-            if [ "$found" = false ]; then
-                echo "No active sessions for this workspace"
-                echo "Use 'deva.sh status --all' to see all sessions"
-            fi
-        fi
+        cmd_status
         exit 0
     fi
 
@@ -3229,6 +3484,8 @@ fi
 if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
+
+inject_workspace_context
 
 if [ "$EPHEMERAL_MODE" = false ]; then
     # Check if container is running

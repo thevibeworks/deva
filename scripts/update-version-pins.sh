@@ -64,7 +64,7 @@ CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION
 CLAUDE_TRACE_VERSION=$CLAUDE_TRACE_VERSION
 CODEX_VERSION=$CODEX_VERSION
 GEMINI_CLI_VERSION=$GEMINI_CLI_VERSION
-ATLAS_CLI_VERSION=$ATLAS_CLI_VERSION
+CCX_VERSION=$CCX_VERSION
 COPILOT_API_VERSION=$COPILOT_API_VERSION
 PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION
 
@@ -101,7 +101,7 @@ main() {
     refresh_pin CLAUDE_TRACE_VERSION "$(fetch_npm_version @mariozechner/claude-trace)"
     refresh_pin CODEX_VERSION "$(fetch_npm_version @openai/codex)"
     refresh_pin GEMINI_CLI_VERSION "$(fetch_npm_version @google/gemini-cli)"
-    refresh_pin ATLAS_CLI_VERSION "$(fetch_latest_git_tag https://github.com/lroolle/atlas-cli.git)"
+    refresh_pin CCX_VERSION "$(fetch_latest_git_tag https://github.com/thevibeworks/ccx.git)"
     refresh_pin COPILOT_API_VERSION "$(fetch_latest_commit https://github.com/ericc-ch/copilot-api.git refs/heads/master)"
     refresh_pin PLAYWRIGHT_VERSION "$(fetch_npm_version playwright)"
 

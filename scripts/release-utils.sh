@@ -29,7 +29,7 @@ TOOL_REGISTRY=(
     "claude-code|npm|@anthropic-ai/claude-code|org.opencontainers.image.claude_code_version|https://www.npmjs.com/package/@anthropic-ai/claude-code|https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md|agent|main"
     "codex|npm|@openai/codex|org.opencontainers.image.codex_version|https://www.npmjs.com/package/@openai/codex|github:openai/codex|agent|main"
     "gemini-cli|npm|@google/gemini-cli|org.opencontainers.image.gemini_cli_version|https://www.npmjs.com/package/@google/gemini-cli||agent|main"
-    "atlas-cli|github-release|lroolle/atlas-cli|org.opencontainers.image.atlas_cli_version|https://github.com/lroolle/atlas-cli|github:lroolle/atlas-cli|agent|main"
+    "ccx|github-release|thevibeworks/ccx|org.opencontainers.image.ccx_version|https://github.com/thevibeworks/ccx|github:thevibeworks/ccx|agent|main"
     "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
     "claude-trace|npm|@mariozechner/claude-trace|org.opencontainers.image.claude_trace_version|https://www.npmjs.com/package/@mariozechner/claude-trace|github:mariozechner/claude-trace|agent|main"
     "playwright|npm|playwright|org.opencontainers.image.playwright_version|https://www.npmjs.com/package/playwright|github:microsoft/playwright|browser|rust"
@@ -134,7 +134,7 @@ get_display_name() {
         claude-code) echo "Claude Code" ;;
         codex) echo "Codex" ;;
         gemini-cli) echo "Gemini CLI" ;;
-        atlas-cli) echo "Atlas CLI" ;;
+        ccx) echo "CCX" ;;
         copilot-api) echo "Copilot API" ;;
         playwright) echo "Playwright" ;;
         *) echo "$tool" ;;
@@ -187,7 +187,7 @@ fetch_latest_version() {
             ;;
         github-commit)
             local branch="master"
-            [[ $source == "lroolle/atlas-cli" ]] && branch="main"
+            [[ $source == "thevibeworks/ccx" ]] && branch="main"
             gh api "repos/$source/branches/$branch" --jq '.commit.sha' 2>/dev/null || echo ""
             ;;
     esac
