@@ -149,9 +149,14 @@ This is not subtle. The container is the trust boundary, so the agent's internal
 ## Browser Wiring
 
 - `deva.sh claude -- --chrome` is Claude's host Chrome bridge. deva mounts the host bridge dir and wires the container tmp path Claude expects.
-- `deva.sh codex --browser-mcp` is Codex MCP wiring. deva injects a session-only `mcp_servers.playwright` override and uses the rust image profile.
+- `deva.sh codex --browser-mcp` is Codex MCP wiring. deva injects a session-only `mcp_servers.playwright` override, uses the rust image profile, and runs an isolated Chromium from inside the container.
 
 Do not treat these as interchangeable. Codex CLI does not consume Claude's `--chrome` bridge, and Claude's native `--chrome` mode does not read Codex MCP config.
+
+The Codex desktop Chrome plugin is also not a mount target for the Linux
+container. It depends on host Codex app resources, a host native messaging
+manifest, and the installed Chrome extension. Mounting those macOS paths into
+the container does not make them executable there.
 
 ## Proxy and Network Behavior
 

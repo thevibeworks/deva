@@ -3518,7 +3518,7 @@ mask_secrets_in_args() {
 if [ "$DEBUG_MODE" = true ]; then
     echo "=== DEBUG: Docker command ===" >&2
     echo "Container name: $CONTAINER_NAME" >&2
-    echo "USER_VOLUMES (${#USER_VOLUMES[@]}): ${USER_VOLUMES[*]}" >&2
+    echo "USER_VOLUMES (${#USER_VOLUMES[@]}): ${USER_VOLUMES[*]-}" >&2
     echo "Ephemeral mode: $EPHEMERAL_MODE" >&2
     echo "" >&2
     if [ "$EPHEMERAL_MODE" = false ]; then

@@ -181,9 +181,17 @@ What deva does:
 
 - switches the default image profile to `rust`, where browser runtime dependencies live
 - injects a session-only Codex MCP override for `mcp_servers.playwright`
+- uses an isolated in-container Chromium, not the host Chrome profile
 - leaves your host `~/.codex/config.toml` untouched
 
 The injected MCP command uses `npx -y`, so the first run may fetch `DEVA_CODEX_BROWSER_MCP_PACKAGE` unless it is already cached in the container.
+
+Do not try to make this work by mounting the Codex desktop Chrome plugin into
+the container. On macOS that plugin points at host-only paths such as
+`/Applications/Codex.app`, `~/.codex/plugins/cache/openai-bundled/chrome`, the
+Chrome native messaging manifest, and a platform-specific extension host
+binary. Those are part of the host app and extension bridge, not a portable
+Linux container browser runtime.
 
 Check:
 
@@ -215,6 +223,7 @@ If Codex also tries to start host-specific or unrelated MCP servers, add session
 CODEX_BROWSER_MCP=true
 CODEX_CONFIG=features.apps=false
 CODEX_CONFIG=features.plugins=false
+CODEX_CONFIG=mcp_servers.node_repl.enabled=false
 CODEX_CONFIG=mcp_servers.hn-research={url="https://hn.1lm.io/mcp",enabled=false}
 ```
 
