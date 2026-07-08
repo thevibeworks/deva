@@ -99,13 +99,13 @@ if [[ "${1:-}" != "api" ]]; then
 fi
 
 case "${2:-}" in
-repos/lroolle/ccx/releases/latest)
+repos/thevibeworks/ccx/releases/latest)
     echo "v0.7.0"
     ;;
 repos/ericc-ch/copilot-api/branches/master)
     echo "0ea08febdd7e3e055b03dd298bf57e669500b5c1"
     ;;
-repos/lroolle/ccx/releases/tags/v0.1.4)
+repos/thevibeworks/ccx/releases/tags/v0.7.0)
     echo "2026-01-16T05:42:00Z"
     ;;
 repos/ericc-ch/copilot-api/commits/0ea08febdd7e3e055b03dd298bf57e669500b5c1)
@@ -172,7 +172,7 @@ for expected in \
     "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
-    "--build-arg CCX_VERSION=v0.1.4" \
+    "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "--build-arg GO_VERSION=1.26.2"
 do
@@ -188,7 +188,7 @@ for expected in \
     "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
-    "--build-arg CCX_VERSION=v0.1.4" \
+    "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do
     [[ "$rust_build" == *"$expected"* ]] || {
