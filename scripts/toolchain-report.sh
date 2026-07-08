@@ -30,7 +30,7 @@ main() {
 
     heading "Agent Tools (auto-upgraded by make versions-up)"
     line "Claude Code:" "$CLAUDE_CODE_VERSION"
-    line "Claude Trace:" "$CLAUDE_TRACE_VERSION"
+    line "cctrace:" "$CCTRACE_VERSION"
     line "Codex:" "$CODEX_VERSION"
     line "Gemini CLI:" "$GEMINI_CLI_VERSION"
     line "CCX:" "$CCX_VERSION"

@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/release-utils.sh"
 # $(origin) is command-line/environment/override, so anything already set
 # here is a genuine user override — not a pin default.
 _CLI_CLAUDE_CODE="${CLAUDE_CODE_VERSION:-}"
-_CLI_CLAUDE_TRACE="${CLAUDE_TRACE_VERSION:-}"
+_CLI_CCTRACE="${CCTRACE_VERSION:-}"
 _CLI_CODEX="${CODEX_VERSION:-}"
 _CLI_GEMINI="${GEMINI_CLI_VERSION:-}"
 _CLI_CCX="${CCX_VERSION:-}"
@@ -47,7 +47,7 @@ Environment:
   RUST_IMAGE            Rust image name (default: ghcr.io/thevibeworks/deva:rust)
   VERSION_PINS_FILE     Shared version pin file (default: versions.env)
   CLAUDE_CODE_VERSION   Override claude-code version
-  CLAUDE_TRACE_VERSION  Override claude-trace version
+  CCTRACE_VERSION       Override cctrace version
   CODEX_VERSION         Override codex version
   GEMINI_CLI_VERSION    Override gemini-cli version
   CCX_VERSION     Override ccx version
@@ -87,9 +87,9 @@ main() {
 
     # Resolve build versions early so we can show the manifest before countdown.
     # CLI override wins; otherwise use whatever load_versions fetched.
-    local claude_ver claude_trace_ver codex_ver gemini_ver ccx_ver copilot_ver playwright_ver
+    local claude_ver cctrace_ver codex_ver gemini_ver ccx_ver copilot_ver playwright_ver
     claude_ver="${_CLI_CLAUDE_CODE:-$(get_latest "claude-code")}"
-    claude_trace_ver="${_CLI_CLAUDE_TRACE:-$(get_latest "claude-trace")}"
+    cctrace_ver="${_CLI_CCTRACE:-$(get_latest "cctrace")}"
     codex_ver="${_CLI_CODEX:-$(get_latest "codex")}"
     gemini_ver="${_CLI_GEMINI:-$(get_latest "gemini-cli")}"
     ccx_ver="${_CLI_CCX:-$(get_latest "ccx")}"
@@ -114,7 +114,7 @@ main() {
     # Collect lines by status, then render upgrades first for visibility.
     local _manifest_pairs=(
         "Claude Code|claude_ver|_CLI_CLAUDE_CODE|claude-code"
-        "Claude Trace|claude_trace_ver|_CLI_CLAUDE_TRACE|claude-trace"
+        "cctrace|cctrace_ver|_CLI_CCTRACE|cctrace"
         "Codex|codex_ver|_CLI_CODEX|codex"
         "CCX|ccx_ver|_CLI_CCX|ccx"
         "Copilot API|copilot_ver|_CLI_COPILOT|copilot-api"
@@ -217,7 +217,7 @@ main() {
         --build-arg TMUX_VERSION="$TMUX_VERSION" \
         --build-arg TMUX_SHA256="$TMUX_SHA256" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
-        --build-arg CLAUDE_TRACE_VERSION="$claude_trace_ver" \
+        --build-arg CCTRACE_VERSION="$cctrace_ver" \
         --build-arg CODEX_VERSION="$codex_ver" \
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
@@ -229,7 +229,7 @@ main() {
     docker build -f "$RUST_DOCKERFILE" \
         --build-arg BASE_IMAGE="$CORE_IMAGE" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
-        --build-arg CLAUDE_TRACE_VERSION="$claude_trace_ver" \
+        --build-arg CCTRACE_VERSION="$cctrace_ver" \
         --build-arg CODEX_VERSION="$codex_ver" \
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \

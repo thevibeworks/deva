@@ -23,7 +23,7 @@ inspect)
     cat <<'JSON'
 [{"Config":{"Labels":{
   "org.opencontainers.image.claude_code_version":"2.1.81",
-  "org.opencontainers.image.claude_trace_version":"1.0.8",
+  "org.opencontainers.image.cctrace_version":"0.3.0",
   "org.opencontainers.image.codex_version":"0.116.0",
   "org.opencontainers.image.gemini_cli_version":"0.35.0",
   "org.opencontainers.image.ccx_version":"v0.7.0",
@@ -58,11 +58,11 @@ case "${2:-}" in
 @anthropic-ai/claude-code@2.1.87)
     echo '{"2.1.87":"2026-03-29T01:40:00Z"}'
     ;;
-@mariozechner/claude-trace)
-    echo "1.0.9"
+@thevibeworks/cctrace)
+    echo "0.4.0"
     ;;
-@mariozechner/claude-trace@1.0.9)
-    echo '{"1.0.9":"2026-03-29T01:40:00Z"}'
+@thevibeworks/cctrace@0.4.0)
+    echo '{"0.4.0":"2026-03-29T01:40:00Z"}'
     ;;
 @openai/codex)
     echo "0.117.0"
@@ -114,7 +114,7 @@ repos/ericc-ch/copilot-api/commits/0ea08febdd7e3e055b03dd298bf57e669500b5c1)
 repos/openai/codex/releases)
     echo '[]'
     ;;
-repos/mariozechner/claude-trace/releases)
+repos/thevibeworks/cctrace/releases)
     echo '[]'
     ;;
 repos/microsoft/playwright/releases)
@@ -143,7 +143,7 @@ BUILD_IMAGE="ghcr.io/thevibeworks/deva:latest" \
 CORE_IMAGE="ghcr.io/thevibeworks/deva:core" \
 RUST_IMAGE="ghcr.io/thevibeworks/deva:rust" \
 GO_VERSION="1.26.2" \
-CLAUDE_TRACE_VERSION="1.0.9" \
+CCTRACE_VERSION="0.4.0" \
 PLAYWRIGHT_VERSION="1.60.0" \
 "$REPO_ROOT/scripts/version-upgrade.sh" >/dev/null
 
@@ -169,7 +169,7 @@ done
 
 for expected in \
     "--build-arg CLAUDE_CODE_VERSION=2.1.87" \
-    "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
+    "--build-arg CCTRACE_VERSION=0.4.0" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg CCX_VERSION=v0.7.0" \
@@ -185,7 +185,7 @@ done
 for expected in \
     "--build-arg BASE_IMAGE=ghcr.io/thevibeworks/deva:core" \
     "--build-arg CLAUDE_CODE_VERSION=2.1.87" \
-    "--build-arg CLAUDE_TRACE_VERSION=1.0.9" \
+    "--build-arg CCTRACE_VERSION=0.4.0" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg CCX_VERSION=v0.7.0" \

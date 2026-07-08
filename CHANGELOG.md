@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Replace claude-trace (@mariozechner/claude-trace) with cctrace
+  (thevibeworks/cctrace) as the `--trace` backend. cctrace is a
+  TLS-intercepting proxy that captures all Anthropic traffic
+  (messages, OAuth, usage/credits, MCP), not just `/v1/messages`,
+  and works on both npm and native-binary Claude installs. Trace
+  logs and HTML snapshots land in `.cctrace/` inside the workspace
+  mount. Version pin renamed `CLAUDE_TRACE_VERSION` ->
+  `CCTRACE_VERSION`; image label renamed to
+  `org.opencontainers.image.cctrace_version`
+- Install bun system-wide at `/usr/local/bin/bun` (real binary via
+  `BUN_INSTALL=/usr/local`) instead of a symlink into `/root/.bun`
+  that non-root users could not execute. cctrace is compiled with it
+  at image build into a standalone binary at
+  `~/.local/bin/cctrace` (no bun needed at runtime)
+
 ## [0.12.0] - 2026-05-27
 
 ### Added

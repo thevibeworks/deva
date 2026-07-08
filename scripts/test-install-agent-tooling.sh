@@ -34,18 +34,27 @@ config)
     ;;
 install)
     mkdir -p "$DEVA_HOME/.npm-global/bin"
-    for bin in claude codex gemini claude-trace; do
+    for bin in claude codex gemini; do
         cat >"$DEVA_HOME/.npm-global/bin/$bin" <<'BIN'
 #!/usr/bin/env bash
 case "$(basename "$0")" in
   claude) echo "__CLAUDE_CODE_VERSION__ (Claude Code)" ;;
   codex) echo "codex-cli __CODEX_VERSION__" ;;
   gemini) echo "__GEMINI_CLI_VERSION__" ;;
-  claude-trace) exit 0 ;;
 esac
 BIN
         chmod +x "$DEVA_HOME/.npm-global/bin/$bin"
     done
+    ;;
+pack)
+    spec="${1:?pack spec required}"
+    ver="${spec##*@}"
+    workdir="$(mktemp -d)"
+    mkdir -p "$workdir/package/src"
+    printf '%s\n' '// fake cctrace cli' >"$workdir/package/src/cli.ts"
+    tar -czf "thevibeworks-cctrace-${ver}.tgz" -C "$workdir" package
+    rm -rf "$workdir"
+    printf 'thevibeworks-cctrace-%s.tgz\n' "$ver"
     ;;
 cache)
     ;;
@@ -121,7 +130,33 @@ BIN
 chmod +x "$GOBIN/ccx"
 EOF
 
-chmod +x "$fake_bin/npm" "$fake_bin/curl" "$fake_bin/go"
+cat >"$fake_bin/bun" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# expects: bun build --compile --outfile <path> src/cli.ts
+out=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --outfile)
+        out="$2"
+        shift 2
+        ;;
+    *)
+        shift
+        ;;
+    esac
+done
+[ -n "$out" ] || exit 1
+mkdir -p "$(dirname "$out")"
+cat >"$out" <<'BIN'
+#!/usr/bin/env bash
+exit 0
+BIN
+chmod +x "$out"
+EOF
+
+chmod +x "$fake_bin/npm" "$fake_bin/curl" "$fake_bin/go" "$fake_bin/bun"
 
 mkdir -p "$tmp_root/deny"
 (
@@ -133,7 +168,7 @@ mkdir -p "$tmp_root/deny"
         HOME="$fake_home" \
         DEVA_HOME="$fake_home" \
         CLAUDE_CODE_VERSION="$CLAUDE_CODE_VERSION" \
-        CLAUDE_TRACE_VERSION="$CLAUDE_TRACE_VERSION" \
+        CCTRACE_VERSION="$CCTRACE_VERSION" \
         CODEX_VERSION="$CODEX_VERSION" \
         GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
         CCX_VERSION="$CCX_VERSION" \
@@ -143,9 +178,11 @@ mkdir -p "$tmp_root/deny"
 
     grep -F "Current working directory is not accessible; switching to $fake_home" <<<"$output" >/dev/null
     grep -F "Installing npm agent tooling" <<<"$output" >/dev/null
-    grep -F "claude-trace=$CLAUDE_TRACE_VERSION" <<<"$output" >/dev/null
     grep -F "Installing ccx pinned to $CCX_VERSION" <<<"$output" >/dev/null
     grep -F "falling back to go install" <<<"$output" >/dev/null
     grep -F "ccx installed" <<<"$output" >/dev/null
     test -x "$fake_home/.local/bin/ccx"
+    grep -F "Installing cctrace pinned to $CCTRACE_VERSION" <<<"$output" >/dev/null
+    grep -F "cctrace installed" <<<"$output" >/dev/null
+    test -x "$fake_home/.local/bin/cctrace"
 )

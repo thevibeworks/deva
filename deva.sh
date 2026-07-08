@@ -202,7 +202,7 @@ Examples:
 
 Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
-  deva.sh claude -- --trace --continue   # Use claude-trace wrapper for request tracing
+  deva.sh claude -- --trace --continue   # Trace requests with cctrace
   deva.sh --show-config                  # Debug configuration
   deva.sh --no-docker claude             # Disable Docker-in-Docker auto-mount
 USAGE

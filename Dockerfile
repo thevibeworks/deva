@@ -50,9 +50,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get -y clean && rm -rf /var/lib/apt/lists/*
 
-# Install bun runtime before building Copilot API fork
-RUN curl -fsSL https://bun.sh/install | bash && \
-    ln -s /root/.bun/bin/bun /usr/local/bin/bun
+# Install bun runtime system-wide (real binary, not a symlink into /root,
+# so non-root users can run it too — cctrace compiles with it at image build)
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 
 # Install stable runtimes BEFORE volatile packages to maximize cache reuse
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -208,13 +208,13 @@ FROM agent-base AS final
 
 # Declare ARGs immediately before usage to minimize cache invalidation
 ARG CLAUDE_CODE_VERSION=2.1.143
-ARG CLAUDE_TRACE_VERSION=1.0.9
+ARG CCTRACE_VERSION=0.4.0
 ARG CODEX_VERSION=0.131.0
 ARG GEMINI_CLI_VERSION=0.42.0
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
-LABEL org.opencontainers.image.claude_trace_version=${CLAUDE_TRACE_VERSION}
+LABEL org.opencontainers.image.cctrace_version=${CCTRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 

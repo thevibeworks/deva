@@ -31,7 +31,7 @@ TOOL_REGISTRY=(
     "gemini-cli|npm|@google/gemini-cli|org.opencontainers.image.gemini_cli_version|https://www.npmjs.com/package/@google/gemini-cli||agent|main"
     "ccx|github-release|thevibeworks/ccx|org.opencontainers.image.ccx_version|https://github.com/thevibeworks/ccx|github:thevibeworks/ccx|agent|main"
     "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
-    "claude-trace|npm|@mariozechner/claude-trace|org.opencontainers.image.claude_trace_version|https://www.npmjs.com/package/@mariozechner/claude-trace|github:mariozechner/claude-trace|agent|main"
+    "cctrace|npm|@thevibeworks/cctrace|org.opencontainers.image.cctrace_version|https://www.npmjs.com/package/@thevibeworks/cctrace|github:thevibeworks/cctrace|agent|main"
     "playwright|npm|playwright|org.opencontainers.image.playwright_version|https://www.npmjs.com/package/playwright|github:microsoft/playwright|browser|rust"
 )
 

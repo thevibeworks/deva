@@ -31,7 +31,7 @@ DELTA_VERSION ?= 0.19.2
 TMUX_VERSION ?= 3.6a
 TMUX_SHA256 ?= b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759
 CLAUDE_CODE_VERSION ?= 2.1.143
-CLAUDE_TRACE_VERSION ?= 1.0.9
+CCTRACE_VERSION ?= 0.4.0
 CODEX_VERSION ?= 0.131.0
 GEMINI_CLI_VERSION ?= 0.42.0
 CCX_VERSION ?= v0.1.4
@@ -56,7 +56,7 @@ CORE_BUILD_ARGS := $(TOOLCHAIN_BUILD_ARGS) \
 
 AGENT_BUILD_ARGS := \
 	--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION) \
-	--build-arg CLAUDE_TRACE_VERSION=$(CLAUDE_TRACE_VERSION) \
+	--build-arg CCTRACE_VERSION=$(CCTRACE_VERSION) \
 	--build-arg CODEX_VERSION=$(CODEX_VERSION) \
 	--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
 	--build-arg CCX_VERSION=$(CCX_VERSION)
@@ -78,7 +78,7 @@ VERSION_QUERY_OVERRIDES := \
 	$(if $(filter command line environment environment\ override override,$(origin TMUX_VERSION)),TMUX_VERSION=$(TMUX_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin TMUX_SHA256)),TMUX_SHA256=$(TMUX_SHA256)) \
 	$(if $(filter command line environment environment\ override override,$(origin CLAUDE_CODE_VERSION)),CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION)) \
-	$(if $(filter command line environment environment\ override override,$(origin CLAUDE_TRACE_VERSION)),CLAUDE_TRACE_VERSION=$(CLAUDE_TRACE_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin CCTRACE_VERSION)),CCTRACE_VERSION=$(CCTRACE_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin CODEX_VERSION)),CODEX_VERSION=$(CODEX_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin GEMINI_CLI_VERSION)),GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin CCX_VERSION)),CCX_VERSION=$(CCX_VERSION)) \
@@ -329,7 +329,7 @@ dev: build shell
 
 context-size:
 	@echo "📏 Build context size:"
-	@du -sh . --exclude='.git' --exclude='node_modules' --exclude='.claude-trace'
+	@du -sh . --exclude='.git' --exclude='node_modules' --exclude='.claude-trace' --exclude='.cctrace'
 
 lint:
 	@echo "🔍 Linting Dockerfile..."
@@ -400,7 +400,7 @@ help:
 	@echo "  DELTA_VERSION        delta version (default: $(DELTA_VERSION))"
 	@echo "  TMUX_VERSION         tmux version (default: $(TMUX_VERSION))"
 	@echo "  CLAUDE_CODE_VERSION  Claude CLI version (default: $(CLAUDE_CODE_VERSION))"
-	@echo "  CLAUDE_TRACE_VERSION Claude trace version (default: $(CLAUDE_TRACE_VERSION))"
+	@echo "  CCTRACE_VERSION      cctrace version (default: $(CCTRACE_VERSION))"
 	@echo "  CODEX_VERSION        Codex CLI version (default: $(CODEX_VERSION))"
 	@echo "  GEMINI_CLI_VERSION   Gemini CLI version (default: $(GEMINI_CLI_VERSION))"
 	@echo "  CCX_VERSION    Atlas CLI version (default: $(CCX_VERSION))"

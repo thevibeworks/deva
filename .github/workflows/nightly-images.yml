@@ -28,7 +28,7 @@ jobs:
       delta_version: ${{ steps.pins.outputs.delta_version }}
       tmux_version: ${{ steps.pins.outputs.tmux_version }}
       tmux_sha256: ${{ steps.pins.outputs.tmux_sha256 }}
-      claude_trace_version: ${{ steps.pins.outputs.claude_trace_version }}
+      cctrace_version: ${{ steps.pins.outputs.cctrace_version }}
       playwright_version: ${{ steps.pins.outputs.playwright_version }}
       rust_toolchains: ${{ steps.pins.outputs.rust_toolchains }}
       rust_default_toolchain: ${{ steps.pins.outputs.rust_default_toolchain }}
@@ -54,7 +54,7 @@ jobs:
       claude_code_version: ${{ steps.versions.outputs.claude_code_version }}
       codex_version: ${{ steps.versions.outputs.codex_version }}
       gemini_cli_version: ${{ steps.versions.outputs.gemini_cli_version }}
-      atlas_cli_version: ${{ steps.versions.outputs.atlas_cli_version }}
+      ccx_version: ${{ steps.versions.outputs.ccx_version }}
       copilot_api_version: ${{ steps.versions.outputs.copilot_api_version }}
     steps:
       - name: Checkout
@@ -80,7 +80,7 @@ jobs:
           - Claude Code: \`${{ steps.versions.outputs.claude_code_version }}\`
           - Codex: \`${{ steps.versions.outputs.codex_version }}\`
           - Gemini CLI: \`${{ steps.versions.outputs.gemini_cli_version }}\`
-          - Atlas CLI: \`${{ steps.versions.outputs.atlas_cli_version }}\`
+          - ccx: \`${{ steps.versions.outputs.ccx_version }}\`
           - Copilot API: \`${{ steps.versions.outputs.copilot_api_version }}\`
           - Stamp: \`${{ steps.versions.outputs.stamp }}\`
           EOF
@@ -137,10 +137,10 @@ jobs:
             TMUX_VERSION=${{ needs.load-version-pins.outputs.tmux_version }}
             TMUX_SHA256=${{ needs.load-version-pins.outputs.tmux_sha256 }}
             CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
-            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
+            CCTRACE_VERSION=${{ needs.load-version-pins.outputs.cctrace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
-            ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
+            CCX_VERSION=${{ needs.resolve-versions.outputs.ccx_version }}
             COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
 
   build-rust:
@@ -190,10 +190,10 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ needs.resolve-versions.outputs.stamp }}
             CLAUDE_CODE_VERSION=${{ needs.resolve-versions.outputs.claude_code_version }}
-            CLAUDE_TRACE_VERSION=${{ needs.load-version-pins.outputs.claude_trace_version }}
+            CCTRACE_VERSION=${{ needs.load-version-pins.outputs.cctrace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
-            ATLAS_CLI_VERSION=${{ needs.resolve-versions.outputs.atlas_cli_version }}
+            CCX_VERSION=${{ needs.resolve-versions.outputs.ccx_version }}
             PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
             RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}
             RUST_DEFAULT_TOOLCHAIN=${{ needs.load-version-pins.outputs.rust_default_toolchain }}

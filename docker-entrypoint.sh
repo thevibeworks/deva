@@ -367,30 +367,36 @@ main() {
             else
                 build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@" --dangerously-skip-permissions
             fi
-        elif [ "$cmd" = "claude-trace" ]; then
-            # claude-trace: ensure --dangerously-skip-permissions follows --run-with
-            local has_dsp=false
+        elif [ "$cmd" = "cctrace" ]; then
+            # cctrace: claude args follow "--"; ensure
+            # --dangerously-skip-permissions is among them
+            local has_dsp=false has_sep=false
             for arg in "$@"; do
                 if [ "$arg" = "--dangerously-skip-permissions" ]; then
                     has_dsp=true
-                    break
+                elif [ "$arg" = "--" ]; then
+                    has_sep=true
                 fi
             done
             if [ "$has_dsp" = true ]; then
                 # Already has --dangerously-skip-permissions, pass through
                 build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"
-            else
-                # Insert --dangerously-skip-permissions after --run-with
+            elif [ "$has_sep" = true ]; then
+                # Insert --dangerously-skip-permissions after the first "--"
                 args=("$@")
                 new_args=()
+                local inserted=false
                 for arg in "${args[@]}"; do
-                    if [ "$arg" = "--run-with" ]; then
-                        new_args+=("--run-with" "--dangerously-skip-permissions")
+                    if [ "$arg" = "--" ] && [ "$inserted" = false ]; then
+                        new_args+=("--" "--dangerously-skip-permissions")
+                        inserted=true
                     else
                         new_args+=("$arg")
                     fi
                 done
                 build_gosu_env_cmd "$DEVA_USER" "$cmd" "${new_args[@]}"
+            else
+                build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@" -- --dangerously-skip-permissions
             fi
         else
             build_gosu_env_cmd "$DEVA_USER" "$cmd" "$@"

@@ -34,6 +34,7 @@ references/
 
 # Claude trace logs
 .claude-trace/
+.cctrace/
 
 # Build artifacts
 *.tar

@@ -61,7 +61,7 @@ TMUX_VERSION=$TMUX_VERSION
 TMUX_SHA256=$TMUX_SHA256
 
 CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION
-CLAUDE_TRACE_VERSION=$CLAUDE_TRACE_VERSION
+CCTRACE_VERSION=$CCTRACE_VERSION
 CODEX_VERSION=$CODEX_VERSION
 GEMINI_CLI_VERSION=$GEMINI_CLI_VERSION
 CCX_VERSION=$CCX_VERSION
@@ -98,7 +98,7 @@ main() {
     refresh_pin GO_VERSION "$(fetch_go_version)"
     refresh_pin DELTA_VERSION "$(fetch_latest_git_tag https://github.com/dandavison/delta.git)"
     refresh_pin CLAUDE_CODE_VERSION "$(fetch_npm_version @anthropic-ai/claude-code)"
-    refresh_pin CLAUDE_TRACE_VERSION "$(fetch_npm_version @mariozechner/claude-trace)"
+    refresh_pin CCTRACE_VERSION "$(fetch_npm_version @thevibeworks/cctrace)"
     refresh_pin CODEX_VERSION "$(fetch_npm_version @openai/codex)"
     refresh_pin GEMINI_CLI_VERSION "$(fetch_npm_version @google/gemini-cli)"
     refresh_pin CCX_VERSION "$(fetch_latest_git_tag https://github.com/thevibeworks/ccx.git)"

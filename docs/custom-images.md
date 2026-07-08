@@ -71,7 +71,7 @@ docker build -t deva-local:latest \
   --build-arg TMUX_VERSION="$TMUX_VERSION" \
   --build-arg TMUX_SHA256="$TMUX_SHA256" \
   --build-arg CLAUDE_CODE_VERSION="$CLAUDE_CODE_VERSION" \
-  --build-arg CLAUDE_TRACE_VERSION="$CLAUDE_TRACE_VERSION" \
+  --build-arg CCTRACE_VERSION="$CCTRACE_VERSION" \
   --build-arg CODEX_VERSION="$CODEX_VERSION" \
   --build-arg GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
   --build-arg ATLAS_CLI_VERSION="$ATLAS_CLI_VERSION" \
@@ -90,7 +90,7 @@ docker build -f Dockerfile --target agent-base -t deva-local:core \
 docker build -f Dockerfile.rust -t deva-local:rust \
   --build-arg BASE_IMAGE=deva-local:core \
   --build-arg CLAUDE_CODE_VERSION="$CLAUDE_CODE_VERSION" \
-  --build-arg CLAUDE_TRACE_VERSION="$CLAUDE_TRACE_VERSION" \
+  --build-arg CCTRACE_VERSION="$CCTRACE_VERSION" \
   --build-arg CODEX_VERSION="$CODEX_VERSION" \
   --build-arg GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
   --build-arg ATLAS_CLI_VERSION="$ATLAS_CLI_VERSION" \
