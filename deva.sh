@@ -115,6 +115,11 @@ Container management commands (docker/tmux-style):
   deva.sh stop [-g]          Stop container (pick if multiple)
   deva.sh rm [-g] [--all]    Remove container (pick if multiple), or all for this workspace
   deva.sh clean [-g]         Remove all stopped containers
+  deva.sh sessions [-g] [args]
+                              Browse agent sessions (ccx sessions pass-through)
+  deva.sh insight [args]      Generate data report (ccx insight pass-through)
+  deva.sh ccx [-g] [cmd] [args]
+                              Run any ccx command inside a container
 
 Advanced:
   deva.sh --show-config      Show resolved configuration (debug)
@@ -1351,6 +1356,7 @@ cmd_status() {
             if [ -f "$session_file" ]; then
                 auth_tag=$(jq -r '.auth.method // "--"' "$session_file" 2>/dev/null)
             else
+                # build_container_name format: prefix--agent--auth_tag--slug..hash
                 local namerest="${name#"${DEVA_CONTAINER_PREFIX}--"}"
                 namerest="${namerest#*--}"
                 auth_tag="${namerest%%--*}"
@@ -1389,9 +1395,9 @@ cmd_status() {
                     while IFS=$'\t' read -r src dest rw; do
                         local mode="rw"
                         [ "$rw" = "true" ] || mode="ro"
-                        local cat
-                        cat=$(categorize_mount "$dest" "$container_ws")
-                        printf '      %-42s -> %-30s %s  (%s)\n' "$(shorten_path "$src")" "$dest" "$mode" "$cat"
+                        local category
+                        category=$(categorize_mount "$dest" "$container_ws")
+                        printf '      %-42s -> %-30s %s  (%s)\n' "$(shorten_path "$src")" "$dest" "$mode" "$category"
                     done | sort -t'(' -k2
                 fi
 
@@ -1503,13 +1509,18 @@ inject_workspace_context() {
     local ws="$(pwd)"
     local marker="<!-- deva:container-context -->"
     local end_marker="<!-- /deva:container-context -->"
-    local docker_available=false
-    local ephemeral="$EPHEMERAL_MODE"
+    local docker_line="" persist_line=""
 
-    [ -z "${DEVA_NO_DOCKER:-}" ] && [ -S /var/run/docker.sock ] && docker_available=true
+    [ -z "${DEVA_NO_DOCKER:-}" ] && [ -S /var/run/docker.sock ] && \
+        docker_line="- Docker is available (socket mounted from host)."
+    if [ "$EPHEMERAL_MODE" = true ]; then
+        persist_line="- Ephemeral container. Installed packages will not persist."
+    else
+        persist_line="- System packages and build caches persist across sessions."
+    fi
 
-    _gen_context() {
-        cat <<'CTX'
+    local context
+    context="$(cat <<'CTX'
 # Container Environment (deva)
 
 You are inside a Docker container running Ubuntu Linux 24.04 LTS
@@ -1528,40 +1539,48 @@ runtime is Linux.
 - Pre-installed: Node.js, Python (use `uv`, not pip), Go, git,
   gh, make, curl. pip is NOT in PATH.
 CTX
-        [ "$docker_available" = true ] && echo "- Docker is available (socket mounted from host)."
-        if [ "$ephemeral" = true ]; then
-            echo "- Ephemeral container. Installed packages will not persist."
-        else
-            echo "- System packages and build caches persist across sessions."
-        fi
-        echo "- Container details are in DEVA_* environment variables."
-    }
+)"
+    [ -n "$docker_line" ] && context="${context}
+${docker_line}"
+    context="${context}
+${persist_line}
+- Container details are in DEVA_* environment variables."
 
-    _strip_and_write() {
-        local target="$1" content="$2"
-
+    local target
+    mkdir -p "$ws/.claude" 2>/dev/null || true
+    for target in "$ws/.claude/CLAUDE.md" "$ws/AGENTS.md"; do
         if [ -f "$target" ] && grep -qF "$marker" "$target"; then
             awk -v m="$marker" -v e="$end_marker" \
                 '$0==m{skip=1;next} $0==e{skip=0;next} !skip' \
                 "$target" > "${target}.deva.tmp" && mv "${target}.deva.tmp" "$target"
         fi
-
         {
             [ -s "$target" ] && printf '\n'
             printf '%s\n' "$marker"
-            printf '%s\n' "$content"
+            printf '%s\n' "$context"
             printf '%s\n' "$end_marker"
         } >> "$target"
-    }
+    done
+}
 
-    local context
-    context="$(_gen_context)"
-
-    mkdir -p "$ws/.claude" 2>/dev/null || true
-    _strip_and_write "$ws/.claude/CLAUDE.md" "$context"
-    _strip_and_write "$ws/AGENTS.md" "$context"
-
-    unset -f _gen_context _strip_and_write
+parse_ccx_args() {
+    CCX_ARGS=()
+    local found_cmd=false
+    for tok in "${PRE_ARGS[@]}"; do
+        if [ "$found_cmd" = false ]; then
+            case "$tok" in sessions|session|insight|ccx) found_cmd=true ;; esac
+            continue
+        fi
+        case "$tok" in -g|--global|--dry-run|--debug|--verbose) ;; *) CCX_ARGS+=("$tok") ;; esac
+    done
+    if [ ${#POST_ARGS[@]} -gt 0 ]; then
+        CCX_ARGS+=("${POST_ARGS[@]}")
+    fi
+    if [ "$MANAGEMENT_MODE" = "sessions" ]; then
+        CCX_ARGS=("sessions" ${CCX_ARGS[@]+"${CCX_ARGS[@]}"})
+    elif [ "$MANAGEMENT_MODE" = "insight" ]; then
+        CCX_ARGS=("insight" ${CCX_ARGS[@]+"${CCX_ARGS[@]}"})
+    fi
 }
 
 prepare_base_docker_args() {
@@ -2924,11 +2943,20 @@ if [ ${#PRE_ARGS[@]} -gt 0 ]; then
         status)
             MANAGEMENT_MODE="status"
             ;;
+        sessions | session)
+            MANAGEMENT_MODE="sessions"
+            ;;
+        insight)
+            MANAGEMENT_MODE="insight"
+            ;;
+        ccx)
+            MANAGEMENT_MODE="ccx"
+            ;;
         esac
     done
 fi
 
-if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANAGEMENT_MODE" = "show-config" ] || [ "$MANAGEMENT_MODE" = "stop" ] || [ "$MANAGEMENT_MODE" = "rm" ] || [ "$MANAGEMENT_MODE" = "clean" ] || [ "$MANAGEMENT_MODE" = "status" ]; then
+if [ "$MANAGEMENT_MODE" != "launch" ]; then
     if [ "$MANAGEMENT_MODE" = "ps" ]; then
         list_containers_pretty
         exit 0
@@ -3076,6 +3104,26 @@ if [ "$MANAGEMENT_MODE" = "shell" ] || [ "$MANAGEMENT_MODE" = "ps" ] || [ "$MANA
     if [ "$MANAGEMENT_MODE" = "status" ]; then
         cmd_status
         exit 0
+    fi
+
+    if [ "$MANAGEMENT_MODE" = "sessions" ] || [ "$MANAGEMENT_MODE" = "insight" ] || [ "$MANAGEMENT_MODE" = "ccx" ]; then
+        parse_ccx_args
+
+        if [ -n "${DEVA_CONTAINER_NAME:-}" ] && command -v ccx >/dev/null 2>&1; then
+            exec ccx ${CCX_ARGS[@]+"${CCX_ARGS[@]}"}
+        fi
+
+        ccx_rows=$(project_container_rows)
+        if [ -z "$ccx_rows" ]; then
+            echo "No running containers. Start one first: deva.sh claude" >&2
+            exit 1
+        fi
+        container_name="${ccx_rows%%$'\t'*}"
+
+        exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$container_name" \
+            gosu deva env HOME=/home/deva \
+            PATH=/home/deva/.local/bin:/home/deva/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+            ccx ${CCX_ARGS[@]+"${CCX_ARGS[@]}"}
     fi
 
     if [ "$MANAGEMENT_MODE" = "shell" ]; then
@@ -3404,11 +3452,13 @@ if [ "$QUICK_MODE" = false ]; then
     append_auth_credential_overlay
 fi
 
-# Set statusline log paths via env vars (XDG-compliant)
-DOCKER_ARGS+=("-e" "CLAUDE_DATA_DIR=/home/deva/.config/deva/claude")
-DOCKER_ARGS+=("-e" "CLAUDE_CACHE_DIR=/home/deva/.cache/deva/claude/sessions")
+# Statusline state intentionally NOT redirected: it defaults to
+# ~/.claude/statusline inside the mounted ~/.claude, so the host and every
+# container share one quota cache and one log dir. Hard-coding
+# CLAUDE_DATA_DIR/CLAUDE_CACHE_DIR here split state from the host and from
+# the logs (#388).
 
-# Mount deva config and cache directories for statusline usage tracking
+# Mount deva config and cache directories (auth credential files etc.)
 # Skip when --config-home is explicit or -Q bare mode to preserve isolation
 if [ "$CONFIG_HOME_FROM_CLI" = false ] && [ "$QUICK_MODE" = false ]; then
     if [ -d "$HOME/.config/deva" ]; then

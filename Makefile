@@ -40,6 +40,8 @@ PLAYWRIGHT_VERSION ?= 1.60.0
 RUST_TOOLCHAINS ?= stable
 RUST_DEFAULT_TOOLCHAIN ?= stable
 RUST_TARGETS ?= wasm32-unknown-unknown
+DOCKER_BUILD_EXTRA_ARGS ?=
+SKIP_BUILD_NETWORK_CHECK ?= 0
 
 TOOLCHAIN_BUILD_ARGS := \
 	--build-arg NODE_MAJOR=$(NODE_MAJOR) \
@@ -91,7 +93,7 @@ export VERSION_PINS_FILE
 
 .DEFAULT_GOAL := help
 
-.PHONY: build build-main rebuild build-core build-rust-image build-rust build-all
+.PHONY: build build-network-check build-main rebuild build-core build-rust-image build-rust build-all
 .PHONY: buildx buildx-multi buildx-multi-rust buildx-multi-local
 .PHONY: versions-up versions versions-pin toolchains scripts commands clean clean-all shell test test-rust test-local
 .PHONY: info push pull build-test dev context-size lint version-check
@@ -99,7 +101,18 @@ export VERSION_PINS_FILE
 
 build: build-all
 
-build-main:
+build-network-check:
+	@if [ "$(SKIP_BUILD_NETWORK_CHECK)" = "1" ]; then \
+		echo "Skipping Docker build network check"; \
+	else \
+		echo "Checking Docker build DNS for registry.npmjs.org..."; \
+		printf '%s\n' \
+			'FROM node:$(NODE_MAJOR)-bookworm-slim' \
+			'RUN node -e "require('\''dns'\'').lookup('\''registry.npmjs.org'\'',{all:true},(e,a)=>{if(e){console.error(e);process.exit(1)};console.log(a.map(x=>x.address).slice(0,3).join('\'','\''))})"' \
+			| docker build $(DOCKER_BUILD_EXTRA_ARGS) --progress=plain --no-cache -f - . >/dev/null; \
+	fi
+
+build-main: build-network-check
 	@echo "🔨 Building Docker image with $(DOCKERFILE)..."
 	@if [ -f "$(VERSION_PINS_FILE)" ]; then \
 		echo "📌 Using shared defaults from $(VERSION_PINS_FILE)"; \
@@ -136,23 +149,23 @@ build-main:
 		   fi; \
 		 fi
 	@echo "Hint: override via GO_VERSION=... CLAUDE_CODE_VERSION=... or run 'make versions-pin'"
-	docker build -f $(DOCKERFILE) $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
+	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(DOCKERFILE) $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Build completed: $(MAIN_IMAGE)"
 
 rebuild:
 	@echo "🔨 Rebuilding Docker image (no cache) with $(DOCKERFILE)..."
-	docker build -f $(DOCKERFILE) --no-cache $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
+	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(DOCKERFILE) --no-cache $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Rebuild completed: $(MAIN_IMAGE)"
 
 
 build-core:
 	@echo "🔨 Building stable core image..."
-	docker build -f $(DOCKERFILE) --target agent-base $(CORE_BUILD_ARGS) -t $(CORE_IMAGE) .
+	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(DOCKERFILE) --target agent-base $(CORE_BUILD_ARGS) -t $(CORE_IMAGE) .
 	@echo "✅ Core build completed: $(CORE_IMAGE)"
 
-build-rust-image:
+build-rust-image: build-network-check
 	@echo "🔨 Building Rust Docker image..."
-	docker build -f $(RUST_DOCKERFILE) \
+	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(RUST_DOCKERFILE) \
 		--build-arg BASE_IMAGE=$(CORE_IMAGE) \
 		$(RUST_BUILD_ARGS) \
 		-t $(RUST_IMAGE) .
@@ -348,6 +361,7 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  build                Build all images with pinned Makefile defaults"
+	@echo "  build-network-check  Check Docker build DNS before npm-heavy stages"
 	@echo "  build-core           Build stable core image only"
 	@echo "  build-main           Build main Docker image only"
 	@echo "  build-rust           Build Rust Docker image"

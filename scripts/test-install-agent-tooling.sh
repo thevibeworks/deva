@@ -114,11 +114,11 @@ os.stat(".")
 PY
 
 mkdir -p "${GOBIN:?GOBIN is required}"
-cat >"$GOBIN/atl" <<'BIN'
+cat >"$GOBIN/ccx" <<'BIN'
 #!/usr/bin/env bash
-echo "atl fake"
+echo "ccx fake"
 BIN
-chmod +x "$GOBIN/atl"
+chmod +x "$GOBIN/ccx"
 EOF
 
 chmod +x "$fake_bin/npm" "$fake_bin/curl" "$fake_bin/go"
@@ -137,6 +137,7 @@ mkdir -p "$tmp_root/deny"
         CODEX_VERSION="$CODEX_VERSION" \
         GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
         CCX_VERSION="$CCX_VERSION" \
+        DEVA_SKIP_NPM_REGISTRY_CHECK=1 \
         bash "$REPO_ROOT/scripts/install-agent-tooling.sh" 2>&1
     )"
 
@@ -144,7 +145,7 @@ mkdir -p "$tmp_root/deny"
     grep -F "Installing npm agent tooling" <<<"$output" >/dev/null
     grep -F "claude-trace=$CLAUDE_TRACE_VERSION" <<<"$output" >/dev/null
     grep -F "Installing ccx pinned to $CCX_VERSION" <<<"$output" >/dev/null
-    grep -F "falling back to pinned go install" <<<"$output" >/dev/null
+    grep -F "falling back to go install" <<<"$output" >/dev/null
     grep -F "ccx installed" <<<"$output" >/dev/null
-    test -x "$fake_home/.local/bin/atl"
+    test -x "$fake_home/.local/bin/ccx"
 )
