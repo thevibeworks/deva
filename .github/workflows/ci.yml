@@ -79,7 +79,7 @@ jobs:
             --build-arg CCTRACE_VERSION="${{ steps.pins.outputs.cctrace_version }}" \
             --build-arg CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
             --build-arg GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
-            --build-arg ATLAS_CLI_VERSION="${{ steps.pins.outputs.atlas_cli_version }}" \
+            --build-arg CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             --build-arg COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             .
 
@@ -100,7 +100,7 @@ jobs:
             CCTRACE_VERSION="${{ steps.pins.outputs.cctrace_version }}" \
             CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
             GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
-            ATLAS_CLI_VERSION="${{ steps.pins.outputs.atlas_cli_version }}" \
+            CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             PLAYWRIGHT_VERSION="${{ steps.pins.outputs.playwright_version }}" \
             RUST_TOOLCHAINS="${{ steps.pins.outputs.rust_toolchains }}" \
