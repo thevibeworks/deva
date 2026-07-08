@@ -160,6 +160,22 @@ Use them in that order:
 
 The printed `docker run` line is diagnostic output. It masks secrets and may contain unquoted values. Read it. Do not blindly paste it back into a shell and then complain when your shell parses spaces like spaces.
 
+## Request Tracing
+
+```bash
+deva.sh claude -- --trace --continue
+```
+
+`--trace` wraps Claude with [cctrace](https://github.com/thevibeworks/cctrace),
+which records every API call Claude makes — messages, OAuth, usage/credits,
+MCP — not just the chat endpoint. Everything else on the line goes to Claude
+unchanged.
+
+Traces land in `.cctrace/` inside your workspace, so they survive the
+container. Each run writes a JSONL log plus a self-contained HTML snapshot you
+can open in a browser on the host. Credentials are redacted before anything
+hits disk.
+
 ## Risk Knobs
 
 ### Docker Socket
