@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `skills/deva-clean`: Claude Code skill for mount-safe workspace disk
+  cleanup. Maps bind mounts from `.deva` + /proc/mounts, git-triages
+  local worktrees for unpushed/uncommitted work, and reports a tiered
+  dry-run plan before any deletion (#401)
+
 ## [0.13.0] - 2026-07-07
 
 ### Changed
