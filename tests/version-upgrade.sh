@@ -26,6 +26,7 @@ inspect)
   "org.opencontainers.image.cctrace_version":"0.3.0",
   "org.opencontainers.image.codex_version":"0.116.0",
   "org.opencontainers.image.gemini_cli_version":"0.35.0",
+  "org.opencontainers.image.grok_cli_version":"0.2.90",
   "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
@@ -75,6 +76,12 @@ case "${2:-}" in
     ;;
 @google/gemini-cli@0.35.3)
     echo '{"0.35.3":"2026-03-28T03:17:00Z"}'
+    ;;
+@xai-official/grok)
+    echo "0.2.93"
+    ;;
+@xai-official/grok@0.2.93)
+    echo '{"0.2.93":"2026-07-01T00:00:00Z"}'
     ;;
 playwright)
     echo "1.60.0"
@@ -172,6 +179,7 @@ for expected in \
     "--build-arg CCTRACE_VERSION=0.4.0" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
+    "--build-arg GROK_CLI_VERSION=0.2.93" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "--build-arg GO_VERSION=1.26.2"
@@ -188,6 +196,7 @@ for expected in \
     "--build-arg CCTRACE_VERSION=0.4.0" \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
+    "--build-arg GROK_CLI_VERSION=0.2.93" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do

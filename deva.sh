@@ -186,6 +186,7 @@ Examples:
   deva.sh claude                      # Same
   deva.sh codex                       # Launch codex in the same default container shape
   deva.sh gemini                      # Launch gemini in the same default container shape
+  deva.sh grok                        # Launch grok in the same default container shape
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -882,7 +883,7 @@ generate_auth_tag() {
     fi
 
     case "$agent:$auth_method" in
-        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth)
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth)
             printf '%s' "auth-default"
             return
             ;;
@@ -904,6 +905,7 @@ generate_auth_tag() {
                 claude) key_val="${ANTHROPIC_API_KEY:-}" ;;
                 codex)  key_val="${OPENAI_API_KEY:-}" ;;
                 gemini) key_val="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}" ;;
+                grok)   key_val="${XAI_API_KEY:-}" ;;
             esac
             if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
                 printf '%s' "api-key-${key_val: -4}"
@@ -1251,7 +1253,8 @@ categorize_mount() {
     elif [ "$dest" = "/var/run/docker.sock" ]; then printf 'bridge'
     elif [[ "$dest" == /deva-host-chrome-bridge* ]]; then printf 'bridge'
     elif [[ "$dest" == /home/deva/.claude* ]] || [[ "$dest" == /home/deva/.codex* ]] || \
-         [[ "$dest" == /home/deva/.gemini* ]] || [ "$dest" = "/home/deva/.agents" ]; then
+         [[ "$dest" == /home/deva/.gemini* ]] || [[ "$dest" == /home/deva/.grok* ]] || \
+         [ "$dest" = "/home/deva/.agents" ]; then
         printf 'config'
     else printf 'user'
     fi
@@ -1432,7 +1435,7 @@ cmd_status() {
 
     if [ -d "$config_root" ]; then
         echo "Agent Homes ($(shorten_path "$config_root")):"
-        for agent_name in claude codex gemini; do
+        for agent_name in claude codex gemini grok; do
             local agent_dir="$config_root/$agent_name"
             if [ -d "$agent_dir" ]; then
                 local canonical="" other_count=0 entry is_canonical
@@ -1443,6 +1446,7 @@ cmd_status() {
                         claude:.claude|claude:.claude.json) is_canonical=true ;;
                         codex:.codex) is_canonical=true ;;
                         gemini:.gemini) is_canonical=true ;;
+                        grok:.grok) is_canonical=true ;;
                     esac
                     if [ "$is_canonical" = true ]; then
                         if [ -L "$agent_dir/$entry" ]; then
@@ -1893,6 +1897,24 @@ should_skip_env_for_auth() {
             ;;
         esac
         ;;
+    grok)
+        case "${AUTH_METHOD:-oauth}" in
+        oauth)
+            case "$name" in
+            XAI_API_KEY | ANTHROPIC_API_KEY | ANTHROPIC_BASE_URL | OPENAI_API_KEY | OPENAI_BASE_URL)
+                return 0
+                ;;
+            esac
+            ;;
+        api-key)
+            case "$name" in
+            XAI_API_KEY)
+                return 0
+                ;;
+            esac
+            ;;
+        esac
+        ;;
     esac
 
     return 1
@@ -1949,6 +1971,7 @@ agent_canonical_basenames() {
     claude) printf '%s\n' '.claude' '.claude.json' ;;
     codex)  printf '%s\n' '.codex' ;;
     gemini) printf '%s\n' '.gemini' ;;
+    grok)   printf '%s\n' '.grok' ;;
     *)      return 0 ;;
     esac
 }
@@ -1989,7 +2012,7 @@ mount_config_home() {
     mount_agent_canonical "$ACTIVE_AGENT" "$CONFIG_HOME"
 }
 
-# Effective config base: where agent config dirs (.claude/, .codex/, .gemini/) live.
+# Effective config base: where agent config dirs (.claude/, .codex/, .gemini/, .grok/) live.
 resolve_config_base() {
     if [ -n "$CONFIG_HOME" ]; then
         printf '%s' "$CONFIG_HOME"
@@ -2016,7 +2039,7 @@ has_auth_override() {
     # Non-default --auth-with
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth) ;;
             *) return 0 ;;
         esac
     fi
@@ -2027,6 +2050,7 @@ has_auth_override() {
         claude) auth_vars="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN" ;;
         codex)  auth_vars="OPENAI_API_KEY" ;;
         gemini) auth_vars="GEMINI_API_KEY" ;;
+        grok)   auth_vars="XAI_API_KEY" ;;
     esac
 
     local var
@@ -2067,6 +2091,11 @@ default_credential_target_path() {
     gemini)
         printf '%s' "/home/deva/.gemini/mcp-oauth-tokens-v2.json"
         ;;
+    grok)
+        # grok prefers the auth.json session token over XAI_API_KEY, so the
+        # blank overlay is what makes api-key auth win over a mounted ~/.grok.
+        printf '%s' "/home/deva/.grok/auth.json"
+        ;;
     *)
         return 1
         ;;
@@ -2093,7 +2122,7 @@ append_auth_credential_overlay() {
     local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deva/auth-overlays/$ACTIVE_AGENT"
     local overlay_key="${AUTH_METHOD:-default}"
     case "$ACTIVE_AGENT:$AUTH_METHOD" in
-    claude:claude | codex:chatgpt | gemini:oauth | gemini:gemini-app-oauth)
+    claude:claude | codex:chatgpt | gemini:oauth | gemini:gemini-app-oauth | grok:oauth)
         overlay_key="env"
         ;;
     esac
@@ -3207,7 +3236,7 @@ if [ "$CONFIG_HOME_AUTO" = true ]; then
 fi
 
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
-    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ]; then
+    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
         CONFIG_HOME=""
         CONFIG_HOME_AUTO=false
@@ -3258,6 +3287,17 @@ autolink_legacy_into_deva_root() {
     if [ -d "$CONFIG_ROOT" ]; then
         [ -d "$CONFIG_ROOT/gemini/.gemini" ] || [ -L "$CONFIG_ROOT/gemini/.gemini" ] || mkdir -p "$CONFIG_ROOT/gemini/.gemini"
     fi
+
+    if [ -d "$HOME/.grok" ]; then
+        [ -d "$CONFIG_ROOT/grok" ] || mkdir -p "$CONFIG_ROOT/grok"
+        if [ ! -e "$CONFIG_ROOT/grok/.grok" ] && [ ! -L "$CONFIG_ROOT/grok/.grok" ]; then
+            ln -s "$HOME/.grok" "$CONFIG_ROOT/grok/.grok"
+            echo "autolink: ~/.grok -> $CONFIG_ROOT/grok/.grok" >&2
+        fi
+    fi
+    if [ -d "$CONFIG_ROOT" ]; then
+        [ -d "$CONFIG_ROOT/grok/.grok" ] || [ -L "$CONFIG_ROOT/grok/.grok" ] || mkdir -p "$CONFIG_ROOT/grok/.grok"
+    fi
 }
 
 check_agent "$ACTIVE_AGENT"
@@ -3280,6 +3320,9 @@ if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
     gemini)
         [ -d "$CONFIG_HOME/.gemini" ] || mkdir -p "$CONFIG_HOME/.gemini"
         [ -f "$CONFIG_HOME/.gemini/settings.json" ] || echo '{}' >"$CONFIG_HOME/.gemini/settings.json"
+        ;;
+    grok)
+        [ -d "$CONFIG_HOME/.grok" ] || mkdir -p "$CONFIG_HOME/.grok"
         ;;
     esac
 fi
@@ -3309,6 +3352,11 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ] && [ "$_config_ho
     gemini)
         if [ ! -d "$CONFIG_HOME/.gemini" ] || [ -z "$(ls -A "$CONFIG_HOME/.gemini" 2>/dev/null)" ]; then
             echo "warning: $CONFIG_HOME/.gemini is empty; authentication will need to be set up" >&2
+        fi
+        ;;
+    grok)
+        if [ ! -d "$CONFIG_HOME/.grok" ] || [ -z "$(ls -A "$CONFIG_HOME/.grok" 2>/dev/null)" ]; then
+            echo "warning: $CONFIG_HOME/.grok is empty; authentication will need to be set up" >&2
         fi
         ;;
     esac
@@ -3345,7 +3393,7 @@ _step "agent_prepare"
 
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth) ;;
             *) _needs_rewrite=true ;;
         esac
 
@@ -3416,8 +3464,8 @@ fi
 # -Q bare mode: skip all config/auth mounts entirely.
 # Explicit --config-home DIR: isolate to that single home (no sibling agents).
 # Default: walk CONFIG_ROOT but only for KNOWN AGENT subdirs, and within each
-# mount only the CANONICAL entries (.claude/.claude.json/.codex/.gemini). Non-
-# agent subdirs (sessions/, cache/, adhoc state) are skipped. This keeps the
+# mount only the CANONICAL entries (.claude/.claude.json/.codex/.gemini/.grok).
+# Non-agent subdirs (sessions/, cache/, adhoc state) are skipped. This keeps the
 # mount count bounded at ~4 regardless of how much state agents accumulate
 # under their home dirs — the old unfiltered walk could emit 200+ mounts and
 # turn validate_bind_mount_shape's O(N²) into a several-minute stall.
@@ -3442,6 +3490,7 @@ else
         [ -f "$HOME/.claude.json" ] && DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
         [ -d "$HOME/.codex" ] && DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
         [ -d "$HOME/.gemini" ] && DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
+        [ -d "$HOME/.grok" ] && DOCKER_ARGS+=("-v" "$HOME/.grok:/home/deva/.grok")
     fi
 fi
 _step "mount dispatch: done"

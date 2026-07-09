@@ -16,6 +16,7 @@ _CLI_CLAUDE_CODE="${CLAUDE_CODE_VERSION:-}"
 _CLI_CCTRACE="${CCTRACE_VERSION:-}"
 _CLI_CODEX="${CODEX_VERSION:-}"
 _CLI_GEMINI="${GEMINI_CLI_VERSION:-}"
+_CLI_GROK="${GROK_CLI_VERSION:-}"
 _CLI_CCX="${CCX_VERSION:-}"
 _CLI_COPILOT="${COPILOT_API_VERSION:-}"
 _CLI_PLAYWRIGHT="${PLAYWRIGHT_VERSION:-}"
@@ -50,6 +51,7 @@ Environment:
   CCTRACE_VERSION       Override cctrace version
   CODEX_VERSION         Override codex version
   GEMINI_CLI_VERSION    Override gemini-cli version
+  GROK_CLI_VERSION      Override grok-cli version
   CCX_VERSION     Override ccx version
   COPILOT_API_VERSION   Override copilot-api version
   PLAYWRIGHT_VERSION    Override playwright version (rust image only)
@@ -87,11 +89,12 @@ main() {
 
     # Resolve build versions early so we can show the manifest before countdown.
     # CLI override wins; otherwise use whatever load_versions fetched.
-    local claude_ver cctrace_ver codex_ver gemini_ver ccx_ver copilot_ver playwright_ver
+    local claude_ver cctrace_ver codex_ver gemini_ver grok_ver ccx_ver copilot_ver playwright_ver
     claude_ver="${_CLI_CLAUDE_CODE:-$(get_latest "claude-code")}"
     cctrace_ver="${_CLI_CCTRACE:-$(get_latest "cctrace")}"
     codex_ver="${_CLI_CODEX:-$(get_latest "codex")}"
     gemini_ver="${_CLI_GEMINI:-$(get_latest "gemini-cli")}"
+    grok_ver="${_CLI_GROK:-$(get_latest "grok-cli")}"
     ccx_ver="${_CLI_CCX:-$(get_latest "ccx")}"
     copilot_ver="${_CLI_COPILOT:-$(get_latest "copilot-api")}"
     playwright_ver="${_CLI_PLAYWRIGHT:-${PLAYWRIGHT_VERSION}}"
@@ -100,6 +103,7 @@ main() {
     [[ -z $claude_ver ]] && missing+=("CLAUDE_CODE_VERSION")
     [[ -z $codex_ver ]] && missing+=("CODEX_VERSION")
     [[ -z $gemini_ver ]] && missing+=("GEMINI_CLI_VERSION")
+    [[ -z $grok_ver ]] && missing+=("GROK_CLI_VERSION")
     [[ -z $ccx_ver ]] && missing+=("CCX_VERSION")
     [[ -z $copilot_ver ]] && missing+=("COPILOT_API_VERSION")
     [[ -z $playwright_ver ]] && missing+=("PLAYWRIGHT_VERSION")
@@ -116,6 +120,7 @@ main() {
         "Claude Code|claude_ver|_CLI_CLAUDE_CODE|claude-code"
         "cctrace|cctrace_ver|_CLI_CCTRACE|cctrace"
         "Codex|codex_ver|_CLI_CODEX|codex"
+        "Grok CLI|grok_ver|_CLI_GROK|grok-cli"
         "CCX|ccx_ver|_CLI_CCX|ccx"
         "Copilot API|copilot_ver|_CLI_COPILOT|copilot-api"
         "Playwright|playwright_ver|_CLI_PLAYWRIGHT|playwright"
@@ -220,6 +225,7 @@ main() {
         --build-arg CCTRACE_VERSION="$cctrace_ver" \
         --build-arg CODEX_VERSION="$codex_ver" \
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
+        --build-arg GROK_CLI_VERSION="$grok_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
         --build-arg COPILOT_API_VERSION="$copilot_ver" \
         -t "$BUILD_IMAGE" .
@@ -232,6 +238,7 @@ main() {
         --build-arg CCTRACE_VERSION="$cctrace_ver" \
         --build-arg CODEX_VERSION="$codex_ver" \
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
+        --build-arg GROK_CLI_VERSION="$grok_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
         --build-arg PLAYWRIGHT_VERSION="$playwright_ver" \
         --build-arg RUST_TOOLCHAINS="$RUST_TOOLCHAINS" \

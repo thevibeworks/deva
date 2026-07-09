@@ -29,6 +29,7 @@ TOOL_REGISTRY=(
     "claude-code|npm|@anthropic-ai/claude-code|org.opencontainers.image.claude_code_version|https://www.npmjs.com/package/@anthropic-ai/claude-code|https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md|agent|main"
     "codex|npm|@openai/codex|org.opencontainers.image.codex_version|https://www.npmjs.com/package/@openai/codex|github:openai/codex|agent|main"
     "gemini-cli|npm|@google/gemini-cli|org.opencontainers.image.gemini_cli_version|https://www.npmjs.com/package/@google/gemini-cli||agent|main"
+    "grok-cli|npm|@xai-official/grok|org.opencontainers.image.grok_cli_version|https://www.npmjs.com/package/@xai-official/grok||agent|main"
     "ccx|github-release|thevibeworks/ccx|org.opencontainers.image.ccx_version|https://github.com/thevibeworks/ccx|github:thevibeworks/ccx|agent|main"
     "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
     "cctrace|npm|@thevibeworks/cctrace|org.opencontainers.image.cctrace_version|https://www.npmjs.com/package/@thevibeworks/cctrace|github:thevibeworks/cctrace|agent|main"
@@ -134,6 +135,7 @@ get_display_name() {
         claude-code) echo "Claude Code" ;;
         codex) echo "Codex" ;;
         gemini-cli) echo "Gemini CLI" ;;
+        grok-cli) echo "Grok CLI" ;;
         ccx) echo "CCX" ;;
         copilot-api) echo "Copilot API" ;;
         playwright) echo "Playwright" ;;

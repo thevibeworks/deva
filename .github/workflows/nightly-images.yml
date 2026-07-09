@@ -54,6 +54,7 @@ jobs:
       claude_code_version: ${{ steps.versions.outputs.claude_code_version }}
       codex_version: ${{ steps.versions.outputs.codex_version }}
       gemini_cli_version: ${{ steps.versions.outputs.gemini_cli_version }}
+      grok_cli_version: ${{ steps.versions.outputs.grok_cli_version }}
       ccx_version: ${{ steps.versions.outputs.ccx_version }}
       copilot_api_version: ${{ steps.versions.outputs.copilot_api_version }}
     steps:
@@ -80,6 +81,7 @@ jobs:
           - Claude Code: \`${{ steps.versions.outputs.claude_code_version }}\`
           - Codex: \`${{ steps.versions.outputs.codex_version }}\`
           - Gemini CLI: \`${{ steps.versions.outputs.gemini_cli_version }}\`
+          - Grok CLI: \`${{ steps.versions.outputs.grok_cli_version }}\`
           - ccx: \`${{ steps.versions.outputs.ccx_version }}\`
           - Copilot API: \`${{ steps.versions.outputs.copilot_api_version }}\`
           - Stamp: \`${{ steps.versions.outputs.stamp }}\`
@@ -140,6 +142,7 @@ jobs:
             CCTRACE_VERSION=${{ needs.load-version-pins.outputs.cctrace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
+            GROK_CLI_VERSION=${{ needs.resolve-versions.outputs.grok_cli_version }}
             CCX_VERSION=${{ needs.resolve-versions.outputs.ccx_version }}
             COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
 
@@ -193,6 +196,7 @@ jobs:
             CCTRACE_VERSION=${{ needs.load-version-pins.outputs.cctrace_version }}
             CODEX_VERSION=${{ needs.resolve-versions.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.resolve-versions.outputs.gemini_cli_version }}
+            GROK_CLI_VERSION=${{ needs.resolve-versions.outputs.grok_cli_version }}
             CCX_VERSION=${{ needs.resolve-versions.outputs.ccx_version }}
             PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
             RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}

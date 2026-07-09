@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uncommitted work via live ls-remote + merge ancestry, and emits a
   tiered dry-run plan; SKILL.md layers the judgment calls and gates
   execution behind explicit approval (#401)
+- `grok` agent: xAI's official Grok CLI (npm `@xai-official/grok`) as the
+  fourth first-party agent (#403). `deva.sh grok` runs it YOLO-style
+  (`--always-approve`) in the standard container shape. Auth: `oauth`
+  (default, mounts `~/.grok`; in-container first login via
+  `grok login --device-auth`) or `api-key` (`XAI_API_KEY`). In api-key mode
+  the default `auth.json` is masked with a blank overlay because grok
+  prefers a session token over the env key. Grok's npm launcher resolves
+  `~/.grok/bin/grok` (its self-update dir) before the packaged binary, so
+  the image moves the real binary to `~/.local/bin` and drops `~/.grok/bin`
+  — a host-mounted `~/.grok`, possibly holding a macOS binary, can never
+  shadow the container CLI. Pin:
+  `GROK_CLI_VERSION` in `versions.env`, label
+  `org.opencontainers.image.grok_cli_version`, wired through make/CI/
+  nightly/release version plumbing
 
 ## [0.13.0] - 2026-07-07
 

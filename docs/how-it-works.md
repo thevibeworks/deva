@@ -61,13 +61,14 @@ Default per-agent homes live under:
 ~/.config/deva/
 ├── claude/
 ├── codex/
-└── gemini/
+├── gemini/
+└── grok/
 ```
 
 `--config-home` supports two layouts:
 
-- leaf home: `DIR/.claude`, `DIR/.claude.json`, `DIR/.codex`, `DIR/.gemini`
-- deva root: `DIR/claude`, `DIR/codex`, `DIR/gemini`
+- leaf home: `DIR/.claude`, `DIR/.claude.json`, `DIR/.codex`, `DIR/.gemini`, `DIR/.grok`
+- deva root: `DIR/claude`, `DIR/codex`, `DIR/gemini`, `DIR/grok`
 
 `-Q` disables config-home resolution, autolink, and host config mounts entirely.
 
@@ -81,6 +82,7 @@ Examples:
 - Claude API-style auth: env vars such as `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN`
 - Codex default: `.codex/auth.json`
 - Gemini default: `.gemini`
+- Grok default: `.grok/auth.json`
 
 When non-default auth is active, deva mounts a blank overlay over the default credential file path so the agent cannot silently fall back to some unrelated OAuth state. That is the point of the overlay fix.
 

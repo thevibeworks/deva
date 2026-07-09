@@ -13,6 +13,15 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-09] Dev Log: add grok agent (official xAI Grok CLI) #403
+- Why: xAI shipped an official coding-agent CLI (x.ai/cli, npm @xai-official/grok); deva should launch it like claude/codex/gemini. Not to be confused with community superagent-ai/grok-cli (npm grok-dev) — different product, same bin name.
+- What:
+  - agents/grok.sh: oauth default (mount ~/.grok) + api-key (XAI_API_KEY); appends --always-approve (grok's bypassPermissions alias) since the container is the sandbox
+  - deva.sh: canonical entry .grok, autolink ~/.grok, XAI_API_KEY env handling, blank-overlay /home/deva/.grok/auth.json for api-key mode (grok prefers session token over env key — overlay makes the key actually win)
+  - install-agent-tooling.sh pin_grok_platform_binary: grok's npm bin is a trampoline that resolves ~/.grok/bin/grok FIRST, and postinstall parks the ~125MB real binary there (self-update dir); a host mount would shadow it (macOS binary -> exec format error). Move the binary to ~/.local/bin, repoint the npm bin, rm ~/.grok/bin
+  - GROK_CLI_VERSION pin wired through versions.env, Makefile, Dockerfile(+rust), version-pins/upgrade/report/resolve scripts, ci/nightly/release workflows; tests extended (release-utils registry, version-upgrade mock, install-tooling, version-targets)
+- Result: deva.sh grok works with both auth modes (dry-run verified: mount + env + overlay wiring); grok pinned at 0.2.93; make versions-up picks up new upstream releases
+
 # [2026-07-07] Dev Log: switch --trace default from claude-trace to cctrace
 - Why: claude-trace's node --require fetch hook only sees /v1/messages and dies on native Claude binaries; cctrace (thevibeworks/cctrace) MITM-captures everything (OAuth, usage/credits, MCP) and auto-detects npm vs native installs
 - What:

@@ -257,6 +257,9 @@ parse_auth_args() {
         gemini)
             supported_methods=(oauth api-key gemini-api-key vertex compute-adc gemini-app-oauth)
             ;;
+        grok)
+            supported_methods=(oauth api-key)
+            ;;
         *)
             auth_error "Unknown agent: $agent_name"
             ;;
@@ -309,6 +312,7 @@ parse_auth_args() {
             claude) auth_method="claude" ;;
             codex) auth_method="chatgpt" ;;
             gemini) auth_method="oauth" ;;
+            grok) auth_method="oauth" ;;
         esac
     fi
 

@@ -26,6 +26,7 @@ That installs:
 - `agents/claude.sh`
 - `agents/codex.sh`
 - `agents/gemini.sh`
+- `agents/grok.sh`
 - `agents/shared_auth.sh`
 
 It also pulls `ghcr.io/thevibeworks/deva:latest`, with Docker Hub as fallback.
@@ -73,6 +74,7 @@ Same project, same default container shape:
 ```bash
 deva.sh claude
 deva.sh gemini
+deva.sh grok
 ```
 
 That is one of the main reasons this wrapper exists. You do not need a separate pet workflow for every vendor.
@@ -108,6 +110,13 @@ Gemini with API key:
 ```bash
 export GEMINI_API_KEY=...
 deva.sh gemini --auth-with api-key
+```
+
+Grok with xAI API key:
+
+```bash
+export XAI_API_KEY=xai-...
+deva.sh grok --auth-with api-key
 ```
 
 More auth details live in [Authentication Guide](authentication.md).
