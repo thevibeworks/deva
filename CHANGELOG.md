@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `skills/deva-clean`: Claude Code skill for mount-safe workspace disk
-  cleanup. Maps bind mounts from `.deva` + /proc/mounts, git-triages
-  local worktrees for unpushed/uncommitted work, and reports a tiered
-  dry-run plan before any deletion (#401)
+  cleanup. `scripts/triage.sh` (read-only, deterministic) maps bind
+  mounts from /proc/mounts, git-triages local worktrees for unpushed or
+  uncommitted work via live ls-remote + merge ancestry, and emits a
+  tiered dry-run plan; SKILL.md layers the judgment calls and gates
+  execution behind explicit approval (#401)
 
 ## [0.13.0] - 2026-07-07
 
