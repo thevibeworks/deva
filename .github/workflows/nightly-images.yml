@@ -203,9 +203,25 @@ jobs:
             RUST_DEFAULT_TOOLCHAIN=${{ needs.load-version-pins.outputs.rust_default_toolchain }}
             RUST_TARGETS=${{ needs.load-version-pins.outputs.rust_targets }}
 
+  verify:
+    name: Verify Published Manifests
+    needs: [resolve-versions, build-base, build-rust]
+    runs-on: ubuntu-latest
+    steps:
+      # Outcome tripwire: assert the artifacts exist, not that the build
+      # steps exited 0. A green run with an unpullable tag is a lie.
+      - name: Assert all nightly tags resolve
+        run: |
+          set -euo pipefail
+          stamp="${{ needs.resolve-versions.outputs.stamp }}"
+          for tag in nightly "nightly-${stamp}" nightly-rust "nightly-${stamp}-rust"; do
+            docker manifest inspect "ghcr.io/thevibeworks/deva:${tag}" >/dev/null
+            echo "ok: ${tag}"
+          done
+
   summary:
     name: Nightly Summary
-    needs: [resolve-versions, build-base, build-rust]
+    needs: [resolve-versions, verify]
     runs-on: ubuntu-latest
     steps:
       - name: Publish summary

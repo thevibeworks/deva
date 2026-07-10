@@ -13,6 +13,16 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-10] Dev Log: repo surface burnish #409
+- Why: product ships four agents but half the storefront said three; agents visiting the repo had no llms.txt; nightly 2026-07-09 failed on a transient ubuntu mirror sync and partially published (base pushed, rust did not — nightly/nightly-rust tags diverged a day)
+- What:
+  - drift kill: docs/index.md tagline + agent list, mkdocs site_description, deva.sh --help header now say four agents
+  - llms.txt at repo root per the agent-surface pattern: blockquote identity, distribution forms, install, curated docs entry points; README grew a one-line agent pointer
+  - Dockerfile + Dockerfile.rust: apt Acquire::Retries=3 (the exact 07-09 failure mode); nightly-images.yml grew a verify job that docker-manifest-inspects all four published tags — assert the artifact, not the exit code
+  - repo settings (not in this PR): description/topics/homepage updated for grok + discovery keywords
+- Result: no three-agent phrasing left outside history; an agent can recommend + install deva from one fetch of llms.txt; nightly flakes retry and a push that produces no pullable manifest goes red
+- Deferred: 9 stale remote branches all carry unique commits — need human triage; v0.14.0 release is ripe (grok + proxy work sitting in Unreleased)
+
 # [2026-07-09] Dev Log: add grok agent (official xAI Grok CLI) #403
 - Why: xAI shipped an official coding-agent CLI (x.ai/cli, npm @xai-official/grok); deva should launch it like claude/codex/gemini. Not to be confused with community superagent-ai/grok-cli (npm grok-dev) — different product, same bin name.
 - What:

@@ -1,5 +1,5 @@
 site_name: deva.sh docs
-site_description: Docker-based multi-agent launcher for Codex, Claude, and Gemini
+site_description: Docker-first launcher for Claude Code, Codex, Gemini, and Grok — the container is the sandbox
 site_url: https://docs.deva.sh
 repo_url: https://github.com/thevibeworks/deva
 repo_name: thevibeworks/deva

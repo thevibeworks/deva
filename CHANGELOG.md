@@ -32,6 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GROK_CLI_VERSION` in `versions.env`, label
   `org.opencontainers.image.grok_cli_version`, wired through make/CI/
   nightly/release version plumbing
+- Proxy-aware builds and version resolution (#407): host
+  `HTTP(S)_PROXY` forwarded to `docker build` via BuildKit predefined
+  ARGs with localhost (and authenticated `user:pass@localhost`) proxies
+  rewritten to `host.docker.internal` plus an explicit
+  `--add-host host-gateway` mapping for native Linux Engine; npm version
+  resolution goes straight to registry.npmjs.org instead of honoring
+  `.npmrc` mirror overrides, degrading to warn-and-fallback on registry
+  outages; proxy credentials are redacted from all build/version logs
+- `llms.txt` (#409): agent-legible repo front door — what deva is, the
+  four agents, install, and curated docs entry points in one fetch
+
+### Fixed
+- Three-agent drift (#409): docs site front page, mkdocs description,
+  and `deva.sh --help` all said Codex/Claude/Gemini after Grok shipped
+- Nightly image builds retry apt fetches (`Acquire::Retries 3`) instead
+  of dying on transient mirror syncs, and the workflow now asserts all
+  four published nightly manifests actually resolve — a green run with
+  an unpullable tag is a lie (#409)
 
 ## [0.13.0] - 2026-07-07
 
