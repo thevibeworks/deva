@@ -100,7 +100,7 @@ _step() {
 
 usage() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok)
 
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]

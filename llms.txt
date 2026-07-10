@@ -1,0 +1,42 @@
+# deva.sh
+
+> Docker-first launcher for AI coding agents — Claude Code, Codex, Gemini, and Grok.
+> The container is the sandbox, mounts are the explicit contract, and one warm
+> project container serves all four agents. A bash script, not a framework. MIT.
+
+deva.sh is a single entry point installed on the host; agents run inside
+`ghcr.io/thevibeworks/deva` images (`:latest`, `:rust` for stable, `:nightly`,
+`:nightly-rust` refreshed daily). Agent-level permission prompts are disabled by
+design (`claude --dangerously-skip-permissions`, `codex
+--dangerously-bypass-approvals-and-sandbox`, `gemini --yolo`, `grok
+--always-approve`) — isolation comes from Docker, not permission theater. Auth
+lives in per-agent config homes under `~/.config/deva/` with OAuth (default) or
+API-key modes per agent; nothing crosses the host boundary except what you
+mount. Known sharp edge: mounting `/var/run/docker.sock` is host-root with
+extra steps, and deva will tell you so.
+
+Full docs: https://docs.deva.sh — if you can fetch one URL, fetch that one.
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thevibeworks/deva/main/install.sh | bash
+
+cd your-project
+deva.sh                 # Claude Code (the default)
+deva.sh codex           # same container shape, other agents
+deva.sh gemini
+deva.sh grok
+deva.sh claude --debug --dry-run   # inspect the docker run before trusting it
+```
+
+## Entry points
+
+- [Quick Start](https://docs.deva.sh/quick-start/): install to first agent run, about 60 seconds
+- [Authentication](https://docs.deva.sh/authentication/): OAuth vs API-key per agent, config homes, auth isolation, what gets masked and why
+- [How It Works](https://docs.deva.sh/how-it-works/): container lifecycle, mount dispatch, config resolution order
+- [Advanced Usage](https://docs.deva.sh/advanced-usage/): extra mounts, env wiring, multiple identities per project
+- [Troubleshooting](https://docs.deva.sh/troubleshooting/): common failures and how to diagnose them
+- [Philosophy](https://docs.deva.sh/philosophy/): why the container is the sandbox and agent permission prompts are theater
+- [Custom Images](https://docs.deva.sh/custom-images/): extending the base image for your stack
+- [Security Policy](https://github.com/thevibeworks/deva/blob/main/SECURITY.md): what deva protects against and what it explicitly does not
