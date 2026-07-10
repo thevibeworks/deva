@@ -222,17 +222,18 @@ jobs:
       - name: Assert all nightly tags resolve
         run: |
           set -euo pipefail
+          image="${REGISTRY}/${IMAGE_NAME}"
           stamp="${{ needs.resolve-versions.outputs.stamp }}"
           for tag in nightly "nightly-${stamp}" nightly-rust "nightly-${stamp}-rust"; do
             for attempt in 1 2 3; do
-              if docker manifest inspect "ghcr.io/thevibeworks/deva:${tag}" >/dev/null; then
+              if docker manifest inspect "${image}:${tag}" >/dev/null; then
                 echo "ok: ${tag}"
                 continue 2
               fi
               echo "attempt ${attempt} failed for ${tag}; retrying in 10s" >&2
               sleep 10
             done
-            echo "error: ghcr.io/thevibeworks/deva:${tag} does not resolve after push" >&2
+            echo "error: ${image}:${tag} does not resolve after push" >&2
             exit 1
           done
 
