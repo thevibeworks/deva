@@ -129,7 +129,7 @@ assert_eq "caller 'image' not clobbered"  "caller-image" "${leak_after##*|}"
 # ───── get_tools_by_group ─────
 section "get_tools_by_group"
 agent_tools="$(get_tools_by_group agent | sort | tr '\n' ' ' | sed 's/ $//')"
-expected_agent="cctrace ccx claude-code codex copilot-api gemini-cli"
+expected_agent="cctrace ccx claude-code codex copilot-api gemini-cli grok-cli"
 assert_eq "group=agent" "$expected_agent" "$agent_tools"
 
 browser_tools="$(get_tools_by_group browser | sort | tr '\n' ' ' | sed 's/ $//')"
@@ -144,7 +144,7 @@ assert_eq "group=does-not-exist" "" "$nonexistent_group"
 # ───── get_tools_by_image ─────
 section "get_tools_by_image"
 main_tools="$(get_tools_by_image main | sort | tr '\n' ' ' | sed 's/ $//')"
-expected_main="cctrace ccx claude-code codex copilot-api gemini-cli"
+expected_main="cctrace ccx claude-code codex copilot-api gemini-cli grok-cli"
 assert_eq "image=main" "$expected_main" "$main_tools"
 
 rust_tools="$(get_tools_by_image rust | sort | tr '\n' ' ' | sed 's/ $//')"
@@ -156,8 +156,8 @@ assert_eq "image=base (empty until Step 3)" "" "$base_tools"
 # ───── filter_tools: scope resolution ─────
 section "filter_tools: default (no scope)"
 default_all="$(unset GROUP TOOL IMAGE; filter_tools | sort | tr '\n' ' ' | sed 's/ $//')"
-expected_all="cctrace ccx claude-code codex copilot-api gemini-cli playwright"
-assert_eq "default returns all 7" "$expected_all" "$default_all"
+expected_all="cctrace ccx claude-code codex copilot-api gemini-cli grok-cli playwright"
+assert_eq "default returns all 8" "$expected_all" "$default_all"
 
 section "filter_tools: TOOL= scope"
 single="$(TOOL=claude-code GROUP= IMAGE= filter_tools)"

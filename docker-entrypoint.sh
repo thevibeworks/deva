@@ -29,6 +29,17 @@ get_codex_version() {
     echo "$version"
 }
 
+get_grok_version() {
+    local version=""
+    for path in "$DEVA_HOME/.local/bin/grok" "$(command -v grok 2>/dev/null)"; do
+        if [ -x "$path" ]; then
+            version=$($path --version 2>/dev/null | head -1)
+            break
+        fi
+    done
+    echo "$version"
+}
+
 show_environment_info() {
     local header="[deva]"
     case "$DEVA_AGENT" in
@@ -44,6 +55,13 @@ show_environment_info() {
             header+=" Starting Codex ($CODEX_VERSION)"
         else
             header+=" Codex CLI (version detection failed)"
+        fi
+        ;;
+    grok)
+        if [ -n "$GROK_VERSION" ]; then
+            header+=" Starting Grok ($GROK_VERSION)"
+        else
+            header+=" Grok CLI (version detection failed)"
         fi
         ;;
     *)
@@ -86,6 +104,28 @@ show_environment_info() {
                 ls -la "$DEVA_HOME/.claude" | head -5
             else
                 echo "warning: Claude auth directory not found in $DEVA_HOME/.claude"
+            fi
+        elif [ "$DEVA_AGENT" = "grok" ]; then
+            local grok_path=""
+            for path in "$DEVA_HOME/.local/bin/grok" "$(command -v grok 2>/dev/null)"; do
+                if [ -x "$path" ]; then
+                    grok_path="$path"
+                    break
+                fi
+            done
+            if [ -n "$grok_path" ]; then
+                echo "Grok CLI: $($grok_path --version 2>/dev/null || echo 'Found but version failed')"
+                echo "Grok location: $grok_path"
+            else
+                echo "Grok CLI not found in PATH"
+            fi
+
+            if [ -d "$DEVA_HOME/.grok" ]; then
+                echo "Grok auth directory mounted"
+                # shellcheck disable=SC2012
+                ls -la "$DEVA_HOME/.grok" | head -5
+            else
+                echo "warning: Grok auth directory not found in $DEVA_HOME/.grok"
             fi
         else
             local codex_path=""
@@ -306,6 +346,12 @@ ensure_agent_binaries() {
             exit 1
         fi
         ;;
+    grok)
+        if ! command -v grok >/dev/null 2>&1; then
+            echo "error: Grok CLI not found in container"
+            exit 1
+        fi
+        ;;
     esac
 }
 
@@ -316,6 +362,7 @@ main() {
 
     CLAUDE_VERSION="$(get_claude_version)"
     CODEX_VERSION="$(get_codex_version)"
+    GROK_VERSION="$(get_grok_version)"
 
     if [ -n "$ANTHROPIC_BASE_URL" ]; then
         case "$ANTHROPIC_BASE_URL" in

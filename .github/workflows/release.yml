@@ -50,6 +50,7 @@ jobs:
       cctrace_version: ${{ steps.pins.outputs.cctrace_version }}
       codex_version: ${{ steps.pins.outputs.codex_version }}
       gemini_cli_version: ${{ steps.pins.outputs.gemini_cli_version }}
+      grok_cli_version: ${{ steps.pins.outputs.grok_cli_version }}
       ccx_version: ${{ steps.pins.outputs.ccx_version }}
       copilot_api_version: ${{ steps.pins.outputs.copilot_api_version }}
       playwright_version: ${{ steps.pins.outputs.playwright_version }}
@@ -84,6 +85,7 @@ jobs:
           - cctrace: \`${{ steps.pins.outputs.cctrace_version }}\`
           - Codex: \`${{ steps.pins.outputs.codex_version }}\`
           - Gemini CLI: \`${{ steps.pins.outputs.gemini_cli_version }}\`
+          - Grok CLI: \`${{ steps.pins.outputs.grok_cli_version }}\`
           - ccx: \`${{ steps.pins.outputs.ccx_version }}\`
           - Copilot API: \`${{ steps.pins.outputs.copilot_api_version }}\`
           - Playwright: \`${{ steps.pins.outputs.playwright_version }}\`
@@ -147,6 +149,7 @@ jobs:
             CCTRACE_VERSION=${{ needs.load-version-pins.outputs.cctrace_version }}
             CODEX_VERSION=${{ needs.load-version-pins.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.load-version-pins.outputs.gemini_cli_version }}
+            GROK_CLI_VERSION=${{ needs.load-version-pins.outputs.grok_cli_version }}
             CCX_VERSION=${{ needs.load-version-pins.outputs.ccx_version }}
             COPILOT_API_VERSION=${{ needs.load-version-pins.outputs.copilot_api_version }}
 
@@ -202,6 +205,7 @@ jobs:
             CCTRACE_VERSION=${{ needs.load-version-pins.outputs.cctrace_version }}
             CODEX_VERSION=${{ needs.load-version-pins.outputs.codex_version }}
             GEMINI_CLI_VERSION=${{ needs.load-version-pins.outputs.gemini_cli_version }}
+            GROK_CLI_VERSION=${{ needs.load-version-pins.outputs.grok_cli_version }}
             CCX_VERSION=${{ needs.load-version-pins.outputs.ccx_version }}
             PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
             RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}

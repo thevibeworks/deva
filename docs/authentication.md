@@ -20,6 +20,7 @@ This guide documents what `deva.sh` actually supports, what env vars it reads, a
 | Claude | `claude` | `api-key`, `oat`, `bedrock`, `vertex`, `copilot`, credentials file | `.claude`, `.claude.json`, `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH_TOKEN`, `AWS_*`, gcloud, `GH_TOKEN` |
 | Codex | `chatgpt` | `api-key`, `copilot`, credentials file | `.codex/auth.json`, `OPENAI_API_KEY`, `GH_TOKEN` |
 | Gemini | `oauth` | `api-key`, `gemini-api-key`, `vertex`, `compute-adc`, `gemini-app-oauth`, credentials file | `.gemini`, `GEMINI_API_KEY`, gcloud, service-account JSON |
+| Grok | `oauth` | `api-key` | `.grok/auth.json`, `XAI_API_KEY` |
 
 ## Claude
 
@@ -267,6 +268,62 @@ Example:
 deva.sh gemini --auth-with ~/keys/gcp-service-account.json
 ```
 
+## Grok
+
+### Default: `--auth-with oauth`
+
+Uses:
+
+- `/home/deva/.grok`
+
+Grok stores its session token in `.grok/auth.json`. First login opens a
+browser, which does not exist inside the container. Two ways in:
+
+- authenticate on the host once; deva auto-links `~/.grok` and the mount
+  carries `auth.json` into the container
+- run `grok login --device-auth` inside the container: it prints a URL and
+  code you complete on any device
+
+### `--auth-with api-key`
+
+Requires:
+
+- `XAI_API_KEY` (from [console.x.ai](https://console.x.ai))
+
+Grok's credential priority puts mounted config above the environment:
+`model.api_key` > `model.env_key` > session token > `XAI_API_KEY`. So in
+this mode deva mounts no `~/.grok` at all — the exported key is the only
+credential in the container, and it is what gets billed. Session state
+lives container-local and does not persist across runs in this mode.
+
+If you force a `~/.grok` mount with `-v` anyway, deva still blank-overlays
+the default `auth.json`, but per-model keys in a mounted `config.toml`
+outrank `XAI_API_KEY` — don't mix the two.
+
+Example:
+
+```bash
+export XAI_API_KEY=...
+deva.sh grok --auth-with api-key
+```
+
+### One more grok-specific wire
+
+Grok keeps its real binary in `~/.grok/bin/` (its self-update dir) and the
+npm launcher resolves that path first. Inside the image, deva moves the
+binary to `~/.local/bin/grok` and removes `~/.grok/bin`, so a host-mounted
+`~/.grok` (which may contain a macOS binary) never shadows it.
+
+The reverse direction is guarded too: grok's self-updater writes into
+`~/.grok/bin/` and `~/.grok/downloads/`. A mounted `config.toml` without
+the npm installer marker makes the updater treat the install as
+self-managed, so `grok update` would drop Linux binaries into the host
+mount — breaking a macOS host CLI via its npm launcher. Whenever a host
+dir is mounted at `/home/deva/.grok`, deva overlays those two paths with
+container-local tmpfs: in-container `grok update` works, its writes die
+with the container, and the host install stays intact. The image pin
+(`GROK_CLI_VERSION`) is the only version that matters.
+
 ## Config Homes And Auth Isolation
 
 Default homes live under:
@@ -275,6 +332,7 @@ Default homes live under:
 ~/.config/deva/claude
 ~/.config/deva/codex
 ~/.config/deva/gemini
+~/.config/deva/grok
 ```
 
 Use `--config-home` when you want a separate identity:

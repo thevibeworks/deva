@@ -13,6 +13,17 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-09] Dev Log: add grok agent (official xAI Grok CLI) #403
+- Why: xAI shipped an official coding-agent CLI (x.ai/cli, npm @xai-official/grok); deva should launch it like claude/codex/gemini. Not to be confused with community superagent-ai/grok-cli (npm grok-dev) — different product, same bin name.
+- What:
+  - agents/grok.sh: oauth default (mount ~/.grok) + api-key (XAI_API_KEY); appends --always-approve (grok's bypassPermissions alias) since the container is the sandbox
+  - deva.sh: canonical entry .grok, autolink ~/.grok, XAI_API_KEY env handling. api-key mode mounts NO ~/.grok (grok credential priority: model.api_key > model.env_key > session token > XAI_API_KEY — anything a mounted config carries can outrank the exported key; per #403 spec and Codex review). Blank auth.json overlay kept as defense for explicit -v mounts
+  - install-agent-tooling.sh pin_grok_platform_binary: grok's npm bin is a trampoline that resolves ~/.grok/bin/grok FIRST, and postinstall parks the ~125MB real binary there (self-update dir); a host mount would shadow it (macOS binary -> exec format error). Move the binary to ~/.local/bin, repoint the npm bin, rm ~/.grok/bin
+  - deva.sh append_grok_update_guard: the reverse hole, found in review and reproduced against the real 0.2.93 — a mounted config.toml without the postinstall's `[cli] installer = "npm"` marker flips the updater to installer=internal, and `grok update` re-creates ~/.grok/bin + ~/.grok/downloads ON THE HOST MOUNT (Linux binary shadows a macOS host CLI via the host trampoline). Fix: tmpfs over both dirs whenever a host dir lands at /home/deva/.grok; updater writes die with the container
+  - docker-entrypoint.sh: grok version header, verbose diagnostics, ensure_agent_binaries
+  - GROK_CLI_VERSION pin wired through versions.env, Makefile, Dockerfile(+rust), version-pins/upgrade/report/resolve scripts, ci/nightly/release workflows; tests extended (release-utils registry, version-upgrade mock, install-tooling, version-targets, mount-shape grok + update-guard + api-key no-mount assertions)
+- Result: deva.sh grok works with both auth modes (dry-run + mount-shape verified); grok pinned at 0.2.93; make versions-up picks up new upstream releases; host ~/.grok cannot be poisoned by in-container updates (tmpfs guard verified live: uid/gid/mode/size + noexec)
+
 # [2026-07-07] Dev Log: switch --trace default from claude-trace to cctrace
 - Why: claude-trace's node --require fetch hook only sees /v1/messages and dies on native Claude binaries; cctrace (thevibeworks/cctrace) MITM-captures everything (OAuth, usage/credits, MCP) and auto-detects npm vs native installs
 - What:

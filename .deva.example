@@ -61,10 +61,10 @@ EPHEMERAL=false
 # Hybrid Agent Setup:
 #
 # Hybrid is the DEFAULT. deva walks every populated subdir under
-# ~/.config/deva/ (claude, codex, gemini) and mounts each agent's
+# ~/.config/deva/ (claude, codex, gemini, grok) and mounts each agent's
 # canonical entries into the container. Populated = you either
 # hand-created the subdir or autolink symlinked it from legacy
-# ~/.claude, ~/.codex, ~/.gemini on first run.
+# ~/.claude, ~/.codex, ~/.gemini, ~/.grok on first run.
 #
 # No .deva entries required for the common case. To opt OUT of
 # hybrid for a single invocation, pass --config-home DIR to

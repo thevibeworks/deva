@@ -47,7 +47,8 @@ Deva-root layout:
 ~/auth-roots/team-a/
 ├── claude/
 ├── codex/
-└── gemini/
+├── gemini/
+└── grok/
 ```
 
 ```bash

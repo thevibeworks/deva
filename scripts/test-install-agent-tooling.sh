@@ -34,17 +34,28 @@ config)
     ;;
 install)
     mkdir -p "$DEVA_HOME/.npm-global/bin"
-    for bin in claude codex gemini; do
+    for bin in claude codex gemini grok; do
         cat >"$DEVA_HOME/.npm-global/bin/$bin" <<'BIN'
 #!/usr/bin/env bash
 case "$(basename "$0")" in
   claude) echo "__CLAUDE_CODE_VERSION__ (Claude Code)" ;;
   codex) echo "codex-cli __CODEX_VERSION__" ;;
   gemini) echo "__GEMINI_CLI_VERSION__" ;;
+  grok) echo "grok __GROK_CLI_VERSION__" ;;
 esac
 BIN
         chmod +x "$DEVA_HOME/.npm-global/bin/$bin"
     done
+    # grok postinstall layout: real binary lives in ~/.grok/bin with a
+    # versioned name + canonical symlink, consumed by pin_grok_platform_binary
+    grok_bin_dir="$DEVA_HOME/.grok/bin"
+    mkdir -p "$grok_bin_dir"
+    cat >"$grok_bin_dir/grok-__GROK_CLI_VERSION__" <<'BIN'
+#!/usr/bin/env bash
+echo "grok __GROK_CLI_VERSION__"
+BIN
+    chmod +x "$grok_bin_dir/grok-__GROK_CLI_VERSION__"
+    ln -sf "grok-__GROK_CLI_VERSION__" "$grok_bin_dir/grok"
     ;;
 pack)
     spec="${1:?pack spec required}"
@@ -72,6 +83,7 @@ sed -i \
     -e "s#__CLAUDE_CODE_VERSION__#$CLAUDE_CODE_VERSION#g" \
     -e "s#__CODEX_VERSION__#$CODEX_VERSION#g" \
     -e "s#__GEMINI_CLI_VERSION__#$GEMINI_CLI_VERSION#g" \
+    -e "s#__GROK_CLI_VERSION__#$GROK_CLI_VERSION#g" \
     "$fake_bin/npm"
 
 cat >"$fake_bin/curl" <<'EOF'
@@ -171,6 +183,7 @@ mkdir -p "$tmp_root/deny"
         CCTRACE_VERSION="$CCTRACE_VERSION" \
         CODEX_VERSION="$CODEX_VERSION" \
         GEMINI_CLI_VERSION="$GEMINI_CLI_VERSION" \
+        GROK_CLI_VERSION="$GROK_CLI_VERSION" \
         CCX_VERSION="$CCX_VERSION" \
         DEVA_SKIP_NPM_REGISTRY_CHECK=1 \
         bash "$REPO_ROOT/scripts/install-agent-tooling.sh" 2>&1
@@ -178,6 +191,12 @@ mkdir -p "$tmp_root/deny"
 
     grep -F "Current working directory is not accessible; switching to $fake_home" <<<"$output" >/dev/null
     grep -F "Installing npm agent tooling" <<<"$output" >/dev/null
+    # pin_grok_platform_binary: real binary moved to .local/bin, global bin
+    # repointed at it, and the ~/.grok/bin self-update dir removed.
+    test -x "$fake_home/.local/bin/grok"
+    test -L "$fake_home/.npm-global/bin/grok"
+    [ "$(readlink "$fake_home/.npm-global/bin/grok")" = "$fake_home/.local/bin/grok" ]
+    test ! -e "$fake_home/.grok/bin"
     grep -F "Installing ccx pinned to $CCX_VERSION" <<<"$output" >/dev/null
     grep -F "falling back to go install" <<<"$output" >/dev/null
     grep -F "ccx installed" <<<"$output" >/dev/null

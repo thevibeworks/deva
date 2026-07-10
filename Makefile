@@ -34,6 +34,7 @@ CLAUDE_CODE_VERSION ?= 2.1.143
 CCTRACE_VERSION ?= 0.4.0
 CODEX_VERSION ?= 0.131.0
 GEMINI_CLI_VERSION ?= 0.42.0
+GROK_CLI_VERSION ?= 0.2.93
 CCX_VERSION ?= v0.1.4
 COPILOT_API_VERSION ?= 0ea08febdd7e3e055b03dd298bf57e669500b5c1
 PLAYWRIGHT_VERSION ?= 1.60.0
@@ -59,6 +60,7 @@ AGENT_BUILD_ARGS := \
 	--build-arg CCTRACE_VERSION=$(CCTRACE_VERSION) \
 	--build-arg CODEX_VERSION=$(CODEX_VERSION) \
 	--build-arg GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION) \
+	--build-arg GROK_CLI_VERSION=$(GROK_CLI_VERSION) \
 	--build-arg CCX_VERSION=$(CCX_VERSION)
 
 MAIN_BUILD_ARGS := $(TOOLCHAIN_BUILD_ARGS) $(AGENT_BUILD_ARGS) \
@@ -81,6 +83,7 @@ VERSION_QUERY_OVERRIDES := \
 	$(if $(filter command line environment environment\ override override,$(origin CCTRACE_VERSION)),CCTRACE_VERSION=$(CCTRACE_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin CODEX_VERSION)),CODEX_VERSION=$(CODEX_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin GEMINI_CLI_VERSION)),GEMINI_CLI_VERSION=$(GEMINI_CLI_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin GROK_CLI_VERSION)),GROK_CLI_VERSION=$(GROK_CLI_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin CCX_VERSION)),CCX_VERSION=$(CCX_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin COPILOT_API_VERSION)),COPILOT_API_VERSION=$(COPILOT_API_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin PLAYWRIGHT_VERSION)),PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION)) \
@@ -123,13 +126,15 @@ build-main: build-network-check
 	@prev_claude=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.claude_code_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 prev_codex=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.codex_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 prev_gemini=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.gemini_cli_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
+	 prev_grok=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.grok_cli_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 fmt() { v="$$1"; if [ -z "$$v" ] || [ "$$v" = "<no value>" ]; then echo "-"; else case "$$v" in v*) echo "$$v";; *) echo "v$$v";; esac; fi; }; \
-	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); curG=$$(fmt "$$prev_gemini"); \
-	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); tgtG=$$(fmt "$(GEMINI_CLI_VERSION)"); \
-		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ] && [ "$$curG" = "$$tgtG" ]; then \
+	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); curG=$$(fmt "$$prev_gemini"); curK=$$(fmt "$$prev_grok"); \
+	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); tgtG=$$(fmt "$(GEMINI_CLI_VERSION)"); tgtK=$$(fmt "$(GROK_CLI_VERSION)"); \
+		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ] && [ "$$curG" = "$$tgtG" ] && [ "$$curK" = "$$tgtK" ]; then \
 		   echo "Claude: $$tgtC (no change)"; \
 		   echo "Codex:  $$tgtX (no change)"; \
 		   echo "Gemini: $$tgtG (no change)"; \
+		   echo "Grok:   $$tgtK (no change)"; \
 		   echo "Already up-to-date"; \
 		 else \
 		   if [ "$$curC" = "$$tgtC" ]; then \
@@ -146,6 +151,11 @@ build-main: build-network-check
 		     echo "Gemini: $$tgtG (no change)"; \
 		   else \
 		     echo "Gemini: $$curG -> $$tgtG"; \
+		   fi; \
+		   if [ "$$curK" = "$$tgtK" ]; then \
+		     echo "Grok:   $$tgtK (no change)"; \
+		   else \
+		     echo "Grok:   $$curK -> $$tgtK"; \
 		   fi; \
 		 fi
 	@echo "Hint: override via GO_VERSION=... CLAUDE_CODE_VERSION=... or run 'make versions-pin'"
@@ -403,6 +413,7 @@ help:
 	@echo "  CCTRACE_VERSION      cctrace version (default: $(CCTRACE_VERSION))"
 	@echo "  CODEX_VERSION        Codex CLI version (default: $(CODEX_VERSION))"
 	@echo "  GEMINI_CLI_VERSION   Gemini CLI version (default: $(GEMINI_CLI_VERSION))"
+	@echo "  GROK_CLI_VERSION     Grok CLI version (default: $(GROK_CLI_VERSION))"
 	@echo "  CCX_VERSION    Atlas CLI version (default: $(CCX_VERSION))"
 	@echo "  PLAYWRIGHT_VERSION   Playwright version (default: $(PLAYWRIGHT_VERSION))"
 	@echo "  RUST_TOOLCHAINS      Rust toolchains to install (default: $(RUST_TOOLCHAINS))"

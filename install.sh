@@ -10,6 +10,7 @@ agent_files=(
     "claude.sh"
     "codex.sh"
     "gemini.sh"
+    "grok.sh"
     "shared_auth.sh"
 )
 
@@ -138,6 +139,7 @@ echo "  - $INSTALL_DIR/claude-yolo"
 echo "  - $INSTALL_DIR/agents/claude.sh"
 echo "  - $INSTALL_DIR/agents/codex.sh"
 echo "  - $INSTALL_DIR/agents/gemini.sh"
+echo "  - $INSTALL_DIR/agents/grok.sh"
 echo "  - $INSTALL_DIR/agents/shared_auth.sh"
 echo ""
 echo "Quick start:"
