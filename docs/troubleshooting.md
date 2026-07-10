@@ -84,7 +84,7 @@ If the dry-run shape is correct but the agent still cannot authenticate, the wra
 
 Symptom:
 
-- first run warns that `.claude`, `.codex`, or `.gemini` is empty
+- first run warns that `.claude`, `.codex`, `.gemini`, or `.grok` is empty
 
 Meaning:
 
@@ -92,6 +92,22 @@ Meaning:
 - you now need to authenticate into that isolated home
 
 That is not an error. That is exactly what isolated config homes are for.
+
+## Grok Wants A Browser The Container Does Not Have
+
+Symptom:
+
+- first `deva.sh grok` run tries to open a browser for OAuth and cannot
+
+Fix, either one:
+
+- run `grok login --device-auth` inside the session — it prints a URL and
+  a code you complete on any device
+- authenticate once on the host; deva's autolink carries
+  `~/.grok/auth.json` into the container
+
+Details, including api-key mode and why in-container `grok update`
+cannot touch your host install: [Authentication](authentication.md).
 
 ## Proxy Weirdness
 

@@ -114,7 +114,7 @@ Persistent is default:
 
 - one default container shape per project
 - reused across runs
-- same workspace can run Claude, Codex, and Gemini in the same container when mounts, config, and auth line up
+- same workspace can run Claude, Codex, Gemini, and Grok in the same container when mounts, config, and auth line up
 - different volumes, explicit config homes, or auth modes create separate persistent containers
 
 Ephemeral with `--rm`:
