@@ -188,7 +188,10 @@ fetch_latest_version() {
 
     case $type in
         npm)
-            _npm_registry_latest "$source"
+            # Soft-fail like the gh arms below: a transient registry error
+            # must reach load_versions' warn-and-fallback path, not abort
+            # the whole run under set -e.
+            _npm_registry_latest "$source" || echo ""
             ;;
         github-release)
             gh api "repos/$source/releases/latest" --jq '.tag_name' 2>/dev/null || echo ""

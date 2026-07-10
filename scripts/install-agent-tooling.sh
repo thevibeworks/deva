@@ -119,10 +119,12 @@ download_to() {
 }
 
 log_proxy_config() {
+    # Proxy userinfo is credential material and this output lands in build
+    # logs — redact user:pass@ before printing.
     local has_proxy=0
     for var in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy; do
         if [ -n "${!var:-}" ]; then
-            log "  $var=${!var}"
+            log "  $var=$(printf '%s' "${!var}" | sed -E 's#://[^@/]*@#://***@#')"
             has_proxy=1
         fi
     done

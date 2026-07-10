@@ -48,8 +48,9 @@ SKIP_BUILD_NETWORK_CHECK ?= 0
 # available in all stages without Dockerfile ARG declarations, excluded
 # from cache key so proxy changes don't bust layer cache).
 # Rewrite localhost proxy addresses: 127.0.0.1/localhost on the host is the
-# container's own loopback during build — host.docker.internal reaches the host.
-_dproxy = $(subst ://localhost,://host.docker.internal,$(subst ://127.0.0.1,://host.docker.internal,$1))
+# container's own loopback during build — host.docker.internal reaches the
+# host. The @-patterns catch authenticated proxies (user:pass@127.0.0.1).
+_dproxy = $(subst @localhost,@host.docker.internal,$(subst @127.0.0.1,@host.docker.internal,$(subst ://localhost,://host.docker.internal,$(subst ://127.0.0.1,://host.docker.internal,$1))))
 PROXY_BUILD_ARGS := \
 	$(if $(HTTP_PROXY),--build-arg HTTP_PROXY=$(call _dproxy,$(HTTP_PROXY))) \
 	$(if $(HTTPS_PROXY),--build-arg HTTPS_PROXY=$(call _dproxy,$(HTTPS_PROXY))) \
@@ -57,6 +58,12 @@ PROXY_BUILD_ARGS := \
 	$(if $(https_proxy),--build-arg https_proxy=$(call _dproxy,$(https_proxy))) \
 	$(if $(NO_PROXY),--build-arg NO_PROXY=$(NO_PROXY)) \
 	$(if $(no_proxy),--build-arg no_proxy=$(no_proxy))
+
+# host.docker.internal resolves implicitly on Docker Desktop/OrbStack only;
+# native Linux Engine needs the explicit host-gateway mapping during build.
+ifneq ($(strip $(HTTP_PROXY)$(HTTPS_PROXY)$(http_proxy)$(https_proxy)),)
+PROXY_BUILD_ARGS += --add-host host.docker.internal:host-gateway
+endif
 
 DOCKER_BUILD_FLAGS = $(PROXY_BUILD_ARGS) $(DOCKER_BUILD_EXTRA_ARGS)
 

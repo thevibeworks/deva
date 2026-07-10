@@ -43,57 +43,13 @@ build)
 esac
 EOF
 
+# npm must never be called: version resolution goes straight to the
+# registry via curl. Tripwire catches regressions back to `npm view`
+# (which honors .npmrc registry overrides and can serve stale metadata).
 cat >"$FAKE_BIN/npm" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "${1:-}" != "view" ]]; then
-    echo "unexpected npm invocation: $*" >&2
-    exit 1
-fi
-
-case "${2:-}" in
-@anthropic-ai/claude-code)
-    echo "2.1.87"
-    ;;
-@anthropic-ai/claude-code@2.1.87)
-    echo '{"2.1.87":"2026-03-29T01:40:00Z"}'
-    ;;
-@thevibeworks/cctrace)
-    echo "0.4.0"
-    ;;
-@thevibeworks/cctrace@0.4.0)
-    echo '{"0.4.0":"2026-03-29T01:40:00Z"}'
-    ;;
-@openai/codex)
-    echo "0.117.0"
-    ;;
-@openai/codex@0.117.0)
-    echo '{"0.117.0":"2026-03-26T22:28:00Z"}'
-    ;;
-@google/gemini-cli)
-    echo "0.35.3"
-    ;;
-@google/gemini-cli@0.35.3)
-    echo '{"0.35.3":"2026-03-28T03:17:00Z"}'
-    ;;
-@xai-official/grok)
-    echo "0.2.93"
-    ;;
-@xai-official/grok@0.2.93)
-    echo '{"0.2.93":"2026-07-01T00:00:00Z"}'
-    ;;
-playwright)
-    echo "1.60.0"
-    ;;
-playwright@1.60.0)
-    echo '{"1.60.0":"2026-05-14T08:00:00Z"}'
-    ;;
-*)
-    echo "unexpected npm view args: $*" >&2
-    exit 1
-    ;;
-esac
+echo "unexpected npm invocation: $*" >&2
+exit 1
 EOF
 
 cat >"$FAKE_BIN/gh" <<'EOF'
@@ -134,10 +90,31 @@ repos/microsoft/playwright/releases)
 esac
 EOF
 
+# Realistic registry fixtures: dist-tags for fetch_latest_version,
+# packument (.time) for fetch_version_date. Unknown URLs are a hard error
+# so new fetch paths cannot silently no-op like the old empty-string stub.
 cat >"$FAKE_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf ''
+url="${!#}"
+case "$url" in
+*/-/package/@anthropic-ai/claude-code/dist-tags) echo '{"latest":"2.1.87"}' ;;
+*/-/package/@thevibeworks/cctrace/dist-tags)     echo '{"latest":"0.4.0"}' ;;
+*/-/package/@openai/codex/dist-tags)             echo '{"latest":"0.117.0"}' ;;
+*/-/package/@google/gemini-cli/dist-tags)        echo '{"latest":"0.35.3"}' ;;
+*/-/package/@xai-official/grok/dist-tags)        echo '{"latest":"0.2.93"}' ;;
+*/-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
+*registry.npmjs.org/@anthropic-ai%2fclaude-code) echo '{"time":{"2.1.87":"2026-03-29T01:40:00Z"}}' ;;
+*registry.npmjs.org/@thevibeworks%2fcctrace)     echo '{"time":{"0.4.0":"2026-03-29T01:40:00Z"}}' ;;
+*registry.npmjs.org/@openai%2fcodex)             echo '{"time":{"0.117.0":"2026-03-26T22:28:00Z"}}' ;;
+*registry.npmjs.org/@google%2fgemini-cli)        echo '{"time":{"0.35.3":"2026-03-28T03:17:00Z"}}' ;;
+*registry.npmjs.org/@xai-official%2fgrok)        echo '{"time":{"0.2.93":"2026-07-01T00:00:00Z"}}' ;;
+*registry.npmjs.org/playwright)                  echo '{"time":{"1.60.0":"2026-05-14T08:00:00Z"}}' ;;
+*)
+    echo "unexpected curl url: $url" >&2
+    exit 1
+    ;;
+esac
 EOF
 
 chmod +x "$FAKE_BIN/docker" "$FAKE_BIN/npm" "$FAKE_BIN/gh" "$FAKE_BIN/curl"
@@ -205,3 +182,78 @@ do
         exit 1
     }
 done
+
+# ───── proxied build: localhost rewrite + host-gateway + redacted logs ─────
+PROXY_BUILD_LOG="$TMP_ROOT/docker-build-proxy.log"
+proxy_out="$(PATH="$FAKE_BIN:$PATH" \
+DOCKER_BUILD_LOG="$PROXY_BUILD_LOG" \
+AUTO_YES=1 \
+HTTP_PROXY="http://user:secret@127.0.0.1:7890" \
+HTTPS_PROXY="http://localhost:7890" \
+CHECK_IMAGE="ghcr.io/thevibeworks/deva:rust" \
+BUILD_IMAGE="ghcr.io/thevibeworks/deva:latest" \
+CORE_IMAGE="ghcr.io/thevibeworks/deva:core" \
+RUST_IMAGE="ghcr.io/thevibeworks/deva:rust" \
+GO_VERSION="1.26.2" \
+CCTRACE_VERSION="0.4.0" \
+PLAYWRIGHT_VERSION="1.60.0" \
+"$REPO_ROOT/scripts/version-upgrade.sh" 2>&1)"
+
+proxy_build="$(sed -n '1p' "$PROXY_BUILD_LOG")"
+for expected in \
+    "--build-arg HTTP_PROXY=http://user:secret@host.docker.internal:7890" \
+    "--build-arg HTTPS_PROXY=http://host.docker.internal:7890" \
+    "--add-host host.docker.internal:host-gateway"
+do
+    [[ "$proxy_build" == *"$expected"* ]] || {
+        echo "proxied build missing expected arg: $expected" >&2
+        echo "$proxy_build" >&2
+        exit 1
+    }
+done
+if grep -F -- "user:secret@" <<<"$proxy_out" >/dev/null; then
+    echo "proxy credentials leaked into script output" >&2
+    exit 1
+fi
+if ! grep -F -- "://***@" <<<"$proxy_out" >/dev/null; then
+    echo "expected redacted proxy URL in script output" >&2
+    exit 1
+fi
+
+# ───── registry outage: warn + fall back to current, do not abort ─────
+cat >"$FAKE_BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 22
+EOF
+chmod +x "$FAKE_BIN/curl"
+
+OUTAGE_BUILD_LOG="$TMP_ROOT/docker-build-outage.log"
+if ! outage_out="$(PATH="$FAKE_BIN:$PATH" \
+DOCKER_BUILD_LOG="$OUTAGE_BUILD_LOG" \
+AUTO_YES=1 \
+CHECK_IMAGE="ghcr.io/thevibeworks/deva:rust" \
+BUILD_IMAGE="ghcr.io/thevibeworks/deva:latest" \
+CORE_IMAGE="ghcr.io/thevibeworks/deva:core" \
+RUST_IMAGE="ghcr.io/thevibeworks/deva:rust" \
+GO_VERSION="1.26.2" \
+CCTRACE_VERSION="0.4.0" \
+PLAYWRIGHT_VERSION="1.60.0" \
+"$REPO_ROOT/scripts/version-upgrade.sh" 2>&1)"; then
+    echo "registry outage must degrade to warnings, not abort the run" >&2
+    echo "$outage_out" >&2
+    exit 1
+fi
+if ! grep -F -- "Failed to fetch latest" <<<"$outage_out" >/dev/null; then
+    echo "expected fetch-failure warnings during outage" >&2
+    echo "$outage_out" >&2
+    exit 1
+fi
+if ! grep -F -- "All versions up-to-date" <<<"$outage_out" >/dev/null; then
+    echo "expected up-to-date fallback conclusion during outage" >&2
+    echo "$outage_out" >&2
+    exit 1
+fi
+if [[ -s "$OUTAGE_BUILD_LOG" ]]; then
+    echo "no builds should run during a registry outage" >&2
+    exit 1
+fi
