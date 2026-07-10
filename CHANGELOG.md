@@ -8,14 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `scripts/host-tmux`: ssh transport to the host tmux server, the new
-  Layer 1 bridge (#405). `attach/ls/tmux` run the host's own tmux client
-  (no protocol coupling); `bridge` forwards the host socket to
-  /tmp/host-tmux.sock over `ssh -L` (0600, authenticated) so the native
-  container client and tmux-bridge Layer 2 work unchanged; one-time
-  `setup` installs the user's own pubkey via docker host mount and prints
-  the undo; `doctor` diagnoses target/port/auth/tmux layer by layer.
-  sshd is launchd-managed, so the bridge is alive right after host reboot
+- `scripts/host-tmux`: opt-in ssh transport to the host tmux server (#405).
+  `attach/ls/tmux` run the host's own tmux client (no protocol coupling);
+  `bridge` forwards the host socket to /tmp/host-tmux.sock over `ssh -L`
+  (0600, authenticated) so the native container client and tmux-bridge
+  Layer 2 work unchanged; one-time `setup` installs the user's own pubkey
+  via docker host mount and prints the undo; `doctor` diagnoses
+  target/port/auth/tmux layer by layer. sshd is launchd-managed, so the
+  bridge is alive right after host reboot.
+  Deliberately NOT installed in the image: it lets the container run
+  commands on the host, so baking it in would give every agent a host-exec
+  path. Enable per run with `--host-tmux`. The sandbox-safe way to watch
+  agents is the other direction — `deva.sh shell` / `docker exec` in.
+- `deva.sh --host-tmux`: opt-in flag that provisions host-tmux (script +
+  host ~/.ssh, ro) into the container; dedups against a user `.deva` that
+  already mounts ~/.ssh
 - `skills/deva-clean`: Claude Code skill for mount-safe workspace disk
   cleanup. `scripts/triage.sh` (read-only, deterministic) maps bind
   mounts from /proc/mounts, git-triages local worktrees for unpushed or

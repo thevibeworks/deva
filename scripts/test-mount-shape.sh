@@ -193,3 +193,57 @@ if [[ "$iso_codex" -ne 0 ]]; then
     echo "$iso_out" >&2
     exit 1
 fi
+
+# ───── --host-tmux opt-in coverage ─────
+# host-tmux is not baked into the image; --host-tmux mounts the script and,
+# when the user is not already mounting ~/.ssh, the host key too — without
+# tripping the duplicate-target guard.
+
+htssh="$hybrid_root/home/.ssh"
+mkdir -p "$htssh"
+
+# off: no host-tmux script mount
+htoff="$(run_hybrid claude --dry-run || true)"
+if grep -F -- 'host-tmux' <<<"$htoff" >/dev/null; then
+    echo "--host-tmux off: host-tmux mount present unexpectedly" >&2
+    echo "$htoff" >&2
+    exit 1
+fi
+
+# on, no pre-existing ~/.ssh mount: script + key both added, exactly once
+hton="$(run_hybrid claude --dry-run --host-tmux || true)"
+if grep -F -- 'duplicate bind mount target detected' <<<"$hton" >/dev/null; then
+    echo "--host-tmux on: duplicate-target error" >&2
+    echo "$hton" >&2
+    exit 1
+fi
+if ! grep -F -- ":/usr/local/bin/host-tmux:ro" <<<"$hton" >/dev/null; then
+    echo "--host-tmux on: script mount missing" >&2
+    echo "$hton" >&2
+    exit 1
+fi
+ht_ssh="$(count_target /home/deva/.ssh "$hton")"
+if [[ "$ht_ssh" -ne 1 ]]; then
+    echo "--host-tmux on: /home/deva/.ssh emitted $ht_ssh times (want 1)" >&2
+    echo "$hton" >&2
+    exit 1
+fi
+
+# on, user already mounts ~/.ssh via .deva: still exactly one, no dup error
+cat > "$hybrid_root/xdg/deva/.deva" <<DEVAEOF
+VOLUME=$htssh:/home/deva/.ssh:ro
+DEVAEOF
+htdup="$(run_hybrid claude --dry-run --host-tmux || true)"
+if grep -F -- 'duplicate bind mount target detected' <<<"$htdup" >/dev/null; then
+    echo "--host-tmux + user .ssh mount: duplicate-target error" >&2
+    echo "$htdup" >&2
+    exit 1
+fi
+htdup_ssh="$(count_target /home/deva/.ssh "$htdup")"
+if [[ "$htdup_ssh" -ne 1 ]]; then
+    echo "--host-tmux + user .ssh mount: /home/deva/.ssh emitted $htdup_ssh times (want 1)" >&2
+    echo "$htdup" >&2
+    exit 1
+fi
+
+echo "all mount-shape tests passed"

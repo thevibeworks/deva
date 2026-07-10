@@ -231,13 +231,15 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
 USER root
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY scripts/host-tmux /usr/local/bin/host-tmux
 # tmux-bridge: vendored from smux (layer-2 agent comms CLI over tmux panes)
 # See scripts/tmux-bridge.VENDORED for upstream commit and SHA256 pin.
 COPY scripts/tmux-bridge /usr/local/bin/tmux-bridge
+# host-tmux (container -> host tmux) is deliberately NOT installed here.
+# It is a host-reach escape hatch; baking it into every image would give
+# every agent a host-exec path (host ~/.ssh is mounted). It ships in the
+# repo at scripts/host-tmux and is opt-in via `deva.sh --host-tmux`.
 
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh && \
-    chmod 755 /usr/local/bin/host-tmux && \
     chmod 755 /usr/local/bin/tmux-bridge && \
     chmod -R 755 /usr/local/bin/scripts || true
 

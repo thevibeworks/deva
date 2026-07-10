@@ -79,6 +79,7 @@ GLOBAL_MODE=false
 DEBUG_MODE=false
 DRY_RUN=false
 CODEX_BROWSER_MCP=false
+HOST_TMUX=false
 
 if [ -t 0 ] && [ -t 1 ]; then
     DOCKER_TERMINAL_ARGS=(-it)
@@ -136,6 +137,12 @@ Deva flags:
   -Q, --quick             Bare mode: no host config mounts, no .deva loading, no autolink,
                           implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
+  --host-tmux             Opt in to the container->host tmux bridge: mounts
+                          scripts/host-tmux and your ~/.ssh (ro) so the agent
+                          can reach host tmux. Off by default — it lets the
+                          container run commands on the host. Then inside:
+                          host-tmux setup && host-tmux attach.
+                          Docs: docs/tmux-bridge-agent-comms.md
   --browser-mcp           Codex only: wire Playwright MCP through Codex config overrides.
                           Uses the rust profile because browser runtime deps live there.
                           Alias: --with-browser
@@ -1652,6 +1659,18 @@ prepare_base_docker_args() {
         DOCKER_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
     fi
 
+    # --host-tmux: opt-in container->host tmux escape hatch. Deliberately not
+    # baked into the image (see Dockerfile); the script is mounted only on
+    # request. The matching host ssh mount is added later, after user volumes,
+    # so we can skip it when the user's .deva already mounts ~/.ssh.
+    if [ "${HOST_TMUX:-false}" = true ]; then
+        if [ -f "$SCRIPT_DIR/scripts/host-tmux" ]; then
+            DOCKER_ARGS+=(-v "$SCRIPT_DIR/scripts/host-tmux:/usr/local/bin/host-tmux:ro")
+        else
+            echo "warning: --host-tmux set but $SCRIPT_DIR/scripts/host-tmux is missing" >&2
+        fi
+    fi
+
     # Fallback: detect host TZ/LANG if not set in env
     if ! docker_args_has_env "TZ"; then
         local host_tz=""
@@ -1782,6 +1801,19 @@ docker_args_has_env() {
                 return 0
             fi
         fi
+    done
+    return 1
+}
+
+docker_args_has_mount_target() {
+    local want="$1"
+    local i
+    for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
+        [ "${DOCKER_ARGS[$i]}" = "-v" ] && [ $((i + 1)) -lt ${#DOCKER_ARGS[@]} ] || continue
+        local spec="${DOCKER_ARGS[$((i + 1))]}"
+        local dest="${spec#*:}"
+        dest="${dest%%:*}"
+        [ "$dest" = "$want" ] && return 0
     done
     return 1
 }
@@ -2785,6 +2817,11 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --host-tmux)
+            HOST_TMUX=true
+            i=$((i + 1))
+            continue
+            ;;
         --browser-mcp | --codex-browser-mcp | --with-browser)
             CODEX_BROWSER_MCP=true
             i=$((i + 1))
@@ -3471,6 +3508,15 @@ fi
 
 append_user_envs
 _step "append_user_envs"
+
+# --host-tmux needs the host ssh key inside the container to authenticate.
+# Add it here, after all user volumes, so we skip it when the user's .deva
+# already mounts ~/.ssh (else the dedup guard below would reject it).
+if [ "${HOST_TMUX:-false}" = true ] && [ -d "$HOME/.ssh" ] \
+    && ! docker_args_has_mount_target "/home/deva/.ssh"; then
+    DOCKER_ARGS+=("-v" "$HOME/.ssh:/home/deva/.ssh:ro")
+fi
+
 validate_bind_mount_shape
 _step "validate_bind_mount_shape"
 

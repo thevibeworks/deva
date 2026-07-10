@@ -1,44 +1,57 @@
-# tmux-bridge: agent-to-agent comms in deva containers
+# tmux in deva: watching agents, and the host escape hatch
 
-deva ships two tmux bridge layers. They compose.
+The container is the sandbox. The default tmux story keeps it that way; one
+optional bridge deliberately breaks it, and is off unless you ask for it.
 
-    Layer 1  host-tmux               kernel boundary
-             (scripts/host-tmux)          container -> host tmux server
-             ssh transport                attach/ls direct; `bridge` forwards
-                                          host socket to /tmp/host-tmux.sock
+    Direction              tool              sandbox
+    ---------              ----              -------
+    host  -> container     deva.sh shell     intact — default, recommended
+    (attach INTO an agent) (docker exec)     host reaches in, container gains nothing
 
-    Layer 2  tmux-bridge             semantic CLI
-             (scripts/tmux-bridge)         read/type/keys/label/envelope
-             vendored from smux           for agents to drive each other's panes
+    agent <-> agent        tmux-bridge       intact — inside one container
+    (drive each other)     (scripts/...)     scoped to the container tmux server
 
-Layer 1 is the plumbing that lets the container see host tmux at all. Layer 2
-is what agents actually call.
+    container -> host      host-tmux         BROKEN — opt-in only
+    (reach host tmux)      (ssh, --host-tmux)  agent can run commands on the host
 
-## Security
+## Default: watch agents from the host (sandbox intact)
 
-Both layers are privileged host bridges. If you run them, the container can
-execute arbitrary commands on the host tmux server (send-keys, run-shell,
-scrollback). This is deliberate for trusted dev workflows. Do not enable on
-untrusted code.
+You rarely need the container to reach out. To watch or drive an agent, go
+the safe direction — from a host terminal, reach into the container:
 
-Access is scoped to ssh key holders and the forwarded socket is 0600 —
-unlike the retired socat bridge (TCP 41555, no auth, any local process).
-Note: a container with the docker socket mounted already has an equivalent
-host write path; `host-tmux setup` uses it once to install your key, and
-prints the undo.
+    deva.sh shell                         # zsh into the container (pick if many)
+    docker exec -it <container> tmux attach   # if the agent runs under tmux
 
-## Quick start
+The host already has full privilege, so reaching in grants the container
+nothing. No sshd, no keys, no host config. This is the recommended path and
+survives reboots for free (host terminal is back after login).
 
-Container (inside a deva agent):
+## Agent-to-agent: tmux-bridge (Layer 2, sandboxed)
+
+`tmux-bridge` lets agents read/drive each other's panes on the container's
+own tmux server. It never leaves the container, so it does not touch the
+sandbox boundary. Baked into the image.
+
+## Opt-in: reach host tmux from the container (host-tmux)
+
+This one dissolves the sandbox: an authenticated ssh key lets the agent run
+arbitrary commands on the host (`send-keys`, `run-shell`, scrollback). So it
+is NOT installed in the image — it ships at `scripts/host-tmux` and you turn
+it on per run:
+
+    deva.sh --host-tmux claude            # mount host-tmux + your ssh key, PATH-linked
+
+Then, inside that container:
 
     host-tmux setup                       # once: install your pubkey on the host
     host-tmux ls                          # list host sessions
     host-tmux attach [session]            # interactive attach over ssh -t
-
-For a local socket (native tmux client, or Layer 2 against host panes):
-
     host-tmux bridge                      # ssh -L; creates /tmp/host-tmux.sock
-    tmux -S /tmp/host-tmux.sock attach    # optional: attach to host session
+                                          # (native client + tmux-bridge vs host panes)
+
+Only enable this for trusted workflows on your own machine. Because it needs
+a key on the host, the hardened `--no-docker` config stays sealed unless you
+pass `--host-tmux` — that is the whole point of keeping it opt-in.
 
 Host prerequisite: Remote Login enabled — one-time, System Settings >
 General > Sharing > Remote Login, or `sudo systemsetup -setremotelogin on`
