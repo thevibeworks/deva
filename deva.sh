@@ -1351,6 +1351,16 @@ shorten_path() {
 # provisioning). The host side owns exactly what must not be done from
 # inside the sandbox: authorizing the ssh key and running the socat daemon.
 
+# Stock macOS ships no `timeout`; probe with nc (present there) and fall
+# back to /dev/tcp, which fails fast on a refused localhost connect.
+tmux_host_port22_open() {
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w 2 127.0.0.1 22 2>/dev/null
+    else
+        (exec 3<>/dev/tcp/127.0.0.1/22) 2>/dev/null
+    fi
+}
+
 tmux_host_setup() {
     local marker="deva-host-tmux"
     local pub=""
@@ -1377,7 +1387,7 @@ tmux_host_setup() {
         echo "undo: remove the '$marker' line from ~/.ssh/authorized_keys"
     fi
 
-    if timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22' 2>/dev/null; then
+    if tmux_host_port22_open; then
         echo "ok: sshd is listening on port 22"
     else
         echo "warning: sshd is not reachable on 127.0.0.1:22" >&2
@@ -1477,7 +1487,7 @@ tmux_host_doctor() {
     else
         echo "ssh keypair:     NONE (ssh-keygen -t ed25519)"
     fi
-    if timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22' 2>/dev/null; then
+    if tmux_host_port22_open; then
         echo "sshd port 22:    open"
     else
         echo "sshd port 22:    CLOSED (macOS: Sharing > Remote Login)"

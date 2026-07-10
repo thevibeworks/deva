@@ -259,6 +259,10 @@ bridge_start() {
         bin=$(host_tmux_bin)
         remote_sock=$(host_tmux_socket "$bin")
         [[ -n "$remote_sock" ]] || die "cannot determine host tmux socket path"
+        # Forwarding to a missing remote socket "succeeds" and then every
+        # connection through it fails opaquely — verify the server first.
+        hssh "$(host_target)" "sh -c 'test -S \"\$0\"' $(printf '%q' "$remote_sock")" ||
+            die "no host tmux server socket at $remote_sock — start one on the host: tmux new -d"
         if [[ "$foreground" == true ]]; then
             echo "bridge (ssh, foreground): $BRIDGE_SOCK -> $(host_target):$remote_sock"
             exec ssh -o BatchMode=yes "${SSH_OPTS[@]}" -N -L "$BRIDGE_SOCK:$remote_sock" "$(host_target)"
@@ -389,7 +393,7 @@ cmd_doctor() {
                     local bin
                     if bin=$(host_tmux_bin 2>/dev/null); then
                         echo "host tmux:         $bin"
-                        echo "host sessions:     $(hssh "$target" "$bin ls 2>/dev/null | wc -l" | tr -d ' ')"
+                        echo "host sessions:     $(hssh "$target" "sh -c '\"\$0\" ls 2>/dev/null | wc -l' $(printf '%q' "$bin")" | tr -d ' ')"
                     else
                         echo "host tmux:         NOT FOUND on host"
                     fi
