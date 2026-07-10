@@ -79,6 +79,7 @@ GLOBAL_MODE=false
 DEBUG_MODE=false
 DRY_RUN=false
 CODEX_BROWSER_MCP=false
+HOST_TMUX=false
 
 if [ -t 0 ] && [ -t 1 ]; then
     DOCKER_TERMINAL_ARGS=(-it)
@@ -120,6 +121,8 @@ Container management commands (docker/tmux-style):
   deva.sh insight [args]      Generate data report (ccx insight pass-through)
   deva.sh ccx [-g] [cmd] [args]
                               Run any ccx command inside a container
+  deva.sh tmux <cmd>         Host-side tmux lifecycle: setup (ssh key),
+                              host-daemon start|stop|status (socat fallback), doctor
 
 Advanced:
   deva.sh --show-config      Show resolved configuration (debug)
@@ -136,6 +139,12 @@ Deva flags:
   -Q, --quick             Bare mode: no host config mounts, no .deva loading, no autolink,
                           implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
+  --host-tmux             Opt in to container->host tmux: mounts ~/.ssh (ro)
+                          and passes DEVA_HOST_USER so the in-container
+                          deva-tmux CLI can reach the host tmux server.
+                          Off by default - it lets the container run
+                          commands on the host. Inside: deva-tmux doctor.
+                          Docs: docs/tmux-bridge-agent-comms.md
   --browser-mcp           Codex only: wire Playwright MCP through Codex config overrides.
                           Uses the rust profile because browser runtime deps live there.
                           Alias: --with-browser
@@ -749,6 +758,30 @@ prepare_claude_chrome_bridge() {
     USER_ENVS+=("DEVA_CHROME_HOST_BRIDGE_DIR=$bridge_mount")
 }
 
+# Container->host tmux is opt-in (--host-tmux). The in-container CLI
+# (deva-tmux) is baked into the image but inert without this provisioning:
+# the ssh transport becomes usable only when the user's ~/.ssh (read-only)
+# and host username ride in. In a repo checkout the launcher's copy of
+# deva-tmux is mounted over the image copy so flag semantics never skew
+# against an older image; installed launchers rely on the image copy.
+prepare_host_tmux() {
+    [ "$HOST_TMUX" = true ] || return 0
+
+    local host_user
+    host_user="$(configured_env_value DEVA_HOST_USER || true)"
+    if [ -z "$host_user" ]; then
+        host_user="$(id -un)"
+    fi
+
+    if [ -d "$HOME/.ssh" ] && ! user_volume_mounts_target "/home/deva/.ssh"; then
+        USER_VOLUMES+=("$HOME/.ssh:/home/deva/.ssh:ro")
+    fi
+    if [ -f "$SCRIPT_DIR/scripts/deva-tmux" ] && ! user_volume_mounts_target "/usr/local/bin/deva-tmux"; then
+        USER_VOLUMES+=("$SCRIPT_DIR/scripts/deva-tmux:/usr/local/bin/deva-tmux:ro")
+    fi
+    USER_ENVS+=("DEVA_HOST_USER=$host_user")
+}
+
 prepare_browser_integration() {
     [ "$CODEX_BROWSER_MCP" = true ] || return 0
 
@@ -1311,6 +1344,181 @@ shorten_path() {
     else
         printf '%s' "$p"
     fi
+}
+
+# --- deva.sh tmux: host-side lifecycle for container->host tmux ------------
+# The container side is deva-tmux (baked into the image, inert without
+# provisioning). The host side owns exactly what must not be done from
+# inside the sandbox: authorizing the ssh key and running the socat daemon.
+
+tmux_host_setup() {
+    local marker="deva-host-tmux"
+    local pub=""
+    for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+        [ -f "$k" ] && { pub="$k"; break; }
+    done
+    if [ -z "$pub" ]; then
+        echo "error: no ssh keypair found in ~/.ssh" >&2
+        echo "generate one first:  ssh-keygen -t ed25519" >&2
+        echo "then re-run:         deva.sh tmux setup" >&2
+        return 1
+    fi
+
+    mkdir -p "$HOME/.ssh"
+    touch "$HOME/.ssh/authorized_keys"
+    chmod 600 "$HOME/.ssh/authorized_keys"
+    local pubkey
+    pubkey="$(cat "$pub")"
+    if grep -qF "$pubkey" "$HOME/.ssh/authorized_keys"; then
+        echo "ok: key already authorized ($pub)"
+    else
+        printf '%s %s\n' "$pubkey" "$marker" >>"$HOME/.ssh/authorized_keys"
+        echo "ok: key authorized ($pub)"
+        echo "undo: remove the '$marker' line from ~/.ssh/authorized_keys"
+    fi
+
+    if timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22' 2>/dev/null; then
+        echo "ok: sshd is listening on port 22"
+    else
+        echo "warning: sshd is not reachable on 127.0.0.1:22" >&2
+        echo "macOS: System Settings > General > Sharing > Remote Login" >&2
+        echo "       or: sudo systemsetup -setremotelogin on" >&2
+        return 1
+    fi
+    echo "container side: deva.sh --host-tmux <agent>, then: deva-tmux doctor"
+}
+
+# The socat fallback daemon exposes the host tmux socket over TCP with NO
+# authentication — any process that can reach the port drives your tmux.
+# Prefer the ssh transport; this exists for hosts without Remote Login.
+tmux_host_daemon() {
+    local action="${1:-status}"
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deva/tmux"
+    local pid_file="$state_dir/host-daemon.pid"
+    local daemon="$SCRIPT_DIR/scripts/deva-bridge-tmux-host"
+    local bind="${DEVA_BRIDGE_BIND:-127.0.0.1}"
+    local port="${DEVA_BRIDGE_PORT:-41555}"
+
+    case "$action" in
+    status)
+        if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+            echo "host-daemon up (pid $(cat "$pid_file"), ${bind}:${port}) — UNAUTHENTICATED, prefer ssh"
+        else
+            echo "host-daemon down"
+            return 1
+        fi
+        ;;
+    stop)
+        if [ -f "$pid_file" ]; then
+            kill "$(cat "$pid_file")" 2>/dev/null || true
+            rm -f "$pid_file"
+            echo "host-daemon stopped"
+        else
+            echo "host-daemon not running"
+        fi
+        ;;
+    start)
+        if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+            echo "host-daemon already up (pid $(cat "$pid_file"))"
+            return 0
+        fi
+        command -v socat >/dev/null 2>&1 || {
+            echo "error: socat not installed on host" >&2
+            return 1
+        }
+        local socket
+        socket="$(tmux display-message -p '#{socket_path}' 2>/dev/null || true)"
+        [ -n "$socket" ] || socket="/private/tmp/tmux-$(id -u)/default"
+        if [ ! -S "$socket" ]; then
+            echo "error: no host tmux server socket at $socket (start tmux first)" >&2
+            return 1
+        fi
+        echo "WARNING: exposing host tmux over UNAUTHENTICATED ${bind}:${port}" >&2
+        echo "         any local process gains tmux control; prefer: deva.sh tmux setup" >&2
+        mkdir -p "$state_dir"
+        if [ -x "$daemon" ]; then
+            nohup "$daemon" -q -b "$bind" -p "$port" -s "$socket" >>"$state_dir/host-daemon.log" 2>&1 &
+        else
+            # Installed launcher without the repo's scripts/: same mechanics inline.
+            nohup socat "TCP-LISTEN:${port},bind=${bind},reuseaddr,fork" "UNIX-CONNECT:${socket}" >>"$state_dir/host-daemon.log" 2>&1 &
+        fi
+        echo $! >"$pid_file"
+        sleep 0.3
+        if kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+            echo "host-daemon up (pid $(cat "$pid_file"), ${bind}:${port} -> ${socket})"
+            echo "container side: deva-tmux bridge start --transport socat"
+        else
+            rm -f "$pid_file"
+            echo "error: host-daemon failed to start (see $state_dir/host-daemon.log)" >&2
+            return 1
+        fi
+        ;;
+    *)
+        echo "error: unknown host-daemon action: $action (start|stop|status)" >&2
+        return 1
+        ;;
+    esac
+}
+
+tmux_host_doctor() {
+    echo "deva tmux doctor (host side)"
+    echo "---"
+    local pub=""
+    for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+        [ -f "$k" ] && { pub="$k"; break; }
+    done
+    if [ -n "$pub" ]; then
+        echo "ssh keypair:     $pub"
+        if [ -f "$HOME/.ssh/authorized_keys" ] && grep -qF "$(cat "$pub")" "$HOME/.ssh/authorized_keys"; then
+            echo "authorized:      yes"
+        else
+            echo "authorized:      NO (run: deva.sh tmux setup)"
+        fi
+    else
+        echo "ssh keypair:     NONE (ssh-keygen -t ed25519)"
+    fi
+    if timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/22' 2>/dev/null; then
+        echo "sshd port 22:    open"
+    else
+        echo "sshd port 22:    CLOSED (macOS: Sharing > Remote Login)"
+    fi
+    local sessions
+    sessions="$(tmux ls 2>/dev/null | wc -l | tr -d ' ')"
+    echo "tmux sessions:   $sessions"
+    tmux_host_daemon status || true
+    echo "---"
+    echo "container side:  deva.sh --host-tmux <agent>, then deva-tmux doctor"
+}
+
+cmd_tmux() {
+    local sub="${1:-help}"
+    [ $# -gt 0 ] && shift
+    case "$sub" in
+    setup) tmux_host_setup "$@" ;;
+    host-daemon) tmux_host_daemon "${1:-status}" ;;
+    doctor) tmux_host_doctor ;;
+    help | -h | --help)
+        cat <<'EOF'
+deva.sh tmux - host-side lifecycle for container->host tmux
+
+Usage:
+  deva.sh tmux setup                          Authorize your ssh key (ssh transport, default)
+  deva.sh tmux host-daemon start|stop|status  socat fallback daemon (UNAUTHENTICATED)
+  deva.sh tmux doctor                         Host-side diagnosis
+
+Container side:
+  deva.sh --host-tmux <agent>                 Opt-in provisioning at launch
+  deva-tmux ls|attach|bridge|doctor           In-container CLI (both transports)
+  tmux-bridge list|read|type|...              Agent<->agent pane comms (Layer 2)
+
+Docs: docs/tmux-bridge-agent-comms.md
+EOF
+        ;;
+    *)
+        echo "error: unknown tmux subcommand: $sub (setup|host-daemon|doctor|help)" >&2
+        exit 1
+        ;;
+    esac
 }
 
 cmd_status() {
@@ -2898,6 +3106,11 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --host-tmux)
+            HOST_TMUX=true
+            i=$((i + 1))
+            continue
+            ;;
         --rm)
             EPHEMERAL_MODE=true
             i=$((i + 1))
@@ -3018,7 +3231,14 @@ if [ ${#PRE_ARGS[@]} -gt 0 ]; then
     done
 fi
 
-if [ ${#PRE_ARGS[@]} -gt 0 ]; then
+# `deva.sh tmux <sub> [args]` is a command group: only the FIRST token
+# selects it, so subcommand args (status, stop, ...) can't collide with the
+# management-mode tokens scanned below.
+if [ "${PRE_ARGS[0]:-}" = "tmux" ]; then
+    MANAGEMENT_MODE="tmux"
+fi
+
+if [ ${#PRE_ARGS[@]} -gt 0 ] && [ "$MANAGEMENT_MODE" != "tmux" ]; then
     for tok in "${PRE_ARGS[@]}"; do
         case "$tok" in
         help | --help | -h)
@@ -3065,6 +3285,11 @@ if [ ${#PRE_ARGS[@]} -gt 0 ]; then
 fi
 
 if [ "$MANAGEMENT_MODE" != "launch" ]; then
+    if [ "$MANAGEMENT_MODE" = "tmux" ]; then
+        cmd_tmux "${PRE_ARGS[@]:1}"
+        exit $?
+    fi
+
     if [ "$MANAGEMENT_MODE" = "ps" ]; then
         list_containers_pretty
         exit 0
@@ -3387,6 +3612,7 @@ autolink_legacy_into_deva_root() {
 check_agent "$ACTIVE_AGENT"
 prepare_browser_integration
 prepare_claude_chrome_bridge
+prepare_host_tmux
 append_shared_agents_mount
 
 if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
