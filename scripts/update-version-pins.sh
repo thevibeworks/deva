@@ -19,7 +19,9 @@ EOF
 }
 
 fetch_npm_version() {
-    npm view "$1" version 2>/dev/null || true
+    curl -fsSL --max-time 10 \
+        "https://registry.npmjs.org/-/package/$1/dist-tags" 2>/dev/null | \
+        sed -n 's/.*"latest":"\([^"]*\)".*/\1/p' || true
 }
 
 fetch_latest_git_tag() {
