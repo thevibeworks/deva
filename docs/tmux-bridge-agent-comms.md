@@ -40,9 +40,24 @@ For a local socket (native tmux client, or Layer 2 against host panes):
     host-tmux bridge                      # ssh -L; creates /tmp/host-tmux.sock
     tmux -S /tmp/host-tmux.sock attach    # optional: attach to host session
 
-Host prerequisite: Remote Login enabled (System Settings > Sharing). sshd is
-launchd-managed, so unlike a manual proxy daemon the transport is alive again
-right after a reboot. `host-tmux doctor` diagnoses the path layer by layer.
+Host prerequisite: Remote Login enabled — one-time, System Settings >
+General > Sharing > Remote Login, or `sudo systemsetup -setremotelogin on`
+in a host terminal. sshd is launchd-managed, so unlike a manual proxy
+daemon the transport is alive again right after a reboot. `host-tmux
+doctor` diagnoses the path layer by layer. Tip: restrict Remote Login's
+"Allow access for" to your own user.
+
+No Remote Login (won't, or can't — MDM-managed Macs)? It cannot be enabled
+from inside a container (containers get file access to the host, never
+process execution — that is the sandbox working). Two fallbacks:
+
+- Invert the direction: run tmux inside the container and attach from a
+  host terminal — `docker exec -it <container> tmux attach`. Zero host
+  config; covers the agent-comms use case entirely. Only attaching to
+  HOST sessions from the container genuinely needs sshd.
+- The retired socat bridge (`deva-bridge-tmux{,-host}`, in git history
+  before this doc's revision) still works if started by hand on the host
+  each boot — with its unauthenticated-TCP caveats. Not recommended.
 
 From another pane (or the same container, any agent CLI that can shell out):
 

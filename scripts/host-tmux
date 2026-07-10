@@ -250,7 +250,9 @@ cmd_doctor() {
   if timeout 3 bash -c "exec 3<>/dev/tcp/${target#*@}/22" 2>/dev/null; then
     echo "ssh port 22:     open"
   else
-    echo "ssh port 22:     CLOSED — enable Remote Login on the host (System Settings > Sharing)"
+    echo "ssh port 22:     CLOSED — enable Remote Login on the host:"
+    echo "                 System Settings > General > Sharing > Remote Login"
+    echo "                 or in a host terminal: sudo systemsetup -setremotelogin on"
     return 1
   fi
   if auth_ok; then
