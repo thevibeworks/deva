@@ -39,7 +39,7 @@ Persistent per-project containers mean:
 
 - warm package caches
 - stateful shell history and scratch space
-- fast switching between Claude, Codex, and Gemini
+- fast switching between Claude, Codex, Gemini, and Grok
 
 `--rm` still exists. It just is not the default because the default should serve real work instead of screenshots.
 
