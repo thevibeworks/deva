@@ -21,10 +21,14 @@ EOF
 }
 
 QUIET=0
+VERSION="1.0.0"
 
+# Same option surface as the old script: -V/--version, -- ends options,
+# non-option args are ignored (break), only unknown -flags error.
 while [ $# -gt 0 ]; do
     case $1 in
     -h | --help) usage; exit 0 ;;
+    -V | --version) printf '%s %s (deva-tmux shim)\n' "$prog" "$VERSION"; exit 0 ;;
     -q | --quiet) QUIET=1 ;;
     -H | --host)
         [ $# -ge 2 ] || { echo "$prog: missing value for $1" >&2; exit 1; }
@@ -35,7 +39,9 @@ while [ $# -gt 0 ]; do
     -s | --socket)
         [ $# -ge 2 ] || { echo "$prog: missing value for $1" >&2; exit 1; }
         DEVA_TMUX_SOCK="$2"; export DEVA_TMUX_SOCK; shift ;;
-    *) echo "$prog: unknown option: $1" >&2; exit 1 ;;
+    --) shift; break ;;
+    -*) echo "$prog: unknown option: $1" >&2; exit 1 ;;
+    *) break ;;
     esac
     shift
 done

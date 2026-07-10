@@ -150,8 +150,20 @@ EOF
     exit 1
 }
 
+# A pidfile can go stale and the PID be reused by an unrelated process;
+# only treat it as ours if it is numeric AND the command looks like our
+# transport child (ssh or socat).
+bridge_pid_ours() {
+    local pid
+    pid=$(cat "$BRIDGE_PID" 2>/dev/null) || return 1
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    ps -o command= -p "$pid" 2>/dev/null | grep -qE '(^|/| )(ssh|socat) ' || return 1
+    echo "$pid"
+}
+
 bridge_alive() {
-    [[ -S "$BRIDGE_SOCK" && -f "$BRIDGE_PID" ]] && kill -0 "$(cat "$BRIDGE_PID")" 2>/dev/null
+    [[ -S "$BRIDGE_SOCK" && -f "$BRIDGE_PID" ]] && bridge_pid_ours >/dev/null
 }
 
 usage() {
@@ -329,9 +341,14 @@ cmd_bridge() {
         ;;
     stop)
         if [[ -f "$BRIDGE_PID" ]]; then
-            kill "$(cat "$BRIDGE_PID")" 2>/dev/null || true
+            local pid
+            if pid=$(bridge_pid_ours); then
+                kill "$pid" 2>/dev/null || true
+                echo "bridge stopped"
+            else
+                echo "bridge pidfile was stale; cleaned up"
+            fi
             rm -f "$BRIDGE_PID" "$BRIDGE_SOCK"
-            echo "bridge stopped"
         else
             echo "bridge not running"
         fi

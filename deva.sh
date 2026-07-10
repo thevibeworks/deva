@@ -1401,6 +1401,18 @@ tmux_host_setup() {
 # The socat fallback daemon exposes the host tmux socket over TCP with NO
 # authentication — any process that can reach the port drives your tmux.
 # Prefer the ssh transport; this exists for hosts without Remote Login.
+# Stale pidfiles + PID reuse would make us report an unrelated process as
+# our daemon (or kill it on stop); only trust a numeric PID whose command
+# looks like the socat daemon.
+tmux_host_daemon_pid() {
+    local pid_file="$1" pid
+    pid="$(cat "$pid_file" 2>/dev/null)" || return 1
+    case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null || return 1
+    ps -o command= -p "$pid" 2>/dev/null | grep -qE 'socat|deva-bridge-tmux-host' || return 1
+    echo "$pid"
+}
+
 tmux_host_daemon() {
     local action="${1:-status}"
     local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/deva/tmux"
@@ -1408,11 +1420,12 @@ tmux_host_daemon() {
     local daemon="$SCRIPT_DIR/scripts/deva-bridge-tmux-host"
     local bind="${DEVA_BRIDGE_BIND:-127.0.0.1}"
     local port="${DEVA_BRIDGE_PORT:-41555}"
+    local pid
 
     case "$action" in
     status)
-        if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-            echo "host-daemon up (pid $(cat "$pid_file"), ${bind}:${port}) — UNAUTHENTICATED, prefer ssh"
+        if pid=$(tmux_host_daemon_pid "$pid_file"); then
+            echo "host-daemon up (pid $pid, ${bind}:${port}) — UNAUTHENTICATED, prefer ssh"
         else
             echo "host-daemon down"
             return 1
@@ -1420,16 +1433,20 @@ tmux_host_daemon() {
         ;;
     stop)
         if [ -f "$pid_file" ]; then
-            kill "$(cat "$pid_file")" 2>/dev/null || true
+            if pid=$(tmux_host_daemon_pid "$pid_file"); then
+                kill "$pid" 2>/dev/null || true
+                echo "host-daemon stopped"
+            else
+                echo "host-daemon pidfile was stale; cleaned up"
+            fi
             rm -f "$pid_file"
-            echo "host-daemon stopped"
         else
             echo "host-daemon not running"
         fi
         ;;
     start)
-        if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-            echo "host-daemon already up (pid $(cat "$pid_file"))"
+        if pid=$(tmux_host_daemon_pid "$pid_file"); then
+            echo "host-daemon already up (pid $pid)"
             return 0
         fi
         command -v socat >/dev/null 2>&1 || {
