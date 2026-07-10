@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# host-tmux — reach the host machine's tmux from inside a deva container.
+#
+# The container is the sandbox; the host tmux server is where long-lived
+# work sits. A tmux unix socket cannot cross the VM boundary (virtiofs does
+# not carry unix-socket connections), so the transport is SSH to the host.
+# sshd is launchd-managed on macOS: unlike a manually started proxy daemon,
+# this transport is alive again right after a reboot.
+#
+# Two modes, one transport:
+#   attach/ls/tmux     interactive or one-shot; runs the HOST's tmux client,
+#                      so there is no client/server protocol coupling
+#   bridge             forward the host tmux socket to /tmp/host-tmux.sock
+#                      (native container tmux client + tmux-bridge Layer 2,
+#                      same socket path as the socat bridge it replaces)
+#
+# SECURITY: this is a privileged host bridge — the container can run
+# commands on the host. Access is scoped to holders of an authorized ssh
+# key, and the forwarded socket is 0600. Note that a container with the
+# docker socket mounted already has an equivalent write path to the host;
+# setup uses exactly that path once, and prints how to undo it.
+set -euo pipefail
+
+VERSION="0.1.0"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/host-tmux"
+KNOWN_HOSTS="$STATE_DIR/known_hosts"
+BRIDGE_SOCK="${DEVA_BRIDGE_SOCK:-/tmp/host-tmux.sock}"
+BRIDGE_PID="$STATE_DIR/bridge.pid"
+KEY_MARKER="deva-host-tmux"
+
+# ~/.ssh is often a read-only mount of the host's, so known_hosts lives in
+# state dir. -F none skips host ssh config that references host-only paths.
+SSH_OPTS=(
+  -F none
+  -o "UserKnownHostsFile=$KNOWN_HOSTS"
+  -o StrictHostKeyChecking=accept-new
+  -o ServerAliveInterval=30
+  -o ConnectTimeout=8
+)
+
+# BatchMode: agents call this; a password prompt that never returns is the
+# worst failure mode. Only attach (human on a tty) goes interactive.
+hssh() {
+  mkdir -p "$STATE_DIR"
+  ssh -o BatchMode=yes "${SSH_OPTS[@]}" "$@"
+}
+
+# --- Target resolution ---
+# DEVA_HOST_SSH overrides everything (full user@host). Otherwise user comes
+# from DEVA_HOST_USER (or the chrome bridge var deva already sets), host is
+# docker's magic name for the machine running it.
+
+host_target() {
+  if [[ -n "${DEVA_HOST_SSH:-}" ]]; then
+    echo "$DEVA_HOST_SSH"
+    return
+  fi
+  local user="${DEVA_HOST_USER:-${DEVA_CHROME_HOST_USER:-}}"
+  [[ -n "$user" ]] || die "cannot determine host user; set DEVA_HOST_USER=<host username>"
+  [[ "$user" =~ ^[A-Za-z0-9._-]+$ ]] || die "bogus host user: $user"
+  echo "${user}@host.docker.internal"
+}
+
+auth_ok() {
+  hssh "$(host_target)" true 2>/dev/null
+}
+
+# Non-interactive ssh runs the user's login shell, which may not be POSIX;
+# wrap the probe in sh -c so fish/nushell users don't get a parse error.
+host_tmux_bin() {
+  local probe='for t in "$(command -v tmux)" /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do [ -x "$t" ] && { echo "$t"; exit; }; done; exit 1'
+  hssh "$(host_target)" "sh -c '$probe'" \
+    || die "tmux not found on host ($(host_target))"
+}
+
+host_tmux_socket() {
+  local bin="$1"
+  hssh "$(host_target)" "sh -c '$bin display-message -p \"#{socket_path}\" 2>/dev/null || echo /tmp/tmux-\$(id -u)/default'"
+}
+
+bridge_alive() {
+  [[ -S "$BRIDGE_SOCK" && -f "$BRIDGE_PID" ]] && kill -0 "$(cat "$BRIDGE_PID")" 2>/dev/null
+}
+
+usage() {
+  cat <<'EOF'
+host-tmux — attach to and drive the host machine's tmux from a deva container
+
+Usage: host-tmux <command> [args...]
+
+Commands:
+  setup                One-time key setup (installs your pubkey on the host)
+  ls                   List host tmux sessions
+  attach [session]     Attach; with a name, create it if missing
+  tmux <args...>       Host tmux passthrough (e.g. host-tmux tmux kill-session -t foo)
+  bridge [stop|status] Forward host tmux socket to /tmp/host-tmux.sock, then:
+                         tmux -S /tmp/host-tmux.sock attach
+                         TMUX_BRIDGE_SOCKET=/tmp/host-tmux.sock tmux-bridge list
+  doctor               Diagnose connectivity layer by layer
+  version              Print version
+
+Environment:
+  DEVA_HOST_SSH    Full override, e.g. me@host.docker.internal
+  DEVA_HOST_USER   Host username (default: $DEVA_CHROME_HOST_USER)
+  DEVA_BRIDGE_SOCK Local forwarded socket (default: /tmp/host-tmux.sock)
+EOF
+  exit 0
+}
+
+# --- Commands ---
+
+cmd_setup() {
+  local target
+  target=$(host_target)
+
+  if auth_ok; then
+    echo "ok: ssh to $target already works"
+    return
+  fi
+
+  # Find a pubkey to install — the container usually has the host's ~/.ssh
+  # mounted read-only, so the user's own key is right there.
+  local pub=""
+  for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+    [[ -f "$k" ]] && { pub=$(cat "$k"); break; }
+  done
+  [[ -n "$pub" ]] || die "no pubkey found in ~/.ssh; generate one first (ssh-keygen -t ed25519)"
+
+  local user="${target%%@*}"
+  local manual="append this key to the host ~/.ssh/authorized_keys manually:
+$pub"
+
+  # The docker daemon runs on the host side of the boundary and can mount
+  # host paths — that is our only write path to the host's authorized_keys.
+  local -a dockercmd=(docker)
+  if ! docker version &>/dev/null; then
+    if [[ -S /run/docker.sock ]] && DOCKER_HOST=unix:///run/docker.sock docker version &>/dev/null; then
+      dockercmd=(env DOCKER_HOST=unix:///run/docker.sock docker)
+    else
+      die "ssh auth failed and docker unavailable; $manual"
+    fi
+  fi
+
+  # Probe the real home dir read-only first: docker -v with a nonexistent
+  # source silently creates a root-owned dir, which would report success
+  # while fixing nothing.
+  local home
+  home=$("${dockercmd[@]}" run --rm -v /:/host:ro alpine sh -c \
+    "for h in /host/Users/$user /host/home/$user; do [ -d \"\$h\" ] && { echo \"\${h#/host}\"; exit; }; done; exit 1") \
+    || die "cannot find home directory for '$user' on the host; $manual"
+
+  echo "installing pubkey into $home/.ssh/authorized_keys via docker host mount..."
+  "${dockercmd[@]}" run --rm -e PUB="$pub" -e MARKER="$KEY_MARKER" -v "$home/.ssh:/hostssh" alpine sh -c '
+    touch /hostssh/authorized_keys
+    grep -qxF "$PUB $MARKER" /hostssh/authorized_keys || grep -qxF "$PUB" /hostssh/authorized_keys \
+      || printf "%s %s\n" "$PUB" "$MARKER" >> /hostssh/authorized_keys
+    chmod 600 /hostssh/authorized_keys' \
+    || die "docker key install failed; $manual"
+
+  auth_ok || die "key installed but ssh still refused — is Remote Login enabled on the host (System Settings > Sharing)?"
+  echo "ok: key installed. Undo: remove the '$KEY_MARKER' line from $home/.ssh/authorized_keys"
+}
+
+cmd_ls() {
+  local bin
+  bin=$(host_tmux_bin)
+  hssh "$(host_target)" "$bin ls"
+}
+
+cmd_attach() {
+  [[ -t 0 ]] || die "attach needs a tty; use 'host-tmux tmux ...' instead"
+  local bin cmd="attach"
+  bin=$(host_tmux_bin)
+  [[ -n "${1:-}" ]] && cmd="new-session -A -s $(printf '%q' "$1")"
+  mkdir -p "$STATE_DIR"
+  exec ssh -t "${SSH_OPTS[@]}" "$(host_target)" "$bin $cmd"
+}
+
+cmd_tmux() {
+  [[ $# -ge 1 ]] || die "'tmux' needs arguments"
+  local bin
+  bin=$(host_tmux_bin)
+  hssh "$(host_target)" "$bin $(printf '%q ' "$@")"
+}
+
+cmd_bridge() {
+  case "${1:-start}" in
+    status)
+      if bridge_alive; then
+        echo "bridge up: $BRIDGE_SOCK (pid $(cat "$BRIDGE_PID"))"
+      else
+        echo "bridge down"
+        return 1
+      fi
+      ;;
+    stop)
+      if [[ -f "$BRIDGE_PID" ]]; then
+        kill "$(cat "$BRIDGE_PID")" 2>/dev/null || true
+        rm -f "$BRIDGE_PID" "$BRIDGE_SOCK"
+        echo "bridge stopped"
+      else
+        echo "bridge not running"
+      fi
+      ;;
+    start)
+      if bridge_alive; then
+        echo "bridge already up: $BRIDGE_SOCK"
+        return
+      fi
+      local bin remote_sock
+      bin=$(host_tmux_bin)
+      remote_sock=$(host_tmux_socket "$bin")
+      [[ -n "$remote_sock" ]] || die "cannot determine host tmux socket path"
+      mkdir -p "$STATE_DIR"
+      rm -f "$BRIDGE_SOCK"
+      ssh -o BatchMode=yes "${SSH_OPTS[@]}" -N -L "$BRIDGE_SOCK:$remote_sock" "$(host_target)" &
+      echo $! > "$BRIDGE_PID"
+      local i
+      for i in 1 2 3 4 5; do
+        [[ -S "$BRIDGE_SOCK" ]] && break
+        sleep 0.4
+      done
+      [[ -S "$BRIDGE_SOCK" ]] || { rm -f "$BRIDGE_PID"; die "bridge failed to come up"; }
+      echo "bridge up: $BRIDGE_SOCK -> $(host_target):$remote_sock"
+      echo "usage: tmux -S $BRIDGE_SOCK attach"
+      echo "       TMUX_BRIDGE_SOCKET=$BRIDGE_SOCK tmux-bridge list"
+      ;;
+    *) die "unknown bridge subcommand: $1 (start|stop|status)" ;;
+  esac
+}
+
+cmd_doctor() {
+  echo "host-tmux doctor v${VERSION}"
+  echo "---"
+  local target
+  if ! target=$(host_target); then
+    echo "target:          FAILED (set DEVA_HOST_USER=<host username>)"
+    return 1
+  fi
+  echo "target:          $target"
+  if getent hosts "${target#*@}" >/dev/null 2>&1; then
+    echo "host resolution: ok"
+  else
+    echo "host resolution: FAILED (${target#*@} does not resolve)"
+    return 1
+  fi
+  if timeout 3 bash -c "exec 3<>/dev/tcp/${target#*@}/22" 2>/dev/null; then
+    echo "ssh port 22:     open"
+  else
+    echo "ssh port 22:     CLOSED — enable Remote Login on the host (System Settings > Sharing)"
+    return 1
+  fi
+  if auth_ok; then
+    echo "ssh auth:        ok"
+  else
+    echo "ssh auth:        FAILED (run: host-tmux setup)"
+    return 1
+  fi
+  local bin
+  if bin=$(host_tmux_bin 2>/dev/null); then
+    echo "host tmux:       $bin"
+    echo "sessions:        $(hssh "$target" "$bin ls 2>/dev/null | wc -l" | tr -d ' ')"
+  else
+    echo "host tmux:       NOT FOUND"
+    return 1
+  fi
+  if bridge_alive; then
+    echo "bridge:          up ($BRIDGE_SOCK)"
+  else
+    echo "bridge:          down (optional; host-tmux bridge)"
+  fi
+  echo "status: OK"
+}
+
+# --- Main ---
+
+[[ $# -eq 0 ]] && usage
+
+case "$1" in
+  setup)    shift; cmd_setup "$@" ;;
+  ls)       shift; cmd_ls "$@" ;;
+  attach|a) shift; cmd_attach "$@" ;;
+  tmux)     shift; cmd_tmux "$@" ;;
+  bridge)   shift; cmd_bridge "$@" ;;
+  doctor)   shift; cmd_doctor "$@" ;;
+  version)  echo "host-tmux $VERSION" ;;
+  -h|--help|help) usage ;;
+  *)        die "unknown command: $1. Run 'host-tmux' for usage." ;;
+esac

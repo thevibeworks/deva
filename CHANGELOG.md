@@ -8,12 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `scripts/host-tmux`: ssh transport to the host tmux server, the new
+  Layer 1 bridge (#405). `attach/ls/tmux` run the host's own tmux client
+  (no protocol coupling); `bridge` forwards the host socket to
+  /tmp/host-tmux.sock over `ssh -L` (0600, authenticated) so the native
+  container client and tmux-bridge Layer 2 work unchanged; one-time
+  `setup` installs the user's own pubkey via docker host mount and prints
+  the undo; `doctor` diagnoses target/port/auth/tmux layer by layer.
+  sshd is launchd-managed, so the bridge is alive right after host reboot
 - `skills/deva-clean`: Claude Code skill for mount-safe workspace disk
   cleanup. `scripts/triage.sh` (read-only, deterministic) maps bind
   mounts from /proc/mounts, git-triages local worktrees for unpushed or
   uncommitted work via live ls-remote + merge ancestry, and emits a
   tiered dry-run plan; SKILL.md layers the judgment calls and gates
   execution behind explicit approval (#401)
+
+### Removed
+- `scripts/deva-bridge-tmux{,-host}`: socat TCP bridge superseded by
+  host-tmux (#405). It exposed unauthenticated host tmux control on
+  TCP 41555 to every container and local process, required a manually
+  started host daemon that died on each reboot, and coupled container
+  tmux client protocol to the host server version
 
 ## [0.13.0] - 2026-07-07
 

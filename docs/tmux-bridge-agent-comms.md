@@ -2,9 +2,10 @@
 
 deva ships two tmux bridge layers. They compose.
 
-    Layer 1  deva-bridge-tmux       kernel boundary
-             (scripts/deva-bridge-tmux)   container tmux client -> host tmux server
-             socat TCP tunnel             via host.docker.internal:41555
+    Layer 1  host-tmux               kernel boundary
+             (scripts/host-tmux)          container -> host tmux server
+             ssh transport                attach/ls direct; `bridge` forwards
+                                          host socket to /tmp/host-tmux.sock
 
     Layer 2  tmux-bridge             semantic CLI
              (scripts/tmux-bridge)         read/type/keys/label/envelope
@@ -20,16 +21,28 @@ execute arbitrary commands on the host tmux server (send-keys, run-shell,
 scrollback). This is deliberate for trusted dev workflows. Do not enable on
 untrusted code.
 
+Access is scoped to ssh key holders and the forwarded socket is 0600 —
+unlike the retired socat bridge (TCP 41555, no auth, any local process).
+Note: a container with the docker socket mounted already has an equivalent
+host write path; `host-tmux setup` uses it once to install your key, and
+prints the undo.
+
 ## Quick start
-
-Host (macOS):
-
-    deva-bridge-tmux-host                 # expose host tmux over TCP:41555
 
 Container (inside a deva agent):
 
-    deva-bridge-tmux                      # start socat; creates /tmp/host-tmux.sock
+    host-tmux setup                       # once: install your pubkey on the host
+    host-tmux ls                          # list host sessions
+    host-tmux attach [session]            # interactive attach over ssh -t
+
+For a local socket (native tmux client, or Layer 2 against host panes):
+
+    host-tmux bridge                      # ssh -L; creates /tmp/host-tmux.sock
     tmux -S /tmp/host-tmux.sock attach    # optional: attach to host session
+
+Host prerequisite: Remote Login enabled (System Settings > Sharing). sshd is
+launchd-managed, so unlike a manual proxy daemon the transport is alive again
+right after a reboot. `host-tmux doctor` diagnoses the path layer by layer.
 
 From another pane (or the same container, any agent CLI that can shell out):
 
@@ -81,5 +94,8 @@ Run this first when things go wrong.
 pinned commit and SHA256. License is MIT, reproduced in
 `scripts/THIRD_PARTY_LICENSES/smux-LICENSE`.
 
-`scripts/deva-bridge-tmux` and `scripts/deva-bridge-tmux-host` are deva's
-own work (see `docs/devlog/20260108-deva-bridge-tmux.org`).
+`scripts/host-tmux` is deva's own work. It replaced the socat TCP pair
+`deva-bridge-tmux`/`deva-bridge-tmux-host` (unauthenticated port, manual
+host daemon that died on every reboot, tmux client/server version coupling
+— see `docs/devlog/20260108-deva-bridge-tmux.org` for the original design
+and #405 for the replacement rationale).

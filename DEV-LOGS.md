@@ -13,6 +13,15 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-09] Dev Log: host-tmux ssh transport replaces socat tmux bridge
+- Why: deva-bridge-tmux exposed unauthenticated host tmux control on TCP 41555 to every container and local process, its host daemon had to be started by hand and died on every reboot (exactly when you need to reattach from a container), and native attach coupled container tmux client protocol to the host server version (#405)
+- What:
+  - scripts/host-tmux: ssh transport with attach/ls/tmux (host's own tmux client, zero version coupling), bridge (ssh -L forwards the host socket to /tmp/host-tmux.sock, 0600, keeps tmux-bridge Layer 2 composition unchanged), setup (one-time pubkey install via docker host mount; probes the real home dir read-only first so a bad -v can't fabricate success; prints undo), doctor (target -> DNS -> port 22/Remote Login -> auth -> tmux, layer by layer)
+  - removed deva-bridge-tmux and deva-bridge-tmux-host; images now install host-tmux at /usr/local/bin (Dockerfile, Dockerfile.rust)
+  - docs/tmux-bridge-agent-comms.md: Layer 1 rewritten around host-tmux
+  - fable-5 skeptic review applied: DOCKER_HOST clobber, ssh arg quoting (printf %q), login-shell probe portability (sh -c wrap), BatchMode for agent callers; cut the tmux-path cache and a generic `run` subcommand as scope creep
+- Result: container -> host tmux survives host reboots with no host-side ritual (sshd is launchd-managed); verified live against OrbStack/macOS — doctor, setup idempotence, spaced-arg quoting, tty guard, bridge lifecycle, Layer 2 list through the forwarded socket
+
 # [2026-07-07] Dev Log: switch --trace default from claude-trace to cctrace
 - Why: claude-trace's node --require fetch hook only sees /v1/messages and dies on native Claude binaries; cctrace (thevibeworks/cctrace) MITM-captures everything (OAuth, usage/credits, MCP) and auto-detects npm vs native installs
 - What:
