@@ -28,6 +28,18 @@ source "$SCRIPT_DIR/version-pins.sh"
 CHECK_IMAGE=${MAIN_IMAGE:-ghcr.io/thevibeworks/deva:latest}
 BUILD_IMAGE=${BUILD_IMAGE:-ghcr.io/thevibeworks/deva:latest}
 CORE_IMAGE=${CORE_IMAGE:-ghcr.io/thevibeworks/deva:core}
+
+# Forward host proxy env vars to Docker build stages.
+# Rewrite 127.0.0.1/localhost → host.docker.internal so the build
+# container reaches the host's proxy instead of its own loopback.
+_dproxy() { sed 's|://127\.0\.0\.1|://host.docker.internal|g; s|://localhost|://host.docker.internal|g' <<< "$1"; }
+PROXY_ARGS=()
+[[ -n ${HTTP_PROXY:-} ]]  && PROXY_ARGS+=(--build-arg "HTTP_PROXY=$(_dproxy "$HTTP_PROXY")")
+[[ -n ${HTTPS_PROXY:-} ]] && PROXY_ARGS+=(--build-arg "HTTPS_PROXY=$(_dproxy "$HTTPS_PROXY")")
+[[ -n ${http_proxy:-} ]]  && PROXY_ARGS+=(--build-arg "http_proxy=$(_dproxy "$http_proxy")")
+[[ -n ${https_proxy:-} ]] && PROXY_ARGS+=(--build-arg "https_proxy=$(_dproxy "$https_proxy")")
+[[ -n ${NO_PROXY:-} ]]    && PROXY_ARGS+=(--build-arg "NO_PROXY=$NO_PROXY")
+[[ -n ${no_proxy:-} ]]    && PROXY_ARGS+=(--build-arg "no_proxy=$no_proxy")
 RUST_IMAGE=${RUST_IMAGE:-ghcr.io/thevibeworks/deva:rust}
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
 RUST_DOCKERFILE=${RUST_DOCKERFILE:-Dockerfile.rust}
@@ -200,8 +212,17 @@ main() {
     echo -e "${GREEN}Proceeding with build...${RESET}"
     echo ""
 
+    if [[ ${#PROXY_ARGS[@]} -gt 0 ]]; then
+        echo -e "${DIM}Proxy forwarding to Docker build:${RESET}"
+        for _pa in "${PROXY_ARGS[@]}"; do
+            echo -e "  ${DIM}${_pa#--build-arg }${RESET}"
+        done
+        echo ""
+    fi
+
     section "Building Core Image"
     docker build -f "$DOCKERFILE" \
+        ${PROXY_ARGS[@]+"${PROXY_ARGS[@]}"} \
         --target agent-base \
         --build-arg NODE_MAJOR="$NODE_MAJOR" \
         --build-arg GO_VERSION="$GO_VERSION" \
@@ -215,6 +236,7 @@ main() {
     echo ""
     section "Building Main Image"
     docker build -f "$DOCKERFILE" \
+        ${PROXY_ARGS[@]+"${PROXY_ARGS[@]}"} \
         --build-arg NODE_MAJOR="$NODE_MAJOR" \
         --build-arg GO_VERSION="$GO_VERSION" \
         --build-arg PYTHON_VERSION="$PYTHON_VERSION" \
@@ -233,6 +255,7 @@ main() {
     echo ""
     section "Building Rust Image"
     docker build -f "$RUST_DOCKERFILE" \
+        ${PROXY_ARGS[@]+"${PROXY_ARGS[@]}"} \
         --build-arg BASE_IMAGE="$CORE_IMAGE" \
         --build-arg CLAUDE_CODE_VERSION="$claude_ver" \
         --build-arg CCTRACE_VERSION="$cctrace_ver" \

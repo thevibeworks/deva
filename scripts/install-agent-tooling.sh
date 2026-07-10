@@ -118,8 +118,23 @@ download_to() {
     curl -fsSL "$url" -o "$dest"
 }
 
+log_proxy_config() {
+    local has_proxy=0
+    for var in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy; do
+        if [ -n "${!var:-}" ]; then
+            log "  $var=${!var}"
+            has_proxy=1
+        fi
+    done
+    if [ "$has_proxy" -eq 0 ]; then
+        log "  (no proxy configured)"
+    fi
+}
+
 install_npm_agent_tooling() {
     log "Installing npm agent tooling"
+    log "Proxy config:"
+    log_proxy_config
     log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION}"
 
     mkdir -p "$DEVA_HOME/.npm-global" "$DEVA_HOME/.local/bin"

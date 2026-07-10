@@ -175,6 +175,12 @@ format_datetime() {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Version Fetching (by type)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_npm_registry_latest() {
+    curl -fsSL --max-time 10 \
+        "https://registry.npmjs.org/-/package/$1/dist-tags" 2>/dev/null | \
+        sed -n 's/.*"latest":"\([^"]*\)".*/\1/p'
+}
+
 fetch_latest_version() {
     local tool=$1
     local type=$(get_tool_field "$tool" type)
@@ -182,7 +188,7 @@ fetch_latest_version() {
 
     case $type in
         npm)
-            npm view "$source" version 2>/dev/null || echo ""
+            _npm_registry_latest "$source"
             ;;
         github-release)
             gh api "repos/$source/releases/latest" --jq '.tag_name' 2>/dev/null || echo ""
@@ -203,8 +209,9 @@ fetch_version_date() {
     case $type in
         npm)
             local v=$(normalize_version "$version")
-            npm view "$source@$v" time --json 2>/dev/null | \
-                jq -r --arg ver "$v" '.[$ver] // .' 2>/dev/null | head -1 || echo ""
+            local encoded=${source/\//%2f}
+            curl -fsSL --max-time 10 "https://registry.npmjs.org/$encoded" 2>/dev/null | \
+                jq -r --arg ver "$v" '.time[$ver] // empty' 2>/dev/null | head -1 || echo ""
             ;;
         github-release)
             gh api "repos/$source/releases/tags/$version" --jq '.published_at' 2>/dev/null || echo ""

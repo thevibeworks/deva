@@ -44,6 +44,22 @@ RUST_TARGETS ?= wasm32-unknown-unknown
 DOCKER_BUILD_EXTRA_ARGS ?=
 SKIP_BUILD_NETWORK_CHECK ?= 0
 
+# Forward host proxy env vars to Docker build (BuildKit predefined ARGs —
+# available in all stages without Dockerfile ARG declarations, excluded
+# from cache key so proxy changes don't bust layer cache).
+# Rewrite localhost proxy addresses: 127.0.0.1/localhost on the host is the
+# container's own loopback during build — host.docker.internal reaches the host.
+_dproxy = $(subst ://localhost,://host.docker.internal,$(subst ://127.0.0.1,://host.docker.internal,$1))
+PROXY_BUILD_ARGS := \
+	$(if $(HTTP_PROXY),--build-arg HTTP_PROXY=$(call _dproxy,$(HTTP_PROXY))) \
+	$(if $(HTTPS_PROXY),--build-arg HTTPS_PROXY=$(call _dproxy,$(HTTPS_PROXY))) \
+	$(if $(http_proxy),--build-arg http_proxy=$(call _dproxy,$(http_proxy))) \
+	$(if $(https_proxy),--build-arg https_proxy=$(call _dproxy,$(https_proxy))) \
+	$(if $(NO_PROXY),--build-arg NO_PROXY=$(NO_PROXY)) \
+	$(if $(no_proxy),--build-arg no_proxy=$(no_proxy))
+
+DOCKER_BUILD_FLAGS = $(PROXY_BUILD_ARGS) $(DOCKER_BUILD_EXTRA_ARGS)
+
 TOOLCHAIN_BUILD_ARGS := \
 	--build-arg NODE_MAJOR=$(NODE_MAJOR) \
 	--build-arg GO_VERSION=$(GO_VERSION) \
@@ -112,7 +128,7 @@ build-network-check:
 		printf '%s\n' \
 			'FROM node:$(NODE_MAJOR)-bookworm-slim' \
 			'RUN node -e "require('\''dns'\'').lookup('\''registry.npmjs.org'\'',{all:true},(e,a)=>{if(e){console.error(e);process.exit(1)};console.log(a.map(x=>x.address).slice(0,3).join('\'','\''))})"' \
-			| docker build $(DOCKER_BUILD_EXTRA_ARGS) --progress=plain --no-cache -f - . >/dev/null; \
+			| docker build $(DOCKER_BUILD_FLAGS) --progress=plain --no-cache -f - . >/dev/null; \
 	fi
 
 build-main: build-network-check
@@ -159,23 +175,23 @@ build-main: build-network-check
 		   fi; \
 		 fi
 	@echo "Hint: override via GO_VERSION=... CLAUDE_CODE_VERSION=... or run 'make versions-pin'"
-	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(DOCKERFILE) $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
+	docker build $(DOCKER_BUILD_FLAGS) -f $(DOCKERFILE) $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Build completed: $(MAIN_IMAGE)"
 
 rebuild:
 	@echo "🔨 Rebuilding Docker image (no cache) with $(DOCKERFILE)..."
-	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(DOCKERFILE) --no-cache $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
+	docker build $(DOCKER_BUILD_FLAGS) -f $(DOCKERFILE) --no-cache $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Rebuild completed: $(MAIN_IMAGE)"
 
 
 build-core:
 	@echo "🔨 Building stable core image..."
-	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(DOCKERFILE) --target agent-base $(CORE_BUILD_ARGS) -t $(CORE_IMAGE) .
+	docker build $(DOCKER_BUILD_FLAGS) -f $(DOCKERFILE) --target agent-base $(CORE_BUILD_ARGS) -t $(CORE_IMAGE) .
 	@echo "✅ Core build completed: $(CORE_IMAGE)"
 
 build-rust-image: build-network-check
 	@echo "🔨 Building Rust Docker image..."
-	docker build $(DOCKER_BUILD_EXTRA_ARGS) -f $(RUST_DOCKERFILE) \
+	docker build $(DOCKER_BUILD_FLAGS) -f $(RUST_DOCKERFILE) \
 		--build-arg BASE_IMAGE=$(CORE_IMAGE) \
 		$(RUST_BUILD_ARGS) \
 		-t $(RUST_IMAGE) .
@@ -192,19 +208,19 @@ build-all:
 
 buildx:
 	@echo "🔨 Building with docker buildx..."
-	docker buildx build -f $(DOCKERFILE) --load $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
+	docker buildx build $(DOCKER_BUILD_FLAGS) -f $(DOCKERFILE) --load $(MAIN_BUILD_ARGS) -t $(MAIN_IMAGE) .
 	@echo "✅ Buildx completed: $(MAIN_IMAGE)"
 
 buildx-multi:
 	@echo "🔨 Building multi-arch images for amd64 and arm64..."
-	docker buildx build -f $(DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
+	docker buildx build $(DOCKER_BUILD_FLAGS) -f $(DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
 		$(MAIN_BUILD_ARGS) \
 		--push -t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed and pushed: $(MAIN_IMAGE)"
 
 buildx-multi-rust:
 	@echo "🔨 Building multi-arch Rust images for amd64 and arm64..."
-	docker buildx build -f $(RUST_DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
+	docker buildx build $(DOCKER_BUILD_FLAGS) -f $(RUST_DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
 		--build-arg BASE_IMAGE=$(MAIN_IMAGE) \
 		$(RUST_BUILD_ARGS) \
 		--push -t $(RUST_IMAGE) .
@@ -212,7 +228,7 @@ buildx-multi-rust:
 
 buildx-multi-local:
 	@echo "🔨 Building multi-arch images locally..."
-	docker buildx build -f $(DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
+	docker buildx build $(DOCKER_BUILD_FLAGS) -f $(DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
 		$(MAIN_BUILD_ARGS) \
 		-t $(MAIN_IMAGE) .
 	@echo "✅ Multi-arch build completed locally: $(MAIN_IMAGE)"
