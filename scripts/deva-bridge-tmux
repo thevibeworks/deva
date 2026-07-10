@@ -20,10 +20,12 @@ Prefer: deva-tmux bridge start   (auto-selects ssh when provisioned)
 EOF
 }
 
+QUIET=0
+
 while [ $# -gt 0 ]; do
     case $1 in
     -h | --help) usage; exit 0 ;;
-    -q | --quiet) ;;
+    -q | --quiet) QUIET=1 ;;
     -H | --host)
         [ $# -ge 2 ] || { echo "$prog: missing value for $1" >&2; exit 1; }
         DEVA_BRIDGE_HOST="$2"; export DEVA_BRIDGE_HOST; shift ;;
@@ -38,4 +40,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# -q matched the old script's behavior: info lines suppressed, warnings
+# and errors still on stderr.
+if [ "$QUIET" -eq 1 ]; then
+    exec deva-tmux bridge start --transport socat --foreground >/dev/null
+fi
 exec deva-tmux bridge start --transport socat --foreground

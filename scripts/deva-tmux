@@ -83,9 +83,14 @@ host_tmux_bin() {
         die "tmux not found on host ($(host_target))"
 }
 
+# Remote invocations pass the tmux path (and args) as positionals to a
+# fixed `sh -c` script: the login shell only ever parses quoted words, and
+# sh — not zsh/fish — does the expansion. No exec before a || fallback:
+# a successful exec would make the fallback unreachable.
 host_tmux_socket() {
     local bin="$1"
-    hssh "$(host_target)" "sh -c '$bin display-message -p \"#{socket_path}\" 2>/dev/null || echo /tmp/tmux-\$(id -u)/default'"
+    hssh "$(host_target)" \
+        "sh -c '\"\$0\" display-message -p \"#{socket_path}\" 2>/dev/null || echo /tmp/tmux-\$(id -u)/default' $(printf '%q' "$bin")"
 }
 
 # --- socat transport ---------------------------------------------------------
@@ -189,7 +194,7 @@ cmd_ls() {
     if [[ "$transport" == "ssh" ]]; then
         local bin
         bin=$(host_tmux_bin)
-        hssh "$(host_target)" "$bin ls"
+        hssh "$(host_target)" "sh -c 'exec \"\$0\" ls' $(printf '%q' "$bin")"
     else
         ensure_bridge socat
         tmux -S "$BRIDGE_SOCK" ls
@@ -201,11 +206,14 @@ cmd_attach() {
     local transport
     transport=$(resolve_transport)
     if [[ "$transport" == "ssh" ]]; then
-        local bin cmd="attach"
+        local bin
         bin=$(host_tmux_bin)
-        [[ -n "${1:-}" ]] && cmd="new-session -A -s $(printf '%q' "$1")"
         mkdir -p "$STATE_DIR"
-        exec ssh -t "${SSH_OPTS[@]}" "$(host_target)" "$bin $cmd"
+        if [[ -n "${1:-}" ]]; then
+            exec ssh -t "${SSH_OPTS[@]}" "$(host_target)" \
+                "sh -c 'exec \"\$0\" new-session -A -s \"\$1\"' $(printf '%q ' "$bin" "$1")"
+        fi
+        exec ssh -t "${SSH_OPTS[@]}" "$(host_target)" "sh -c 'exec \"\$0\" attach' $(printf '%q' "$bin")"
     else
         ensure_bridge socat
         if [[ -n "${1:-}" ]]; then
@@ -222,7 +230,7 @@ cmd_tmux() {
     if [[ "$transport" == "ssh" ]]; then
         local bin
         bin=$(host_tmux_bin)
-        hssh "$(host_target)" "$bin $(printf '%q ' "$@")"
+        hssh "$(host_target)" "sh -c 'exec \"\$0\" \"\$@\"' $(printf '%q ' "$bin" "$@")"
     else
         ensure_bridge socat
         tmux -S "$BRIDGE_SOCK" "$@"
