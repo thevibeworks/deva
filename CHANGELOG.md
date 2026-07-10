@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HTTP(S)_PROXY` forwarded to `docker build` via BuildKit predefined
   ARGs with localhost (and authenticated `user:pass@localhost`) proxies
   rewritten to `host.docker.internal` plus an explicit
-  `--add-host host-gateway` mapping for native Linux Engine; npm version
+  `--add-host host.docker.internal:host-gateway` mapping for native
+  Linux Engine; npm version
   resolution goes straight to registry.npmjs.org instead of honoring
   `.npmrc` mirror overrides, degrading to warn-and-fallback on registry
   outages; proxy credentials are redacted from all build/version logs
