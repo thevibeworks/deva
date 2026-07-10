@@ -290,9 +290,15 @@ Requires:
 
 - `XAI_API_KEY` (from [console.x.ai](https://console.x.ai))
 
-Grok prefers an `auth.json` session token over `XAI_API_KEY`, so deva masks
-the default `auth.json` path with a blank overlay in this mode. The API key
-is what gets billed, even if a mounted `~/.grok` still holds a session.
+Grok's credential priority puts mounted config above the environment:
+`model.api_key` > `model.env_key` > session token > `XAI_API_KEY`. So in
+this mode deva mounts no `~/.grok` at all — the exported key is the only
+credential in the container, and it is what gets billed. Session state
+lives container-local and does not persist across runs in this mode.
+
+If you force a `~/.grok` mount with `-v` anyway, deva still blank-overlays
+the default `auth.json`, but per-model keys in a mounted `config.toml`
+outrank `XAI_API_KEY` — don't mix the two.
 
 Example:
 
@@ -306,9 +312,17 @@ deva.sh grok --auth-with api-key
 Grok keeps its real binary in `~/.grok/bin/` (its self-update dir) and the
 npm launcher resolves that path first. Inside the image, deva moves the
 binary to `~/.local/bin/grok` and removes `~/.grok/bin`, so a host-mounted
-`~/.grok` (which may contain a macOS binary) never shadows it. Consequence:
-`grok update` inside the container is a no-op for the binary actually being
-run; the image pin (`GROK_CLI_VERSION`) is the only version that matters.
+`~/.grok` (which may contain a macOS binary) never shadows it.
+
+The reverse direction is guarded too: grok's self-updater writes into
+`~/.grok/bin/` and `~/.grok/downloads/`. A mounted `config.toml` without
+the npm installer marker makes the updater treat the install as
+self-managed, so `grok update` would drop Linux binaries into the host
+mount — breaking a macOS host CLI via its npm launcher. Whenever a host
+dir is mounted at `/home/deva/.grok`, deva overlays those two paths with
+container-local tmpfs: in-container `grok update` works, its writes die
+with the container, and the host install stays intact. The image pin
+(`GROK_CLI_VERSION`) is the only version that matters.
 
 ## Config Homes And Auth Isolation
 

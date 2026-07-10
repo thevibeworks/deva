@@ -1976,6 +1976,39 @@ agent_canonical_basenames() {
     esac
 }
 
+# grok api-key contract (#403): pass XAI_API_KEY, mount no auth dir.
+# grok's credential priority is model.api_key > model.env_key > session
+# token > XAI_API_KEY, so anything a mounted ~/.grok carries (config.toml
+# per-model keys, auth.json session) can outrank the exported key and
+# silently bill another account.
+grok_api_key_no_mount() {
+    [ "$ACTIVE_AGENT" = "grok" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
+}
+
+# grok's self-updater writes Linux binaries into ~/.grok/bin and
+# ~/.grok/downloads — inside the auth dir we bind-mount. Verified against
+# @xai-official/grok 0.2.93: a mounted config.toml without the npm installer
+# marker flips the updater to installer=internal, and `grok update` then
+# re-creates both dirs on the mount (worst case: Linux binary shadowing a
+# macOS host CLI via the host npm trampoline). Whenever a host dir lands at
+# /home/deva/.grok, overlay those two paths with container-local tmpfs so
+# updater writes die with the container instead of poisoning the host.
+append_grok_update_guard() {
+    local arg
+    for arg in "${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"}"; do
+        case "$arg" in
+        *:/home/deva/.grok | *:/home/deva/.grok:*)
+            DOCKER_ARGS+=(
+                --tmpfs "/home/deva/.grok/bin:uid=$(id -u),gid=$(id -g),mode=0755,size=512m"
+                --tmpfs "/home/deva/.grok/downloads:uid=$(id -u),gid=$(id -g),mode=0755,size=512m"
+            )
+            return 0
+            ;;
+        esac
+    done
+    return 0
+}
+
 # Mount the canonical entries for one agent from a source directory.
 # Host-side CLI -v or .deva VOLUME= at the same container target wins
 # (user_volumes_declares_target suppression; first-writer-wins holds).
@@ -1983,6 +2016,9 @@ mount_agent_canonical() {
     local agent="$1"
     local src_dir="$2"
     [ -n "$agent" ] && [ -d "$src_dir" ] || return 0
+    if [ "$agent" = "grok" ] && grok_api_key_no_mount; then
+        return 0
+    fi
 
     local entry src
     while IFS= read -r entry; do
@@ -2092,8 +2128,9 @@ default_credential_target_path() {
         printf '%s' "/home/deva/.gemini/mcp-oauth-tokens-v2.json"
         ;;
     grok)
-        # grok prefers the auth.json session token over XAI_API_KEY, so the
-        # blank overlay is what makes api-key auth win over a mounted ~/.grok.
+        # api-key mode mounts no ~/.grok (grok_api_key_no_mount), but an
+        # explicit user -v/.deva VOLUME can still carry one in; grok prefers
+        # a session token over XAI_API_KEY, so blank-overlay auth.json anyway.
         printf '%s' "/home/deva/.grok/auth.json"
         ;;
     *)
@@ -3490,7 +3527,9 @@ else
         [ -f "$HOME/.claude.json" ] && DOCKER_ARGS+=("-v" "$HOME/.claude.json:/home/deva/.claude.json")
         [ -d "$HOME/.codex" ] && DOCKER_ARGS+=("-v" "$HOME/.codex:/home/deva/.codex")
         [ -d "$HOME/.gemini" ] && DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
-        [ -d "$HOME/.grok" ] && DOCKER_ARGS+=("-v" "$HOME/.grok:/home/deva/.grok")
+        if [ -d "$HOME/.grok" ] && ! grok_api_key_no_mount; then
+            DOCKER_ARGS+=("-v" "$HOME/.grok:/home/deva/.grok")
+        fi
     fi
 fi
 _step "mount dispatch: done"
@@ -3517,6 +3556,9 @@ if [ "$CONFIG_HOME_FROM_CLI" = false ] && [ "$QUICK_MODE" = false ]; then
         DOCKER_ARGS+=("-v" "$HOME/.cache/deva:/home/deva/.cache/deva")
     fi
 fi
+
+append_grok_update_guard
+_step "append_grok_update_guard"
 
 append_user_envs
 _step "append_user_envs"

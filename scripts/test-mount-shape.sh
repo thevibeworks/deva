@@ -53,9 +53,11 @@ mkdir -p \
     "$hybrid_root/xdg/deva/claude" \
     "$hybrid_root/xdg/deva/codex" \
     "$hybrid_root/xdg/deva/gemini" \
+    "$hybrid_root/xdg/deva/grok" \
     "$hybrid_root/host/.claude" \
     "$hybrid_root/host/.codex" \
     "$hybrid_root/host/.gemini" \
+    "$hybrid_root/host/.grok" \
     "$hybrid_root/cli/.codex"
 touch "$hybrid_root/host/.claude.json"
 
@@ -63,10 +65,12 @@ ln -sf "$hybrid_root/host/.claude"      "$hybrid_root/xdg/deva/claude/.claude"
 ln -sf "$hybrid_root/host/.claude.json" "$hybrid_root/xdg/deva/claude/.claude.json"
 ln -sf "$hybrid_root/host/.codex"       "$hybrid_root/xdg/deva/codex/.codex"
 ln -sf "$hybrid_root/host/.gemini"      "$hybrid_root/xdg/deva/gemini/.gemini"
+ln -sf "$hybrid_root/host/.grok"        "$hybrid_root/xdg/deva/grok/.grok"
 
 cat > "$hybrid_root/xdg/deva/.deva" <<EOF
 VOLUME=$hybrid_root/host/.codex:/home/deva/.codex
 VOLUME=$hybrid_root/host/.gemini:/home/deva/.gemini
+VOLUME=$hybrid_root/host/.grok:/home/deva/.grok
 VOLUME=$hybrid_root/host/.claude:/home/deva/.claude
 VOLUME=$hybrid_root/host/.claude.json:/home/deva/.claude.json
 EOF
@@ -94,14 +98,14 @@ count_target() {
     fi
 }
 
-for agent in claude codex gemini; do
+for agent in claude codex gemini grok; do
     out="$(run_hybrid "$agent" --dry-run || true)"
     if grep -F -- 'duplicate bind mount target detected' <<<"$out" >/dev/null; then
         echo "hybrid recipe triggered duplicate-target error for $agent" >&2
         echo "$out" >&2
         exit 1
     fi
-    for tgt in /home/deva/.claude /home/deva/.claude.json /home/deva/.codex /home/deva/.gemini; do
+    for tgt in /home/deva/.claude /home/deva/.claude.json /home/deva/.codex /home/deva/.gemini /home/deva/.grok; do
         c="$(count_target "$tgt" "$out")"
         if [[ "$c" -ne 1 ]]; then
             echo "hybrid $agent: target $tgt emitted $c times (want 1)" >&2
@@ -152,7 +156,8 @@ trap default_cleanup EXIT
 mkdir -p \
     "$default_root/xdg/deva/claude/.claude" \
     "$default_root/xdg/deva/codex/.codex" \
-    "$default_root/xdg/deva/gemini/.gemini"
+    "$default_root/xdg/deva/gemini/.gemini" \
+    "$default_root/xdg/deva/grok/.grok"
 echo '{}' > "$default_root/xdg/deva/claude/.claude.json"
 
 run_default() {
@@ -167,9 +172,9 @@ run_default() {
     ) 2>&1
 }
 
-for agent in claude codex gemini; do
+for agent in claude codex gemini grok; do
     out="$(run_default "$agent" --dry-run || true)"
-    for tgt in /home/deva/.claude /home/deva/.claude.json /home/deva/.codex /home/deva/.gemini; do
+    for tgt in /home/deva/.claude /home/deva/.claude.json /home/deva/.codex /home/deva/.gemini /home/deva/.grok; do
         c="$(count_target "$tgt" "$out")"
         if [[ "$c" -ne 1 ]]; then
             echo "hybrid-default $agent: target $tgt emitted $c times (want 1)" >&2
@@ -178,6 +183,33 @@ for agent in claude codex gemini; do
         fi
     done
 done
+
+# ───── grok update-guard + api-key no-mount coverage ─────
+# A mounted /home/deva/.grok must come with tmpfs overlays for the
+# self-updater dirs (bin/, downloads/) so in-container `grok update`
+# cannot write into the host mount.
+grok_out="$(run_default grok --dry-run || true)"
+for guard in "--tmpfs /home/deva/.grok/bin:" "--tmpfs /home/deva/.grok/downloads:"; do
+    if ! grep -F -- "$guard" <<<"$grok_out" >/dev/null; then
+        echo "grok oauth: missing update guard $guard" >&2
+        echo "$grok_out" >&2
+        exit 1
+    fi
+done
+
+# api-key mode (#403): XAI_API_KEY only, no ~/.grok mount, no guard needed.
+apikey_out="$(XAI_API_KEY=test-key run_default grok --auth-with api-key --dry-run || true)"
+apikey_grok="$(count_target /home/deva/.grok "$apikey_out")"
+if [[ "$apikey_grok" -ne 0 ]]; then
+    echo "grok api-key: target /home/deva/.grok emitted $apikey_grok times (want 0)" >&2
+    echo "$apikey_out" >&2
+    exit 1
+fi
+if grep -F -- "--tmpfs /home/deva/.grok/bin:" <<<"$apikey_out" >/dev/null; then
+    echo "grok api-key: update guard emitted without a .grok mount" >&2
+    echo "$apikey_out" >&2
+    exit 1
+fi
 
 # Explicit --config-home DIR isolates to a single home (no sibling agents).
 iso_out="$(run_default claude --config-home "$default_root/xdg/deva/claude" --dry-run || true)"

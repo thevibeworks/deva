@@ -52,6 +52,9 @@ setup_grok_auth() {
                            "Set: export XAI_API_KEY=your_key (from https://console.x.ai)"
             fi
 
+            # No ~/.grok mount in this mode (grok_api_key_no_mount in
+            # deva.sh): grok resolves config credentials above XAI_API_KEY,
+            # so a mounted config.toml could silently bill another account.
             AUTH_DETAILS="api-key (XAI_API_KEY)"
             DOCKER_ARGS+=("-e" "XAI_API_KEY=$XAI_API_KEY")
             ;;
