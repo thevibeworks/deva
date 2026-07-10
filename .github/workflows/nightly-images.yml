@@ -208,15 +208,32 @@ jobs:
     needs: [resolve-versions, build-base, build-rust]
     runs-on: ubuntu-latest
     steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # Outcome tripwire: assert the artifacts exist, not that the build
       # steps exited 0. A green run with an unpullable tag is a lie.
+      # Small retry absorbs registry eventual-consistency right after push —
+      # a tripwire that itself flakes trains people to ignore red.
       - name: Assert all nightly tags resolve
         run: |
           set -euo pipefail
           stamp="${{ needs.resolve-versions.outputs.stamp }}"
           for tag in nightly "nightly-${stamp}" nightly-rust "nightly-${stamp}-rust"; do
-            docker manifest inspect "ghcr.io/thevibeworks/deva:${tag}" >/dev/null
-            echo "ok: ${tag}"
+            for attempt in 1 2 3; do
+              if docker manifest inspect "ghcr.io/thevibeworks/deva:${tag}" >/dev/null; then
+                echo "ok: ${tag}"
+                continue 2
+              fi
+              echo "attempt ${attempt} failed for ${tag}; retrying in 10s" >&2
+              sleep 10
+            done
+            echo "error: ghcr.io/thevibeworks/deva:${tag} does not resolve after push" >&2
+            exit 1
           done
 
   summary:

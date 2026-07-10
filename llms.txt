@@ -6,10 +6,11 @@
 
 deva.sh is a single entry point installed on the host; agents run inside
 `ghcr.io/thevibeworks/deva` images (`:latest`, `:rust` for stable, `:nightly`,
-`:nightly-rust` refreshed daily). Agent-level permission prompts are disabled by
-design (`claude --dangerously-skip-permissions`, `codex
---dangerously-bypass-approvals-and-sandbox`, `gemini --yolo`, `grok
---always-approve`) — isolation comes from Docker, not permission theater. Auth
+`:nightly-rust` refreshed daily). Agent-level permission prompts are disabled
+by design — isolation comes from Docker, not permission theater:
+`claude --dangerously-skip-permissions`,
+`codex --dangerously-bypass-approvals-and-sandbox`,
+`gemini --yolo`, and `grok --always-approve`. Auth
 lives in per-agent config homes under `~/.config/deva/` with OAuth (default) or
 API-key modes per agent; nothing crosses the host boundary except what you
 mount. Known sharp edge: mounting `/var/run/docker.sock` is host-root with
