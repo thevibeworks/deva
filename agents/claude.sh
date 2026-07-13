@@ -167,9 +167,17 @@ setup_claude_auth() {
             if [ -z "${CUSTOM_CREDENTIALS_FILE:-}" ]; then
                 auth_error "CUSTOM_CREDENTIALS_FILE not set for credentials-file auth"
             fi
-            AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
+            if [ "$AUTH_PROVISION_MODE" = true ]; then
+                mkdir -p "$(dirname "$CUSTOM_CREDENTIALS_FILE")"
+                printf '{}' > "$CUSTOM_CREDENTIALS_FILE"
+                chmod 600 "$CUSTOM_CREDENTIALS_FILE"
+                AUTH_DETAILS="credentials-file (provisioning: $CUSTOM_CREDENTIALS_FILE)"
+                echo "Provisioning credentials: log in via the TUI to populate $CUSTOM_CREDENTIALS_FILE" >&2
+            else
+                AUTH_DETAILS="credentials-file ($CUSTOM_CREDENTIALS_FILE)"
+                echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.claude/.credentials.json" >&2
+            fi
             DOCKER_ARGS+=("-v" "$CUSTOM_CREDENTIALS_FILE:/home/deva/.claude/.credentials.json")
-            echo "Using custom credentials: $CUSTOM_CREDENTIALS_FILE -> /home/deva/.claude/.credentials.json" >&2
             ;;
         *)
             auth_error "auth method '$method' not implemented"
