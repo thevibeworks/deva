@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--auth-with` provision mode: passing a non-existent credentials file
+  path now offers to create it via interactive TUI login instead of
+  erroring. The container runs with the file bind-mounted; after exit
+  deva validates and reports the captured credentials (subscription type,
+  expiry), or removes the placeholder on abort. Combine with `-Q --rm`
+  for a clean one-shot provisioning flow.
+
 ## [0.14.0] - 2026-07-10
 
 ### Added

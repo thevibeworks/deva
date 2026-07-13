@@ -226,18 +226,95 @@ is_file_path() {
     [[ "$arg" == /* ]] || [[ "$arg" == ~* ]] || [[ "$arg" == ./* ]] || [[ "$arg" == ../* ]] || [[ "$arg" == *.json ]]
 }
 
-expand_and_validate_file() {
+AUTH_PROVISION_MODE=false
+
+expand_auth_file_tilde() {
     local path="$1"
     if [[ "$path" == ~* ]]; then
         path="${path/#\~/$HOME}"
     fi
-    if [ ! -f "$path" ]; then
-        auth_error "Credentials file not found: $path"
-    fi
+    printf '%s' "$path"
+}
+
+resolve_absolute_path() {
+    local path="$1"
     if [[ "$path" == /* ]]; then
-        echo "$path"
+        printf '%s' "$path"
     else
-        echo "$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+        printf '%s/%s' "$(cd "$(dirname "$path")" && pwd)" "$(basename "$path")"
+    fi
+}
+
+expand_and_validate_file() {
+    local path
+    path="$(expand_auth_file_tilde "$1")"
+
+    if [ -f "$path" ]; then
+        resolve_absolute_path "$path"
+        return
+    fi
+
+    # File missing — attempt provision mode
+    local dir
+    dir="$(dirname "$path")"
+    if [ ! -d "$dir" ]; then
+        auth_error "Credentials file not found: $path" \
+                   "Parent directory does not exist: $dir"
+    fi
+
+    if [ ! -t 0 ]; then
+        auth_error "Credentials file not found: $path" \
+                   "Run interactively to provision via TUI login"
+    fi
+
+    printf 'Credentials file not found: %s\n' "$path" >&2
+    printf 'Create it via TUI login? [y/N] ' >&2
+    local reply
+    read -r reply
+    case "$reply" in
+        y | Y | yes | YES) ;;
+        *) auth_error "Aborted: credentials file not found" ;;
+    esac
+
+    AUTH_PROVISION_MODE=true
+    resolve_absolute_path "$path"
+}
+
+finish_auth_provision() {
+    [ "$AUTH_PROVISION_MODE" = true ] || return 0
+    [ "${DRY_RUN:-false}" = true ] && return 0
+    local f="${CUSTOM_CREDENTIALS_FILE:-}"
+    [ -n "$f" ] || return 0
+
+    local ok=false
+    if [ -s "$f" ]; then
+        if command -v jq >/dev/null 2>&1; then
+            jq -e '.claudeAiOauth.accessToken' "$f" >/dev/null 2>&1 && ok=true
+        else
+            grep -q '"accessToken"' "$f" 2>/dev/null && ok=true
+        fi
+    fi
+
+    if [ "$ok" = true ]; then
+        chmod 600 "$f" 2>/dev/null || true
+        echo "" >&2
+        echo "Credentials captured: $f" >&2
+        if command -v jq >/dev/null 2>&1; then
+            local sub expires_ms now_s days
+            sub=$(jq -r '.claudeAiOauth.subscriptionType // "unknown"' "$f" 2>/dev/null)
+            expires_ms=$(jq -r '.claudeAiOauth.expiresAt // 0' "$f" 2>/dev/null)
+            now_s=$(date +%s)
+            if [ "$expires_ms" -gt 0 ] 2>/dev/null; then
+                days=$(( (expires_ms / 1000 - now_s) / 86400 ))
+                echo "  subscription: $sub, expires in ~${days}d" >&2
+            else
+                echo "  subscription: $sub" >&2
+            fi
+        fi
+        echo "Reuse: deva claude --auth-with $f" >&2
+    else
+        rm -f "$f"
+        echo "warning: no credentials captured; removed placeholder $f" >&2
     fi
 }
 

@@ -3684,12 +3684,22 @@ if [ "$EPHEMERAL_MODE" = false ]; then
         update_session_file
     fi
 
-    exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+    if [ "$AUTH_PROVISION_MODE" = true ]; then
+        docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
+        finish_auth_provision
+    else
+        exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+    fi
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
     write_session_file
-    if ! docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"; then
-        echo "error: failed to launch ephemeral container" >&2
-        exit 1
+    if [ "$AUTH_PROVISION_MODE" = true ]; then
+        docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}" || true
+        finish_auth_provision
+    else
+        if ! docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}"; then
+            echo "error: failed to launch ephemeral container" >&2
+            exit 1
+        fi
     fi
 fi

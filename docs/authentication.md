@@ -152,6 +152,24 @@ Example:
 deva.sh claude --auth-with ~/work/claude-prod.credentials.json
 ```
 
+#### Provisioning new credentials
+
+If the file does not exist, deva offers to create it via TUI login:
+
+```bash
+deva claude -Q --rm --auth-with ~/creds/xxx-claude-max.credentials.json -- --resume
+# -> "Credentials file not found: .../xxx-claude-max.credentials.json"
+# -> "Create it via TUI login? [y/N]"
+# Log in via /login in the TUI, then exit when done.
+# -> "Credentials captured: .../xxx-claude-max.credentials.json"
+# -> "  subscription: max, expires in ~365d"
+# -> "Reuse: deva claude --auth-with .../xxx-claude-max.credentials.json"
+```
+
+Use `-Q` (bare mode) to avoid polluting your default config home with the
+new account's identity. The placeholder file is removed automatically if
+no credentials are captured.
+
 ## Codex
 
 ### Default: `--auth-with chatgpt`
