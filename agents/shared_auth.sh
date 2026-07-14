@@ -233,15 +233,23 @@ DEVA_TRACE_UI_URL=""
 setup_trace_ui_port() {
     local port=9317
     local tries=0
+    local free_port=""
     while [ "$tries" -lt 12 ]; do
         if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            free_port="$port"
             break
         fi
         port=$((port + 1))
         tries=$((tries + 1))
     done
-    DOCKER_ARGS+=("-p" "127.0.0.1:${port}:9317")
-    DEVA_TRACE_UI_URL="http://localhost:${port}"
+
+    if [ -z "$free_port" ]; then
+        echo "warning: no free host port in 9317-9328; trace UI will not be reachable from the host" >&2
+        return 0
+    fi
+
+    DOCKER_ARGS+=("-p" "127.0.0.1:${free_port}:9317")
+    DEVA_TRACE_UI_URL="http://127.0.0.1:${free_port}"
 }
 
 # Print the trace UI URL before the TUI takes the screen, and open the host
@@ -253,13 +261,15 @@ announce_trace_ui() {
 
     local url="$DEVA_TRACE_UI_URL"
     if [ "${1:-new}" = "existing" ]; then
+        # docker port exits non-zero for unpublished mappings; under
+        # set -euo pipefail that must not kill the launch.
         local mapping
-        mapping=$(docker port "$CONTAINER_NAME" 9317/tcp 2>/dev/null | head -1)
+        mapping=$(docker port "$CONTAINER_NAME" 9317/tcp 2>/dev/null | head -1 || true)
         if [ -z "$mapping" ]; then
             echo "warning: trace UI not reachable — container was created without the trace port; recreate it (deva rm) or use --rm" >&2
             return 0
         fi
-        url="http://localhost:${mapping##*:}"
+        url="http://127.0.0.1:${mapping##*:}"
     fi
     [ -n "$url" ] || return 0
 

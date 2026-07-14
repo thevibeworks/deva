@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of silently attaching a stale CLI to the same config home.
   Label-less images keep the bare agent name (#420)
 - Traced sessions publish the cctrace live UI to the host loopback:
-  free port probed from 9317, `Trace UI: http://localhost:<port>` printed
+  free port probed from 9317, `Trace UI: http://127.0.0.1:<port>` printed
   before the TUI starts, and the host browser opens the moment the UI
   answers (poll-then-open; `DEVA_TRACE_OPEN=0` disables). Attaching to a
   persistent container created without the port warns instead (#425)

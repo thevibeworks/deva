@@ -186,7 +186,7 @@ published to the host loopback. deva prints the URL before the TUI takes
 the screen and opens your host browser the moment the UI answers:
 
 ```text
-Trace UI: http://localhost:9317 (live once the agent starts)
+Trace UI: http://127.0.0.1:<port> (live once the agent starts)
 ```
 
 Set `DEVA_TRACE_OPEN=0` to keep the banner but skip the auto-open.
