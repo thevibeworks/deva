@@ -147,6 +147,23 @@ main() {
         exit 0
     fi
 
+    # --only: gate on the selected tools, not the whole manifest — a lagging
+    # unselected tool must not trigger a rebuild of nothing but pins.
+    if [[ -n $ONLY ]]; then
+        local _t _cur _lat _only_needs_update=0
+        for _t in ${ONLY//,/ }; do
+            _cur=$(normalize_version "$(get_current "$_t")")
+            _lat=$(normalize_version "$(get_latest "$_t")")
+            if [[ -z $_cur || $_cur == "-" || $_cur != "$_lat" ]]; then
+                _only_needs_update=1
+            fi
+        done
+        if [[ $_only_needs_update -eq 0 ]]; then
+            echo -e "${GREEN}Selected tool(s) up-to-date: ${ONLY}. Nothing to upgrade.${RESET}"
+            exit 0
+        fi
+    fi
+
     print_changelogs
 
     # Resolve build versions early so we can show the manifest before countdown.
