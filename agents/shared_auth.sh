@@ -226,6 +226,74 @@ is_file_path() {
     [[ "$arg" == /* ]] || [[ "$arg" == ~* ]] || [[ "$arg" == ./* ]] || [[ "$arg" == ../* ]] || [[ "$arg" == *.json ]]
 }
 
+# Publish the cctrace live UI (container port 9317, binds 0.0.0.0) to the
+# host loopback so the browser can reach it. Probe host ports from 9317 so
+# concurrent traced containers land on predictable neighbors (#425).
+DEVA_TRACE_UI_URL=""
+setup_trace_ui_port() {
+    local port=9317
+    local tries=0
+    while [ "$tries" -lt 12 ]; do
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            break
+        fi
+        port=$((port + 1))
+        tries=$((tries + 1))
+    done
+    DOCKER_ARGS+=("-p" "127.0.0.1:${port}:9317")
+    DEVA_TRACE_UI_URL="http://localhost:${port}"
+}
+
+# Print the trace UI URL before the TUI takes the screen, and open the host
+# browser the moment the UI answers. "new" trusts DEVA_TRACE_UI_URL (the
+# container doesn't exist yet); "existing" asks docker for the live mapping.
+announce_trace_ui() {
+    [ "${DEVA_TRACE_ACTIVE:-false}" = true ] || return 0
+    [ "${DRY_RUN:-false}" = true ] && return 0
+
+    local url="$DEVA_TRACE_UI_URL"
+    if [ "${1:-new}" = "existing" ]; then
+        local mapping
+        mapping=$(docker port "$CONTAINER_NAME" 9317/tcp 2>/dev/null | head -1)
+        if [ -z "$mapping" ]; then
+            echo "warning: trace UI not reachable — container was created without the trace port; recreate it (deva rm) or use --rm" >&2
+            return 0
+        fi
+        url="http://localhost:${mapping##*:}"
+    fi
+    [ -n "$url" ] || return 0
+
+    echo "Trace UI: $url (live once the agent starts)" >&2
+    maybe_open_trace_ui "$url"
+}
+
+# Poll-then-open in the background: the browser opens exactly when the UI
+# is up, never against a connection-refused page. DEVA_TRACE_OPEN=0 disables.
+maybe_open_trace_ui() {
+    local url="$1"
+    [ "${DEVA_TRACE_OPEN:-1}" = "1" ] || return 0
+
+    local opener=""
+    if command -v open >/dev/null 2>&1; then
+        opener="open"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        opener="xdg-open"
+    fi
+    [ -n "$opener" ] || return 0
+
+    (
+        local i=0
+        while [ "$i" -lt 60 ]; do
+            if curl -sf -o /dev/null --max-time 1 "$url/" 2>/dev/null; then
+                "$opener" "$url" >/dev/null 2>&1 || true
+                exit 0
+            fi
+            sleep 0.5
+            i=$((i + 1))
+        done
+    ) >/dev/null 2>&1 &
+}
+
 AUTH_PROVISION_MODE=false
 
 expand_auth_file_tilde() {

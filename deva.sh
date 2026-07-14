@@ -3732,6 +3732,10 @@ if [ "$EPHEMERAL_MODE" = false ]; then
     _trace_env="DEVA_TRACE=0"
     [ "${DEVA_TRACE_ACTIVE:-false}" = true ] && _trace_env="DEVA_TRACE=1"
 
+    # Trace UI reachability is fixed at container create (port publish);
+    # attaching to a container created without it cannot gain the mapping.
+    announce_trace_ui existing
+
     if [ "$AUTH_PROVISION_MODE" = true ]; then
         docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
         finish_auth_provision
@@ -3741,6 +3745,7 @@ if [ "$EPHEMERAL_MODE" = false ]; then
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
     write_session_file
+    announce_trace_ui new
     if [ "$AUTH_PROVISION_MODE" = true ]; then
         docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}" || true
         finish_auth_provision
