@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-14
+
 ### Added
 - `deva-tmux` (#412): tmux interaction is now a built-in module instead of
   loose scripts. One in-container CLI, two transports — `ssh` (default:
