@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `deva-tmux` (#412): tmux interaction is now a built-in module instead of
+  loose scripts. One in-container CLI, two transports — `ssh` (default:
+  authenticated, reboot-durable, runs the host's tmux client so there is
+  no client/server protocol coupling) and `socat` (fallback: the old
+  unauthenticated TCP daemon, kept for hosts without sshd, loud warning
+  every start). Both land the host server on `/tmp/host-tmux.sock`, so
+  `tmux-bridge` (Layer 2) and `htmux` muscle memory work unchanged.
+  Container->host stays opt-in: `deva.sh --host-tmux` mounts `~/.ssh`
+  read-only and passes `DEVA_HOST_USER`; without it the baked CLI is
+  inert. Host-side lifecycle moved where it belongs: `deva.sh tmux setup`
+  authorizes your key by writing your own `authorized_keys` (killing the
+  in-container docker-mount write from the #406 draft), `deva.sh tmux
+  host-daemon start|stop|status` manages the socat fallback, `deva.sh
+  tmux doctor` diagnoses the host side. `deva-bridge-tmux` is now a compat
+  shim. Verified live against a real host: both transports, bridge
+  lifecycle, native client + Layer 2 through the forwarded socket.
+
 ## [0.15.0] - 2026-07-14
 
 ### Added
@@ -59,7 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deva validates and reports the captured credentials (subscription type,
   expiry), or removes the placeholder on abort. Combine with `-Q --rm`
   for a clean one-shot provisioning flow.
-
 ## [0.14.0] - 2026-07-10
 
 ### Added

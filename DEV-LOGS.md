@@ -13,6 +13,16 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-10] Dev Log: deva-tmux — tmux as a built-in module, both transports #412
+- Why: tmux interaction was four loose scripts with zero deva.sh integration; #406 built the right transport (ssh) but deleted the socat fallback and stayed a loose script. Direction split matters: host->container (deva.sh shell) and agent<->agent (tmux-bridge) keep the sandbox; container->host breaks it and must be opt-in.
+- What:
+  - scripts/deva-tmux (new, baked into both images): ls/attach/tmux/bridge/setup/doctor with transport backends — ssh default (authenticated, launchd-durable, host-side tmux client so zero protocol coupling), socat fallback (unauthenticated TCP, warns loudly). DEVA_TMUX_TRANSPORT=auto|ssh|socat; auto probes ssh then socat. Both transports land on /tmp/host-tmux.sock -> tmux-bridge Layer 2 unchanged
+  - inert-without-provisioning is the security property: baked binary + no key + no daemon = no host reach. deva.sh --host-tmux is the opt-in: mounts ~/.ssh ro (dedup-safe, user -v wins), passes DEVA_HOST_USER, launcher's deva-tmux copy overrides the image copy in repo mode (skew insurance)
+  - deva.sh tmux command group (host side): setup writes your OWN authorized_keys — the #406 draft did this from inside the container via a docker host-mount, which is exactly the host-reach pattern the tool exists to gate; moving it host-side dissolved the scariest code. host-daemon start|stop|status wraps the socat daemon (inline fallback when scripts/ absent). doctor for the host view
+  - deva-bridge-tmux -> compat shim (old flags -> env -> deva-tmux bridge start --transport socat --foreground); deva-bridge-tmux-host unchanged; tmux-bridge stays vendored byte-for-byte (read-guard TTL idea goes upstream, not a fork)
+  - found+fixed in live test: backgrounded ssh -N -L inherited the caller's stdout, so `deva-tmux bridge start | tail` hung forever waiting for EOF — the #406 draft had the same latent bug. Bridge children now detach stdio to a state-dir log
+- Result: verified live against a real macOS host from inside the dev container — doctor sees both transports, ssh bridge + socat bridge both land the host server on the socket, native tmux client and tmux-bridge list work through it, lifecycle idempotent, socket cleaned on stop; mount-shape suite asserts off/on/dedup provisioning shapes; shellcheck severity=error clean
+
 # [2026-07-10] Dev Log: repo surface burnish #409
 - Why: product ships four agents but half the storefront said three; agents visiting the repo had no llms.txt; nightly 2026-07-09 failed on a transient ubuntu mirror sync and partially published (base pushed, rust did not — nightly/nightly-rust tags diverged a day)
 - What:

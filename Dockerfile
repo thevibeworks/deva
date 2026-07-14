@@ -240,12 +240,17 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
 USER root
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# deva-tmux: container->host tmux CLI (ssh + socat transports). Baked but
+# inert without host-side provisioning (deva.sh --host-tmux / tmux setup).
+COPY scripts/deva-tmux /usr/local/bin/deva-tmux
+# deva-bridge-tmux: compat shim -> deva-tmux bridge --transport socat
 COPY scripts/deva-bridge-tmux /usr/local/bin/deva-bridge-tmux
 # tmux-bridge: vendored from smux (layer-2 agent comms CLI over tmux panes)
 # See scripts/tmux-bridge.VENDORED for upstream commit and SHA256 pin.
 COPY scripts/tmux-bridge /usr/local/bin/tmux-bridge
 
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh && \
+    chmod 755 /usr/local/bin/deva-tmux && \
     chmod 755 /usr/local/bin/deva-bridge-tmux && \
     chmod 755 /usr/local/bin/tmux-bridge && \
     chmod -R 755 /usr/local/bin/scripts || true

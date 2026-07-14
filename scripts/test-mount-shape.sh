@@ -211,6 +211,55 @@ if grep -F -- "--tmpfs /home/deva/.grok/bin:" <<<"$apikey_out" >/dev/null; then
     exit 1
 fi
 
+# ───── --host-tmux provisioning coverage ─────
+# Container->host tmux is opt-in: no flag, no ~/.ssh mount, no host user env.
+# With the flag: ~/.ssh rides in read-only exactly once (user -v wins), and
+# DEVA_HOST_USER is passed for the in-container deva-tmux CLI.
+
+mkdir -p "$default_root/home/.ssh"
+
+plain_out="$(run_default claude --dry-run || true)"
+if [[ "$(count_target /home/deva/.ssh "$plain_out")" -ne 0 ]]; then
+    echo "host-tmux off: /home/deva/.ssh mounted without --host-tmux" >&2
+    echo "$plain_out" >&2
+    exit 1
+fi
+if grep -F -- "DEVA_HOST_USER=" <<<"$plain_out" >/dev/null; then
+    echo "host-tmux off: DEVA_HOST_USER passed without --host-tmux" >&2
+    echo "$plain_out" >&2
+    exit 1
+fi
+
+tmuxon_out="$(run_default claude --host-tmux --dry-run || true)"
+if [[ "$(count_target /home/deva/.ssh "$tmuxon_out")" -ne 1 ]]; then
+    echo "host-tmux on: /home/deva/.ssh not mounted exactly once" >&2
+    echo "$tmuxon_out" >&2
+    exit 1
+fi
+if ! grep -F -- "$default_root/home/.ssh:/home/deva/.ssh:ro" <<<"$tmuxon_out" >/dev/null; then
+    echo "host-tmux on: ~/.ssh mount is not read-only" >&2
+    echo "$tmuxon_out" >&2
+    exit 1
+fi
+if ! grep -F -- "DEVA_HOST_USER=" <<<"$tmuxon_out" >/dev/null; then
+    echo "host-tmux on: DEVA_HOST_USER not passed" >&2
+    echo "$tmuxon_out" >&2
+    exit 1
+fi
+
+mkdir -p "$default_root/cli-ssh"
+tmuxdedup_out="$(run_default claude --host-tmux --dry-run -v "$default_root/cli-ssh:/home/deva/.ssh" || true)"
+if [[ "$(count_target /home/deva/.ssh "$tmuxdedup_out")" -ne 1 ]]; then
+    echo "host-tmux dedup: /home/deva/.ssh emitted more than once with user -v" >&2
+    echo "$tmuxdedup_out" >&2
+    exit 1
+fi
+if ! grep -F -- "-v $default_root/cli-ssh:/home/deva/.ssh" <<<"$tmuxdedup_out" >/dev/null; then
+    echo "host-tmux dedup: user -v for /home/deva/.ssh did not win" >&2
+    echo "$tmuxdedup_out" >&2
+    exit 1
+fi
+
 # Explicit --config-home DIR isolates to a single home (no sibling agents).
 iso_out="$(run_default claude --config-home "$default_root/xdg/deva/claude" --dry-run || true)"
 iso_claude="$(count_target /home/deva/.claude "$iso_out")"

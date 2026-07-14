@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+# deva-tmux — reach the host machine's tmux from inside a deva container.
+#
+# One CLI, two transports:
+#
+#   ssh    (default)  authenticated, launchd-durable on macOS, and runs the
+#                     HOST's tmux client for ls/attach/tmux — zero
+#                     client/server protocol coupling.
+#   socat  (fallback) plain TCP to a host-side daemon (deva-bridge-tmux-host,
+#                     port 41555). Unauthenticated — any local process on the
+#                     host network can drive your tmux. Kept for hosts
+#                     without sshd; the warning is loud on purpose.
+#
+# Both transports land the host tmux server on the SAME local socket
+# (/tmp/host-tmux.sock), so tmux-bridge (Layer 2) and `htmux` muscle memory
+# work unchanged whichever transport carried it.
+#
+# SECURITY: container -> host is a privileged direction; this tool is baked
+# into the image but INERT without host-side provisioning. The ssh backend
+# needs a key you mount (deva.sh --host-tmux mounts ~/.ssh read-only); the
+# socat backend needs a daemon you start on the host (deva.sh tmux
+# host-daemon start). No provisioning, no host reach.
+set -euo pipefail
+
+VERSION="1.0.0"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/deva-tmux"
+KNOWN_HOSTS="$STATE_DIR/known_hosts"
+BRIDGE_SOCK="${DEVA_TMUX_SOCK:-${DEVA_BRIDGE_SOCK:-/tmp/host-tmux.sock}}"
+BRIDGE_PID="$STATE_DIR/bridge.pid"
+TRANSPORT="${DEVA_TMUX_TRANSPORT:-auto}"
+
+# socat backend endpoint (deva-bridge-tmux-host on the host side)
+SOCAT_HOST="${DEVA_BRIDGE_HOST:-host.docker.internal}"
+SOCAT_PORT="${DEVA_BRIDGE_PORT:-41555}"
+
+# --- ssh transport -----------------------------------------------------------
+
+# ~/.ssh is usually the host's, mounted read-only, so known_hosts lives in
+# the state dir. -F none skips host ssh config that references host-only
+# paths. BatchMode everywhere except attach: agents call this, and a password
+# prompt that never returns is the worst failure mode.
+SSH_OPTS=(
+    -F none
+    -o "UserKnownHostsFile=$KNOWN_HOSTS"
+    -o StrictHostKeyChecking=accept-new
+    -o ServerAliveInterval=30
+    -o ConnectTimeout=8
+)
+
+hssh() {
+    mkdir -p "$STATE_DIR"
+    ssh -o BatchMode=yes "${SSH_OPTS[@]}" "$@"
+}
+
+# DEVA_HOST_SSH overrides everything (full user@host). Otherwise the user
+# comes from DEVA_HOST_USER (deva.sh --host-tmux sets it) or the chrome
+# bridge var deva already exports; the host is docker's name for the machine.
+host_target() {
+    if [[ -n "${DEVA_HOST_SSH:-}" ]]; then
+        echo "$DEVA_HOST_SSH"
+        return
+    fi
+    local user="${DEVA_HOST_USER:-${DEVA_CHROME_HOST_USER:-}}"
+    [[ -n "$user" ]] || return 1
+    [[ "$user" =~ ^[A-Za-z0-9._-]+$ ]] || die "bogus host user: $user"
+    echo "${user}@host.docker.internal"
+}
+
+ssh_ok() {
+    local target
+    target=$(host_target 2>/dev/null) || return 1
+    hssh "$target" true 2>/dev/null
+}
+
+# Non-interactive ssh runs the user's login shell, which may not be POSIX;
+# wrap probes in sh -c so fish/nushell users don't get parse errors.
+host_tmux_bin() {
+    local probe='for t in "$(command -v tmux)" /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do [ -x "$t" ] && { echo "$t"; exit; }; done; exit 1'
+    hssh "$(host_target)" "sh -c '$probe'" ||
+        die "tmux not found on host ($(host_target))"
+}
+
+# Remote invocations pass the tmux path (and args) as positionals to a
+# fixed `sh -c` script: the login shell only ever parses quoted words, and
+# sh — not zsh/fish — does the expansion. No exec before a || fallback:
+# a successful exec would make the fallback unreachable.
+host_tmux_socket() {
+    local bin="$1"
+    hssh "$(host_target)" \
+        "sh -c '\"\$0\" display-message -p \"#{socket_path}\" 2>/dev/null || echo /tmp/tmux-\$(id -u)/default' $(printf '%q' "$bin")"
+}
+
+# --- socat transport ---------------------------------------------------------
+
+socat_reachable() {
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w2 "$SOCAT_HOST" "$SOCAT_PORT" 2>/dev/null && return 0
+    fi
+    if command -v socat >/dev/null 2>&1; then
+        socat -T1 /dev/null "TCP:$SOCAT_HOST:$SOCAT_PORT" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+socat_warning() {
+    cat >&2 <<'EOF'
+============================================
+WARNING: socat transport is UNAUTHENTICATED
+============================================
+Any process that can reach the host daemon's TCP port gains full tmux
+control on the host (send-keys, run-shell, scrollback). Prefer the ssh
+transport: deva.sh tmux setup (host) + deva.sh --host-tmux (launch).
+EOF
+}
+
+# --- transport resolution ----------------------------------------------------
+
+resolve_transport() {
+    case "$TRANSPORT" in
+    ssh | socat)
+        echo "$TRANSPORT"
+        return
+        ;;
+    auto) ;;
+    *) die "unknown transport: $TRANSPORT (auto|ssh|socat)" ;;
+    esac
+
+    if ssh_ok; then
+        echo "ssh"
+        return
+    fi
+    if socat_reachable; then
+        echo "socat"
+        return
+    fi
+
+    cat >&2 <<EOF
+error: no usable transport to the host tmux server.
+
+  ssh:   $(host_target 2>/dev/null || echo "<no host user; deva.sh --host-tmux sets DEVA_HOST_USER>") — auth failed or unreachable.
+         Host side: deva.sh tmux setup    Container side: needs ~/.ssh mounted (deva.sh --host-tmux)
+  socat: $SOCAT_HOST:$SOCAT_PORT — daemon not reachable.
+         Host side: deva.sh tmux host-daemon start
+
+Run 'deva-tmux doctor' for a layer-by-layer diagnosis.
+EOF
+    exit 1
+}
+
+# A pidfile can go stale and the PID be reused by an unrelated process;
+# only treat it as ours if it is numeric AND the command looks like our
+# transport child (ssh or socat).
+bridge_pid_ours() {
+    local pid
+    pid=$(cat "$BRIDGE_PID" 2>/dev/null) || return 1
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    ps -o command= -p "$pid" 2>/dev/null | grep -qE '(^|/| )(ssh|socat) ' || return 1
+    echo "$pid"
+}
+
+bridge_alive() {
+    [[ -S "$BRIDGE_SOCK" && -f "$BRIDGE_PID" ]] && bridge_pid_ours >/dev/null
+}
+
+usage() {
+    cat <<'EOF'
+deva-tmux — drive the host machine's tmux from inside a deva container
+
+Usage: deva-tmux <command> [args...]
+
+Commands:
+  ls                     List host tmux sessions
+  attach [session]       Attach; with a name, create it if missing
+  tmux <args...>         Host tmux passthrough (e.g. deva-tmux tmux kill-session -t foo)
+  bridge [start|stop|status] [--transport ssh|socat] [--foreground]
+                         Land the host tmux server on /tmp/host-tmux.sock, then:
+                           tmux -S /tmp/host-tmux.sock attach
+                           TMUX_BRIDGE_SOCKET=/tmp/host-tmux.sock tmux-bridge list
+  setup                  Verify ssh transport prerequisites (key + auth)
+  doctor                 Diagnose both transports layer by layer
+  version                Print version
+
+Transports:
+  ssh (default)          authenticated; host-side tmux client, no protocol coupling
+  socat (fallback)       unauthenticated TCP to deva-bridge-tmux-host:41555
+
+Environment:
+  DEVA_TMUX_TRANSPORT    auto (default) | ssh | socat
+  DEVA_TMUX_SOCK         local bridge socket (default: /tmp/host-tmux.sock)
+  DEVA_HOST_SSH          full ssh override, e.g. me@host.docker.internal
+  DEVA_HOST_USER         host username (deva.sh --host-tmux sets this)
+  DEVA_BRIDGE_HOST/PORT  socat daemon endpoint (default: host.docker.internal:41555)
+EOF
+    exit 0
+}
+
+# --- commands ----------------------------------------------------------------
+
+cmd_ls() {
+    local transport
+    transport=$(resolve_transport)
+    if [[ "$transport" == "ssh" ]]; then
+        local bin
+        bin=$(host_tmux_bin)
+        hssh "$(host_target)" "sh -c 'exec \"\$0\" ls' $(printf '%q' "$bin")"
+    else
+        ensure_bridge socat
+        tmux -S "$BRIDGE_SOCK" ls
+    fi
+}
+
+cmd_attach() {
+    [[ -t 0 ]] || die "attach needs a tty; use 'deva-tmux tmux ...' instead"
+    local transport
+    transport=$(resolve_transport)
+    if [[ "$transport" == "ssh" ]]; then
+        local bin
+        bin=$(host_tmux_bin)
+        mkdir -p "$STATE_DIR"
+        if [[ -n "${1:-}" ]]; then
+            exec ssh -t "${SSH_OPTS[@]}" "$(host_target)" \
+                "sh -c 'exec \"\$0\" new-session -A -s \"\$1\"' $(printf '%q ' "$bin" "$1")"
+        fi
+        exec ssh -t "${SSH_OPTS[@]}" "$(host_target)" "sh -c 'exec \"\$0\" attach' $(printf '%q' "$bin")"
+    else
+        ensure_bridge socat
+        if [[ -n "${1:-}" ]]; then
+            exec tmux -S "$BRIDGE_SOCK" new-session -A -s "$1"
+        fi
+        exec tmux -S "$BRIDGE_SOCK" attach
+    fi
+}
+
+cmd_tmux() {
+    [[ $# -ge 1 ]] || die "'tmux' needs arguments"
+    local transport
+    transport=$(resolve_transport)
+    if [[ "$transport" == "ssh" ]]; then
+        local bin
+        bin=$(host_tmux_bin)
+        hssh "$(host_target)" "sh -c 'exec \"\$0\" \"\$@\"' $(printf '%q ' "$bin" "$@")"
+    else
+        ensure_bridge socat
+        tmux -S "$BRIDGE_SOCK" "$@"
+    fi
+}
+
+# Start the bridge if it is not already up (used by socat-mode commands that
+# need the local socket as their only path to the server).
+ensure_bridge() {
+    bridge_alive && return 0
+    bridge_start "$1" false
+}
+
+bridge_start() {
+    local transport="$1" foreground="$2"
+
+    if bridge_alive; then
+        echo "bridge already up: $BRIDGE_SOCK"
+        return 0
+    fi
+    mkdir -p "$STATE_DIR"
+    rm -f "$BRIDGE_SOCK"
+
+    if [[ "$transport" == "ssh" ]]; then
+        local bin remote_sock
+        bin=$(host_tmux_bin)
+        remote_sock=$(host_tmux_socket "$bin")
+        [[ -n "$remote_sock" ]] || die "cannot determine host tmux socket path"
+        # Forwarding to a missing remote socket "succeeds" and then every
+        # connection through it fails opaquely — verify the server first.
+        hssh "$(host_target)" "sh -c 'test -S \"\$0\"' $(printf '%q' "$remote_sock")" ||
+            die "no host tmux server socket at $remote_sock — start one on the host: tmux new -d"
+        if [[ "$foreground" == true ]]; then
+            echo "bridge (ssh, foreground): $BRIDGE_SOCK -> $(host_target):$remote_sock"
+            exec ssh -o BatchMode=yes "${SSH_OPTS[@]}" -N -L "$BRIDGE_SOCK:$remote_sock" "$(host_target)"
+        fi
+        # Detach stdio: an inherited stdout keeps callers' pipes open forever.
+        ssh -o BatchMode=yes "${SSH_OPTS[@]}" -N -L "$BRIDGE_SOCK:$remote_sock" "$(host_target)" \
+            >>"$STATE_DIR/bridge.log" 2>&1 </dev/null &
+        echo $! >"$BRIDGE_PID"
+    else
+        command -v socat >/dev/null 2>&1 || die "missing dependency: socat"
+        socat_reachable || {
+            echo "error: cannot reach $SOCAT_HOST:$SOCAT_PORT" >&2
+            echo "on the host, run: deva.sh tmux host-daemon start" >&2
+            exit 3
+        }
+        socat_warning
+        if [[ "$foreground" == true ]]; then
+            echo "bridge (socat, foreground): $BRIDGE_SOCK -> $SOCAT_HOST:$SOCAT_PORT"
+            exec socat "UNIX-LISTEN:$BRIDGE_SOCK,fork,unlink-early,mode=600" "TCP:$SOCAT_HOST:$SOCAT_PORT"
+        fi
+        socat "UNIX-LISTEN:$BRIDGE_SOCK,fork,unlink-early,mode=600" "TCP:$SOCAT_HOST:$SOCAT_PORT" \
+            >>"$STATE_DIR/bridge.log" 2>&1 </dev/null &
+        echo $! >"$BRIDGE_PID"
+    fi
+
+    local i
+    for i in 1 2 3 4 5; do
+        [[ -S "$BRIDGE_SOCK" ]] && break
+        sleep 0.4
+    done
+    [[ -S "$BRIDGE_SOCK" ]] || {
+        rm -f "$BRIDGE_PID"
+        die "bridge failed to come up"
+    }
+    echo "bridge up ($transport): $BRIDGE_SOCK"
+    echo "usage: tmux -S $BRIDGE_SOCK attach"
+    echo "       TMUX_BRIDGE_SOCKET=$BRIDGE_SOCK tmux-bridge list"
+}
+
+cmd_bridge() {
+    local action="start" foreground=false transport=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        start | stop | status) action="$1" ;;
+        --foreground) foreground=true ;;
+        --transport)
+            [[ $# -ge 2 ]] || die "missing value for --transport"
+            transport="$2"
+            shift
+            ;;
+        *) die "unknown bridge argument: $1 (start|stop|status, --transport, --foreground)" ;;
+        esac
+        shift
+    done
+
+    case "$action" in
+    status)
+        if bridge_alive; then
+            echo "bridge up: $BRIDGE_SOCK (pid $(cat "$BRIDGE_PID"))"
+        else
+            echo "bridge down"
+            return 1
+        fi
+        ;;
+    stop)
+        if [[ -f "$BRIDGE_PID" ]]; then
+            local pid
+            if pid=$(bridge_pid_ours); then
+                kill "$pid" 2>/dev/null || true
+                echo "bridge stopped"
+            else
+                echo "bridge pidfile was stale; cleaned up"
+            fi
+            rm -f "$BRIDGE_PID" "$BRIDGE_SOCK"
+        else
+            echo "bridge not running"
+        fi
+        ;;
+    start)
+        if [[ -z "$transport" ]]; then
+            transport=$(resolve_transport)
+        fi
+        case "$transport" in ssh | socat) ;; *) die "unknown transport: $transport" ;; esac
+        bridge_start "$transport" "$foreground"
+        ;;
+    esac
+}
+
+# In-container setup only VERIFIES the ssh path — writing the host's
+# authorized_keys from inside the sandbox would need the docker socket,
+# which is exactly the kind of host reach this tool refuses to normalize.
+# The write happens on the host: deva.sh tmux setup.
+cmd_setup() {
+    local target
+    target=$(host_target 2>/dev/null) ||
+        die "no host user; launch with 'deva.sh --host-tmux' (sets DEVA_HOST_USER) or set it manually"
+
+    if ssh_ok; then
+        echo "ok: ssh to $target works — nothing to do"
+        return
+    fi
+
+    local pub=""
+    for k in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+        [[ -f "$k" ]] && { pub="$k"; break; }
+    done
+    if [[ -z "$pub" ]]; then
+        echo "no pubkey visible in ~/.ssh — launch with 'deva.sh --host-tmux' to mount it (read-only)" >&2
+    else
+        echo "pubkey present ($pub) but ssh auth failed." >&2
+    fi
+    echo "on the HOST, run: deva.sh tmux setup" >&2
+    echo "then re-check here: deva-tmux doctor" >&2
+    exit 1
+}
+
+cmd_doctor() {
+    echo "deva-tmux doctor v${VERSION}"
+    echo "transport policy:  $TRANSPORT"
+    echo "bridge socket:     $BRIDGE_SOCK"
+    echo "---"
+
+    # ssh transport
+    local target
+    if target=$(host_target 2>/dev/null); then
+        echo "ssh target:        $target"
+        if getent hosts "${target#*@}" >/dev/null 2>&1; then
+            echo "ssh resolution:    ok"
+            if timeout 3 bash -c "exec 3<>/dev/tcp/${target#*@}/22" 2>/dev/null; then
+                echo "ssh port 22:       open"
+                if ssh_ok; then
+                    echo "ssh auth:          ok"
+                    local bin
+                    if bin=$(host_tmux_bin 2>/dev/null); then
+                        echo "host tmux:         $bin"
+                        echo "host sessions:     $(hssh "$target" "sh -c '\"\$0\" ls 2>/dev/null | wc -l' $(printf '%q' "$bin")" | tr -d ' ')"
+                    else
+                        echo "host tmux:         NOT FOUND on host"
+                    fi
+                else
+                    echo "ssh auth:          FAILED (host side: deva.sh tmux setup)"
+                fi
+            else
+                echo "ssh port 22:       CLOSED (macOS: System Settings > Sharing > Remote Login)"
+            fi
+        else
+            echo "ssh resolution:    FAILED (${target#*@} does not resolve)"
+        fi
+    else
+        echo "ssh target:        unset (deva.sh --host-tmux sets DEVA_HOST_USER)"
+    fi
+    echo "---"
+
+    # socat transport
+    echo "socat endpoint:    $SOCAT_HOST:$SOCAT_PORT"
+    if socat_reachable; then
+        echo "socat daemon:      reachable (UNAUTHENTICATED transport — prefer ssh)"
+    else
+        echo "socat daemon:      not reachable (host side: deva.sh tmux host-daemon start)"
+    fi
+    echo "---"
+
+    # local state
+    if bridge_alive; then
+        echo "bridge:            up ($BRIDGE_SOCK, pid $(cat "$BRIDGE_PID"))"
+        if command -v tmux >/dev/null 2>&1 && tmux -S "$BRIDGE_SOCK" ls >/dev/null 2>&1; then
+            echo "bridge server:     responding"
+        else
+            echo "bridge server:     socket up but tmux not responding through it"
+        fi
+    else
+        echo "bridge:            down (optional; deva-tmux bridge start)"
+    fi
+    if command -v tmux-bridge >/dev/null 2>&1; then
+        echo "layer 2:           tmux-bridge present ($(tmux-bridge version 2>/dev/null || echo '?'))"
+    else
+        echo "layer 2:           tmux-bridge NOT in PATH"
+    fi
+    echo "---"
+
+    local usable
+    usable=$(resolve_transport 2>/dev/null || echo "none")
+    if [[ "$usable" == "none" ]]; then
+        echo "status: NO USABLE TRANSPORT"
+        return 1
+    fi
+    echo "status: OK (would use: $usable)"
+}
+
+# --- main --------------------------------------------------------------------
+
+[[ $# -eq 0 ]] && usage
+
+case "$1" in
+ls) shift; cmd_ls "$@" ;;
+attach | a) shift; cmd_attach "$@" ;;
+tmux) shift; cmd_tmux "$@" ;;
+bridge) shift; cmd_bridge "$@" ;;
+setup) shift; cmd_setup "$@" ;;
+doctor) shift; cmd_doctor "$@" ;;
+version) echo "deva-tmux $VERSION" ;;
+-h | --help | help) usage ;;
+*) die "unknown command: $1. Run 'deva-tmux' for usage." ;;
+esac
