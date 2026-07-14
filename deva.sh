@@ -929,6 +929,43 @@ compute_shape_hash() {
     short_hash "$combined" 8
 }
 
+# Agent CLI version from the image label. Persistent containers pin the
+# image they were created from; embedding the CLI version in the name keeps
+# version drift visible and stops silent attach to a stale-version container
+# sharing the same config home (#420). check_image runs before any name is
+# built, so the inspect is reliable; label-less images fall back to the
+# bare agent name.
+AGENT_VERSION_TAG_CACHE_AGENT=""
+AGENT_VERSION_TAG_CACHE=""
+agent_version_tag() {
+    local agent="$1"
+
+    if [ "$AGENT_VERSION_TAG_CACHE_AGENT" = "$agent" ]; then
+        printf '%s' "$AGENT_VERSION_TAG_CACHE"
+        return
+    fi
+
+    local label=""
+    case "$agent" in
+        claude) label="org.opencontainers.image.claude_code_version" ;;
+        codex) label="org.opencontainers.image.codex_version" ;;
+        gemini) label="org.opencontainers.image.gemini_cli_version" ;;
+        grok) label="org.opencontainers.image.grok_cli_version" ;;
+    esac
+
+    local ver=""
+    if [ -n "$label" ]; then
+        ver=$(docker image inspect --format "{{ index .Config.Labels \"$label\" }}" "$(docker_image_ref)" 2>/dev/null | head -1)
+        [ "$ver" = "<no value>" ] && ver=""
+        # Container names allow [a-zA-Z0-9_.-]; drop anything else (keep dots)
+        ver=$(printf '%s' "$ver" | tr -cd 'a-zA-Z0-9._-')
+    fi
+
+    AGENT_VERSION_TAG_CACHE_AGENT="$agent"
+    AGENT_VERSION_TAG_CACHE="$ver"
+    printf '%s' "$ver"
+}
+
 build_container_name() {
     local prefix="$1"
     local agent="$2"
@@ -938,7 +975,12 @@ build_container_name() {
     local ephemeral="${6:-false}"
     local pid="${7:-}"
 
-    local name="${prefix}--${agent}--${auth_tag}--${slug}..${shape_hash}"
+    local agent_seg="$agent"
+    local agent_ver
+    agent_ver="$(agent_version_tag "$agent")"
+    [ -n "$agent_ver" ] && agent_seg="${agent}-v${agent_ver}"
+
+    local name="${prefix}--${agent_seg}--${auth_tag}--${slug}..${shape_hash}"
     if [ "$ephemeral" = true ] && [ -n "$pid" ]; then
         name="${name}--${pid}"
     fi
@@ -1077,8 +1119,8 @@ extract_agent_from_name() {
     local name="$1"
     local rest="${name#"${DEVA_CONTAINER_PREFIX}"}"
 
-    # New format: deva--<agent>--<auth>--<slug>..<hash>
-    if [[ "$rest" =~ ^--([a-z]+)-- ]]; then
+    # New format: deva--<agent>[-v<version>]--<auth>--<slug>..<hash>
+    if [[ "$rest" =~ ^--([a-z]+)(-v[A-Za-z0-9._-]+)?-- ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
         return
     fi

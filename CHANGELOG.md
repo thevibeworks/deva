@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEVA_TRACE=1` and removes it on the next non-traced start. Covers
   subprocesses and tools that ignore the CA env vars; never touches the
   host trust store
+- Container names embed the agent CLI version from the image label:
+  `deva--claude-v2.1.204--auth-file-max--proj..hash`. Persistent
+  containers pin old images; a CLI bump now creates a distinct container
+  instead of silently attaching a stale CLI to the same config home.
+  Label-less images keep the bare agent name (#420)
 
 ### Changed
 - cctrace pin bumped 0.4.0 -> 0.11.0 (client profiles, shape-first
