@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared adjacent — a cctrace-only bump no longer rebuilds the npm
   agent layer or (rust image) the Playwright layer (#419)
 - `--trace` for codex and grok via cctrace client profiles (#418).
-  `deva codex -- --trace exec "..."` / `deva grok -- --trace -p "..."`
+  `deva codex --trace -- exec "..."` / `deva grok --trace -- -p "..."`
   wrap the agent with `cctrace <client> --no-open --`; always MITM capture
 - Container-scoped CA trust for traced sessions (#414): the entrypoint
   installs the cctrace MITM CA into the container system store when

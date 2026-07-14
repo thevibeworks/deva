@@ -203,7 +203,7 @@ Examples:
 
 Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
-  deva.sh claude -- --trace --continue   # Trace requests with cctrace
+  deva.sh claude --trace -- --continue   # Trace requests with cctrace
   deva.sh --show-config                  # Debug configuration
   deva.sh --no-docker claude             # Disable Docker-in-Docker auto-mount
 USAGE
@@ -3414,8 +3414,13 @@ fi
 # Warn if explicit --config-home is missing the agent's auth directory.
 # Only warn for default OAuth flows — api-key/bedrock/vertex/copilot don't need local auth dirs.
 # Peek at AGENT_ARGV + AGENT_ARGS to detect --auth-with before agent_prepare() runs.
+# Only scan before the -- sentinel; post-side --auth-with belongs to the
+# agent CLI and must not suppress the missing-dir warning (#427).
 _config_home_uses_default_auth=true
 for _arg in "${AGENT_ARGV[@]+"${AGENT_ARGV[@]}"}" "${AGENT_ARGS[@]+"${AGENT_ARGS[@]}"}"; do
+    if [ "$_arg" = "--" ]; then
+        break
+    fi
     if [ "$_arg" = "--auth-with" ]; then
         _config_home_uses_default_auth=false
         break
