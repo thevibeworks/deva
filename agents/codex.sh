@@ -94,6 +94,7 @@ agent_prepare() {
         # DEVA_TRACE=1 installs the MITM CA into the container store (#414).
         DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
         DEVA_TRACE_ACTIVE=true
+        setup_trace_ui_port
         AGENT_COMMAND=("cctrace" "codex" "--no-open" "--" "${AGENT_COMMAND[@]:1}")
     fi
 

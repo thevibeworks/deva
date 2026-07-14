@@ -181,6 +181,20 @@ tools that ignore `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE` still verify. The
 container is the blast radius: trust never touches the host store and is
 removed at the next non-traced start.
 
+The live trace UI (cctrace's web view, port 9317 in the container) is
+published to the host loopback. deva prints the URL before the TUI takes
+the screen and opens your host browser the moment the UI answers:
+
+```text
+Trace UI: http://127.0.0.1:<port> (live once the agent starts)
+```
+
+Set `DEVA_TRACE_OPEN=0` to keep the banner but skip the auto-open.
+Concurrent traced containers get neighboring host ports (9318, ...).
+Port publishing is fixed at container create: attaching to a persistent
+container created without `--trace` prints a warning instead — recreate
+it (`deva rm`) or use `--rm` for traced sessions.
+
 Traces land in `.cctrace/` inside your workspace, so they survive the
 container. Each run writes a JSONL log plus a self-contained HTML snapshot you
 can open in a browser on the host. Credentials are redacted before anything

@@ -51,6 +51,7 @@ agent_prepare() {
         # into the container system trust store (#414)
         DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
         DEVA_TRACE_ACTIVE=true
+        setup_trace_ui_port
         AGENT_COMMAND=("cctrace" "--no-open" "--")
         if [ "$has_dangerously" = false ]; then
             AGENT_COMMAND+=("--dangerously-skip-permissions")
