@@ -20,7 +20,18 @@ agent_prepare() {
 
     AGENT_COMMAND+=("--yolo")
 
-    AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
+    # Strip the deva -- sentinel; everything after it is verbatim (#427).
+    local -a clean_args=()
+    local first_sep=false
+    local arg
+    for arg in "${remaining_args[@]+"${remaining_args[@]}"}"; do
+        if [ "$arg" = "--" ] && [ "$first_sep" = false ]; then
+            first_sep=true
+        else
+            clean_args+=("$arg")
+        fi
+    done
+    AGENT_COMMAND+=("${clean_args[@]+"${clean_args[@]}"}")
 
     setup_gemini_auth "$AUTH_METHOD"
 }

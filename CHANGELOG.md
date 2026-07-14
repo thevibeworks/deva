@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared adjacent — a cctrace-only bump no longer rebuilds the npm
   agent layer or (rust image) the Playwright layer (#419)
 - `--trace` for codex and grok via cctrace client profiles (#418).
-  `deva codex -- --trace exec "..."` / `deva grok -- --trace -p "..."`
+  `deva codex --trace -- exec "..."` / `deva grok --trace -- -p "..."`
   wrap the agent with `cctrace <client> --no-open --`; always MITM capture
 - Container-scoped CA trust for traced sessions (#414): the entrypoint
   installs the cctrace MITM CA into the container system store when
@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before the TUI starts, and the host browser opens the moment the UI
   answers (poll-then-open; `DEVA_TRACE_OPEN=0` disables). Attaching to a
   persistent container created without the port warns instead (#425)
+
+### Fixed
+- `--` contract: deva-level flags (`--trace`, `--auth-with`) are now
+  interpreted only before `--`; everything after passes to the agent CLI
+  verbatim. `deva claude --trace -- --resume` traces; `deva claude --
+  --trace --resume` passes `--trace` through to claude as its own flag.
+  Previous behavior silently intercepted flags from both sides (#427)
 
 ### Changed
 - cctrace pin bumped 0.4.0 -> 0.11.0 (client profiles, shape-first

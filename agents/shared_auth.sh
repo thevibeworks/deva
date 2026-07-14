@@ -447,10 +447,23 @@ parse_auth_args() {
     local auth_method=""
     local -a remaining_args=()
     local i=0
+    local seen_sep=false
 
     while [ $i -lt ${#args[@]} ]; do
         case "${args[$i]}" in
+            --)
+                # First -- is the deva sentinel; keep it for downstream
+                # flag scanners (#427). Later --s pass through as-is.
+                seen_sep=true
+                remaining_args+=("${args[$i]}")
+                i=$((i + 1))
+                ;;
             --auth-with)
+                if [ "$seen_sep" = true ]; then
+                    remaining_args+=("${args[$i]}")
+                    i=$((i + 1))
+                    continue
+                fi
                 if [ $((i + 1)) -ge ${#args[@]} ]; then
                     auth_error "--auth-with requires a method or file path"
                 fi

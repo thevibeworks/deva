@@ -15,8 +15,10 @@ agent_prepare() {
     AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
-    # Detect --trace flag
+    # Detect --trace flag — only before the -- sentinel; after it, args
+    # belong to the agent CLI verbatim (#427). First -- is stripped.
     local use_trace=false
+    local seen_sep=false
     local -a claude_args=()
 
     if [ ${#remaining_args[@]} -gt 0 ]; then
@@ -24,8 +26,19 @@ agent_prepare() {
         while [ $i -lt ${#remaining_args[@]} ]; do
             local arg="${remaining_args[$i]}"
             case "$arg" in
+                --)
+                    if [ "$seen_sep" = false ]; then
+                        seen_sep=true
+                    else
+                        claude_args+=("$arg")
+                    fi
+                    ;;
                 --trace)
-                    use_trace=true
+                    if [ "$seen_sep" = true ]; then
+                        claude_args+=("$arg")
+                    else
+                        use_trace=true
+                    fi
                     ;;
                 *)
                     claude_args+=("$arg")
