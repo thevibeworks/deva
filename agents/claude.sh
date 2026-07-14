@@ -50,6 +50,7 @@ agent_prepare() {
         # DEVA_TRACE=1 tells the entrypoint to install the cctrace MITM CA
         # into the container system trust store (#414)
         DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
+        DEVA_TRACE_ACTIVE=true
         AGENT_COMMAND=("cctrace" "--no-open" "--")
         if [ "$has_dangerously" = false ]; then
             AGENT_COMMAND+=("--dangerously-skip-permissions")

@@ -343,7 +343,9 @@ setup_trace_ca() {
     if [ "${DEVA_TRACE:-}" != "1" ]; then
         if [ -f "$crt" ]; then
             rm -f "$crt"
-            update-ca-certificates >/dev/null 2>&1 || true
+            if ! update-ca-certificates >/dev/null 2>&1; then
+                echo "[entrypoint] warning: trust-store update failed; cctrace MITM CA may still be trusted" >&2
+            fi
         fi
         return 0
     fi
@@ -363,8 +365,12 @@ setup_trace_ca() {
     fi
 
     cp "$ca_path" "$crt"
-    update-ca-certificates >/dev/null 2>&1 || true
-    [ "$VERBOSE" = "true" ] && echo "[entrypoint] cctrace MITM CA trusted container-wide: $crt"
+    chmod 644 "$crt"
+    if update-ca-certificates >/dev/null 2>&1; then
+        [ "$VERBOSE" = "true" ] && echo "[entrypoint] cctrace MITM CA trusted container-wide: $crt"
+    else
+        echo "[entrypoint] warning: trust-store update failed; container-wide CA trust incomplete (cctrace env-scoped trust still applies)" >&2
+    fi
     return 0
 }
 

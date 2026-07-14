@@ -41,6 +41,7 @@ agent_prepare() {
         # cctrace grok profile: grok args go after "--"; always mitm.
         # DEVA_TRACE=1 installs the MITM CA into the container store (#414).
         DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
+        DEVA_TRACE_ACTIVE=true
         AGENT_COMMAND=("cctrace" "grok" "--no-open" "--" "${AGENT_COMMAND[@]:1}")
     fi
 

@@ -3684,11 +3684,17 @@ if [ "$EPHEMERAL_MODE" = false ]; then
         update_session_file
     fi
 
+    # docker exec env overrides the container's creation-time env: pass the
+    # trace state explicitly so --trace works on an existing container and a
+    # non-traced attach un-trusts the CA installed by an earlier traced run.
+    _trace_env="DEVA_TRACE=0"
+    [ "${DEVA_TRACE_ACTIVE:-false}" = true ] && _trace_env="DEVA_TRACE=1"
+
     if [ "$AUTH_PROVISION_MODE" = true ]; then
-        docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
+        docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
         finish_auth_provision
     else
-        exec docker exec "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+        exec docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
     fi
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
