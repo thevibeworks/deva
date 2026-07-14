@@ -935,11 +935,12 @@ compute_shape_hash() {
 # sharing the same config home (#420). check_image runs before any name is
 # built, so the inspect is reliable; label-less images fall back to the
 # bare agent name.
-AGENT_VERSION_TAG_CACHE="__unset__"
+AGENT_VERSION_TAG_CACHE_AGENT=""
+AGENT_VERSION_TAG_CACHE=""
 agent_version_tag() {
     local agent="$1"
 
-    if [ "$AGENT_VERSION_TAG_CACHE" != "__unset__" ]; then
+    if [ "$AGENT_VERSION_TAG_CACHE_AGENT" = "$agent" ]; then
         printf '%s' "$AGENT_VERSION_TAG_CACHE"
         return
     fi
@@ -960,6 +961,7 @@ agent_version_tag() {
         ver=$(printf '%s' "$ver" | tr -cd 'a-zA-Z0-9._-')
     fi
 
+    AGENT_VERSION_TAG_CACHE_AGENT="$agent"
     AGENT_VERSION_TAG_CACHE="$ver"
     printf '%s' "$ver"
 }
@@ -1117,8 +1119,8 @@ extract_agent_from_name() {
     local name="$1"
     local rest="${name#"${DEVA_CONTAINER_PREFIX}"}"
 
-    # New format: deva--<agent>--<auth>--<slug>..<hash>
-    if [[ "$rest" =~ ^--([a-z]+)-- ]]; then
+    # New format: deva--<agent>[-v<version>]--<auth>--<slug>..<hash>
+    if [[ "$rest" =~ ^--([a-z]+)(-v[A-Za-z0-9._-]+)?-- ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
         return
     fi

@@ -52,6 +52,11 @@ source_helpers() {
     eval "$(sed -n '/^generate_container_slug_for_path()/,/^}/p' "$REPO_ROOT/deva.sh")"
     eval "$(sed -n '/^compute_slug_components_for_path()/,/^}/p' "$REPO_ROOT/deva.sh")"
     eval "$(sed -n '/^extract_agent_from_name()/,/^}/p' "$REPO_ROOT/deva.sh")"
+    eval "$(sed -n '/^agent_version_tag()/,/^}/p' "$REPO_ROOT/deva.sh")"
+    AGENT_VERSION_TAG_CACHE_AGENT=""
+    AGENT_VERSION_TAG_CACHE=""
+    # No image label in unit tests unless a test stubs docker itself
+    docker_image_ref() { printf 'deva-test:none'; }
     DEVA_CONTAINER_PREFIX="deva"
 }
 
@@ -178,6 +183,26 @@ name=$(build_container_name "deva" "gemini" "vertex" "big-project" "11223344" "f
 assert_eq "persistent vertex auth" \
     "deva--gemini--vertex--big-project..11223344" "$name"
 
+# Versioned agent segment (#420): stub docker to return an image label
+docker() {
+    if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+        printf '2.1.204\n'
+        return 0
+    fi
+    return 1
+}
+AGENT_VERSION_TAG_CACHE_AGENT="" AGENT_VERSION_TAG_CACHE=""
+name=$(build_container_name "deva" "claude" "auth-file-max" "myrepo" "ab12cd34" "false" "")
+assert_eq "persistent with agent version" \
+    "deva--claude-v2.1.204--auth-file-max--myrepo..ab12cd34" "$name"
+
+AGENT_VERSION_TAG_CACHE_AGENT="" AGENT_VERSION_TAG_CACHE=""
+name=$(build_container_name "deva" "mystery" "auth-default" "myrepo" "ab12cd34" "false" "")
+assert_eq "unmapped agent stays bare" \
+    "deva--mystery--auth-default--myrepo..ab12cd34" "$name"
+unset -f docker
+AGENT_VERSION_TAG_CACHE_AGENT="" AGENT_VERSION_TAG_CACHE=""
+
 # ──────────────────────────────────────
 echo "=== extract_agent_from_name ==="
 # ──────────────────────────────────────
@@ -193,6 +218,12 @@ assert_eq "new format gemini" "gemini" \
 
 assert_eq "new format ephemeral" "claude" \
     "$(extract_agent_from_name "deva--claude--api-key-abcd--myrepo..ab12cd34--99999")"
+
+assert_eq "versioned agent segment" "claude" \
+    "$(extract_agent_from_name "deva--claude-v2.1.204--auth-file-max--myrepo..ab12cd34")"
+
+assert_eq "versioned ephemeral" "codex" \
+    "$(extract_agent_from_name "deva--codex-v0.131.0--auth-default--myrepo..ab12cd34--4242")"
 
 assert_eq "legacy ephemeral" "claude" \
     "$(extract_agent_from_name "deva-myrepo..i47b207-claude-12345")"
@@ -254,7 +285,7 @@ out="$(run_dry claude --debug --dry-run || true)"
 cname="$(extract_container_name "$out")"
 if [ -n "$cname" ]; then
     assert_match "dry-run: new format structure" \
-        "^deva--claude--auth-default--" "$cname"
+        "^deva--claude(-v[A-Za-z0-9._-]+)?--auth-default--" "$cname"
     assert_match "dry-run: ends with ..hash" \
         '\.\.[a-f0-9]{8}$' "$cname"
     assert_no_match "dry-run: no old-style ..i prefix" \
@@ -267,7 +298,7 @@ out="$(run_dry codex --debug --dry-run || true)"
 cname="$(extract_container_name "$out")"
 if [ -n "$cname" ]; then
     assert_match "dry-run codex: agent in name" \
-        "^deva--codex--" "$cname"
+        "^deva--codex(-v[A-Za-z0-9._-]+)?--" "$cname"
 else
     fail "dry-run codex: could not extract container name"
 fi
@@ -276,7 +307,7 @@ out="$(run_dry gemini --debug --dry-run || true)"
 cname="$(extract_container_name "$out")"
 if [ -n "$cname" ]; then
     assert_match "dry-run gemini: agent in name" \
-        "^deva--gemini--" "$cname"
+        "^deva--gemini(-v[A-Za-z0-9._-]+)?--" "$cname"
 else
     fail "dry-run gemini: could not extract container name"
 fi
@@ -288,7 +319,7 @@ if [ -n "$cname" ]; then
     assert_match "dry-run ephemeral: has PID suffix" \
         '--[0-9]+$' "$cname"
     assert_match "dry-run ephemeral: agent in name" \
-        "^deva--claude--" "$cname"
+        "^deva--claude(-v[A-Za-z0-9._-]+)?--" "$cname"
 else
     fail "dry-run ephemeral: could not extract container name"
 fi
