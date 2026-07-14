@@ -4,6 +4,7 @@
 .claude/
 *.bak
 
+/.cctrace
 ### Node ###
 # Logs
 logs
