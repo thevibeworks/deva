@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--auth-with` bare names (`claude-max.credentials.json`, no slash) resolve
+  against the agent config home (`~/.config/deva/<agent>/`) as a named
+  credentials store; CWD checked first for compat. Provisioning a missing
+  bare name creates it in the store (#417)
+
 ## [0.14.1] - 2026-07-13
 
 ### Added

@@ -245,9 +245,29 @@ resolve_absolute_path() {
     fi
 }
 
+# Bare credential names (no slash) live in the agent config home — the store.
+auth_store_dir() {
+    if [ -n "${CONFIG_HOME:-}" ]; then
+        printf '%s' "$CONFIG_HOME"
+    elif command -v default_config_home_for_agent >/dev/null 2>&1; then
+        default_config_home_for_agent "${ACTIVE_AGENT:-claude}"
+    else
+        printf '%s/deva/%s' "${XDG_CONFIG_HOME:-$HOME/.config}" "${ACTIVE_AGENT:-claude}"
+    fi
+}
+
 expand_and_validate_file() {
     local path
     path="$(expand_auth_file_tilde "$1")"
+
+    # Bare name: CWD first (compat), then the store; provision lands in the store.
+    if [[ "$path" != */* ]]; then
+        if [ -f "$path" ]; then
+            resolve_absolute_path "$path"
+            return
+        fi
+        path="$(auth_store_dir)/$path"
+    fi
 
     if [ -f "$path" ]; then
         resolve_absolute_path "$path"
@@ -257,7 +277,7 @@ expand_and_validate_file() {
     # File missing — attempt provision mode
     local dir
     dir="$(dirname "$path")"
-    if [ ! -d "$dir" ]; then
+    if [[ "$1" == */* ]] && [ ! -d "$dir" ]; then
         auth_error "Credentials file not found: $path" \
                    "Parent directory does not exist: $dir"
     fi
