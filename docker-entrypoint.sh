@@ -332,6 +332,48 @@ build_gosu_env_cmd() {
     exec gosu "$user" env "HOME=$DEVA_HOME" "PATH=$PATH" "$@"
 }
 
+# Container-scoped CA trust for cctrace MITM (#414). The container is the
+# blast radius: the CA key already lives in the container-readable home, so
+# trusting the cert system-wide adds convenience, not attack surface. Runs
+# each start: installs when tracing, removes otherwise — trust exists only
+# in traced sessions.
+setup_trace_ca() {
+    local crt=/usr/local/share/ca-certificates/cctrace-mitm.crt
+
+    if [ "${DEVA_TRACE:-}" != "1" ]; then
+        if [ -f "$crt" ]; then
+            rm -f "$crt"
+            if ! update-ca-certificates >/dev/null 2>&1; then
+                echo "[entrypoint] warning: trust-store update failed; cctrace MITM CA may still be trusted" >&2
+            fi
+        fi
+        return 0
+    fi
+
+    if ! command -v cctrace >/dev/null 2>&1; then
+        echo "[entrypoint] warning: DEVA_TRACE=1 but cctrace not found; skipping CA trust" >&2
+        return 0
+    fi
+
+    # --print-ca generates the CA on first use; it must run as the deva user
+    # so the key lands under $DEVA_HOME/.local/share/cctrace with sane ownership.
+    local ca_path
+    ca_path=$(gosu "$DEVA_USER" env "HOME=$DEVA_HOME" "PATH=$PATH" cctrace --print-ca 2>/dev/null | tail -1)
+    if [ -z "$ca_path" ] || [ ! -f "$ca_path" ]; then
+        echo "[entrypoint] warning: cctrace --print-ca gave no usable path; skipping CA trust" >&2
+        return 0
+    fi
+
+    cp "$ca_path" "$crt"
+    chmod 644 "$crt"
+    if update-ca-certificates >/dev/null 2>&1; then
+        [ "$VERBOSE" = "true" ] && echo "[entrypoint] cctrace MITM CA trusted container-wide: $crt"
+    else
+        echo "[entrypoint] warning: trust-store update failed; container-wide CA trust incomplete (cctrace env-scoped trust still applies)" >&2
+    fi
+    return 0
+}
+
 ensure_agent_binaries() {
     case "$DEVA_AGENT" in
     claude)
@@ -385,6 +427,7 @@ main() {
     setup_claude_chrome_bridge
     fix_rust_permissions
     fix_docker_socket_permissions
+    setup_trace_ca
     ensure_agent_binaries
 
     if [ $# -eq 0 ]; then

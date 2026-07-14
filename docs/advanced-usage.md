@@ -165,12 +165,21 @@ The printed `docker run` line is diagnostic output. It masks secrets and may con
 
 ```bash
 deva.sh claude -- --trace --continue
+deva.sh codex -- --trace exec "fix the failing tests"
+deva.sh grok -- --trace -p "explain this stack trace"
 ```
 
-`--trace` wraps Claude with [cctrace](https://github.com/thevibeworks/cctrace),
-which records every API call Claude makes — messages, OAuth, usage/credits,
-MCP — not just the chat endpoint. Everything else on the line goes to Claude
-unchanged.
+`--trace` wraps the agent with [cctrace](https://github.com/thevibeworks/cctrace),
+which records every API call the agent makes — messages, OAuth, usage/credits,
+MCP — not just the chat endpoint. Everything else on the line goes to the
+agent unchanged. Codex and Grok use cctrace client profiles (cctrace >= 0.11)
+and always run MITM capture.
+
+When tracing is on, the entrypoint installs the cctrace MITM CA into the
+container's system trust store (`update-ca-certificates`) so subprocesses and
+tools that ignore `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE` still verify. The
+container is the blast radius: trust never touches the host store and is
+removed at the next non-traced start.
 
 Traces land in `.cctrace/` inside your workspace, so they survive the
 container. Each run writes a JSONL log plus a self-contained HTML snapshot you

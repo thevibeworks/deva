@@ -18,9 +18,32 @@ agent_prepare() {
     AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
+    # Detect --trace flag (cctrace grok client profile, cctrace >= 0.11)
+    local use_trace=false
+    if [ ${#remaining_args[@]} -gt 0 ]; then
+        local -a filtered_args=()
+        local arg
+        for arg in "${remaining_args[@]}"; do
+            if [ "$arg" = "--trace" ]; then
+                use_trace=true
+            else
+                filtered_args+=("$arg")
+            fi
+        done
+        remaining_args=("${filtered_args[@]+"${filtered_args[@]}"}")
+    fi
+
     AGENT_COMMAND+=("--always-approve")
 
     AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
+
+    if [ "$use_trace" = true ]; then
+        # cctrace grok profile: grok args go after "--"; always mitm.
+        # DEVA_TRACE=1 installs the MITM CA into the container store (#414).
+        DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
+        DEVA_TRACE_ACTIVE=true
+        AGENT_COMMAND=("cctrace" "grok" "--no-open" "--" "${AGENT_COMMAND[@]:1}")
+    fi
 
     setup_grok_auth "$AUTH_METHOD"
 }

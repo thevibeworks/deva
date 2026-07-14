@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.title="deva-rust"
 LABEL org.opencontainers.image.description="Rust development environment with full toolchain"
 
 ARG CLAUDE_CODE_VERSION=2.1.143
-ARG CCTRACE_VERSION=0.4.0
+ARG CCTRACE_VERSION=0.11.0
 ARG CODEX_VERSION=0.131.0
 ARG GEMINI_CLI_VERSION=0.42.0
 ARG GROK_CLI_VERSION=0.2.93
