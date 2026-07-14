@@ -1011,7 +1011,7 @@ build_container_name() {
     local agent_seg="$agent"
     local agent_ver
     agent_ver="$(agent_version_tag "$agent")"
-    [ -n "$agent_ver" ] && agent_seg="${agent}-v${agent_ver}"
+    [ -n "$agent_ver" ] && agent_seg="${agent}v${agent_ver}"
 
     local name="${prefix}--${agent_seg}--${auth_tag}--${slug}..${shape_hash}"
     if [ "$ephemeral" = true ] && [ -n "$pid" ]; then
@@ -1152,8 +1152,8 @@ extract_agent_from_name() {
     local name="$1"
     local rest="${name#"${DEVA_CONTAINER_PREFIX}"}"
 
-    # New format: deva--<agent>[-v<version>]--<auth>--<slug>..<hash>
-    if [[ "$rest" =~ ^--([a-z]+)(-v[A-Za-z0-9._-]+)?-- ]]; then
+    # New format: deva--<agent>[v<version>]--<auth>--<slug>..<hash>
+    if [[ "$rest" =~ ^--([a-z]+)(v[A-Za-z0-9._-]+)?-- ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
         return
     fi
