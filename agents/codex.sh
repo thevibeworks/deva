@@ -33,6 +33,21 @@ agent_prepare() {
     AUTH_METHOD="$PARSED_AUTH_METHOD"
     local -a remaining_args=("${PARSED_REMAINING_ARGS[@]+"${PARSED_REMAINING_ARGS[@]}"}")
 
+    # Detect --trace flag (cctrace codex client profile, cctrace >= 0.11)
+    local use_trace=false
+    if [ ${#remaining_args[@]} -gt 0 ]; then
+        local -a filtered_args=()
+        local arg
+        for arg in "${remaining_args[@]}"; do
+            if [ "$arg" = "--trace" ]; then
+                use_trace=true
+            else
+                filtered_args+=("$arg")
+            fi
+        done
+        remaining_args=("${filtered_args[@]+"${filtered_args[@]}"}")
+    fi
+
     local has_dangerous=false
     local has_model=false
 
@@ -73,6 +88,13 @@ agent_prepare() {
     done
 
     AGENT_COMMAND+=("${remaining_args[@]+"${remaining_args[@]}"}")
+
+    if [ "$use_trace" = true ]; then
+        # cctrace codex profile: codex args go after "--"; always mitm.
+        # DEVA_TRACE=1 installs the MITM CA into the container store (#414).
+        DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
+        AGENT_COMMAND=("cctrace" "codex" "--no-open" "--" "${AGENT_COMMAND[@]:1}")
+    fi
 
     DOCKER_ARGS+=("-p" "127.0.0.1:1455:1455")
 

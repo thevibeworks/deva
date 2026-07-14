@@ -47,6 +47,9 @@ agent_prepare() {
     if [ "$use_trace" = true ]; then
         # Use cctrace wrapper: captures everything by default,
         # claude args go after "--"
+        # DEVA_TRACE=1 tells the entrypoint to install the cctrace MITM CA
+        # into the container system trust store (#414)
+        DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
         AGENT_COMMAND=("cctrace" "--no-open" "--")
         if [ "$has_dangerously" = false ]; then
             AGENT_COMMAND+=("--dangerously-skip-permissions")

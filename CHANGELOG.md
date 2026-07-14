@@ -12,6 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the agent config home (`~/.config/deva/<agent>/`) as a named
   credentials store; CWD checked first for compat. Provisioning a missing
   bare name creates it in the store (#417)
+- `--trace` for codex and grok via cctrace client profiles (#418).
+  `deva codex -- --trace exec "..."` / `deva grok -- --trace -p "..."`
+  wrap the agent with `cctrace <client> --no-open --`; always MITM capture
+- Container-scoped CA trust for traced sessions (#414): the entrypoint
+  installs the cctrace MITM CA into the container system store when
+  `DEVA_TRACE=1` and removes it on the next non-traced start. Covers
+  subprocesses and tools that ignore the CA env vars; never touches the
+  host trust store
+
+### Changed
+- cctrace pin bumped 0.4.0 -> 0.11.0 (client profiles, shape-first
+  categorization, `view --serve`)
 
 ## [0.14.1] - 2026-07-13
 
