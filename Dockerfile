@@ -209,14 +209,12 @@ FROM agent-base AS final
 
 # Declare ARGs immediately before usage to minimize cache invalidation
 ARG CLAUDE_CODE_VERSION=2.1.143
-ARG CCTRACE_VERSION=0.11.0
 ARG CODEX_VERSION=0.131.0
 ARG GEMINI_CLI_VERSION=0.42.0
 ARG GROK_CLI_VERSION=0.2.93
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
-LABEL org.opencontainers.image.cctrace_version=${CCTRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 LABEL org.opencontainers.image.grok_cli_version=${GROK_CLI_VERSION}
@@ -228,7 +226,15 @@ LABEL org.opencontainers.image.ccx_version=${CCX_VERSION}
 COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
 
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
-    bash /tmp/install-agent-tooling.sh && \
+    DEVA_TOOLING_STAGE=agents bash /tmp/install-agent-tooling.sh
+
+# cctrace moves fast: own ARG + layer, declared here so a pin bump
+# rebuilds only this layer, not the npm agent layer above.
+ARG CCTRACE_VERSION=0.11.0
+LABEL org.opencontainers.image.cctrace_version=${CCTRACE_VERSION}
+
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    DEVA_TOOLING_STAGE=cctrace bash /tmp/install-agent-tooling.sh && \
     rm -f /tmp/install-agent-tooling.sh
 
 USER root
