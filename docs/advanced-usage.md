@@ -164,10 +164,13 @@ The printed `docker run` line is diagnostic output. It masks secrets and may con
 ## Request Tracing
 
 ```bash
-deva.sh claude -- --trace --continue
-deva.sh codex -- --trace exec "fix the failing tests"
-deva.sh grok -- --trace -p "explain this stack trace"
+deva.sh claude --trace -- --continue
+deva.sh codex --trace -- exec "fix the failing tests"
+deva.sh grok --trace -- -p "explain this stack trace"
 ```
+
+`--trace` goes before `--`. Everything after `--` passes to the agent CLI
+verbatim and is never intercepted by deva.
 
 `--trace` wraps the agent with [cctrace](https://github.com/thevibeworks/cctrace),
 which records every API call the agent makes — messages, OAuth, usage/credits,

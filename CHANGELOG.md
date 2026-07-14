@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers (poll-then-open; `DEVA_TRACE_OPEN=0` disables). Attaching to a
   persistent container created without the port warns instead (#425)
 
+### Fixed
+- `--` contract: deva-level flags (`--trace`, `--auth-with`) are now
+  interpreted only before `--`; everything after passes to the agent CLI
+  verbatim. `deva claude --trace -- --resume` traces; `deva claude --
+  --trace --resume` passes `--trace` through to claude as its own flag.
+  Previous behavior silently intercepted flags from both sides (#427)
+
 ### Changed
 - cctrace pin bumped 0.4.0 -> 0.11.0 (client profiles, shape-first
   categorization, `view --serve`)

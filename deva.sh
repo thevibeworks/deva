@@ -3278,12 +3278,17 @@ else
     parse_wrapper_args
 fi
 
+# Preserve the -- boundary so agent_prepare can distinguish deva-level
+# flags (--auth-with, --trace) from agent CLI args: flags are only
+# interpreted before the sentinel; everything after passes verbatim (#427).
 if [ ${#AGENT_ARGS[@]} -gt 0 ]; then
     if [ ${#AGENT_ARGV[@]} -gt 0 ]; then
-        AGENT_ARGV=("${AGENT_ARGS[@]}" "${AGENT_ARGV[@]}")
+        AGENT_ARGV=("${AGENT_ARGS[@]}" "--" "${AGENT_ARGV[@]}")
     else
         AGENT_ARGV=("${AGENT_ARGS[@]}")
     fi
+elif [ ${#AGENT_ARGV[@]} -gt 0 ]; then
+    AGENT_ARGV=("--" "${AGENT_ARGV[@]}")
 fi
 
 _step "start"
