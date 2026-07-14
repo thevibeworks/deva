@@ -158,11 +158,12 @@ A bare `*.json` name (no slash) resolves against the agent config home
 (`~/.config/deva/claude/` by default) — a named credentials store:
 
 ```bash
-deva claude --auth-with claude-max.credentials.json
+deva.sh claude --auth-with claude-max.credentials.json
 # -> ~/.config/deva/claude/claude-max.credentials.json
 ```
 
 Resolution order: current directory first (compat), then the store.
+With an explicit `--config-home` root, the store is `<root>/<agent>/`.
 A missing bare name provisions into the store.
 
 #### Provisioning new credentials

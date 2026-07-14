@@ -246,9 +246,13 @@ resolve_absolute_path() {
 }
 
 # Bare credential names (no slash) live in the agent config home — the store.
+# Explicit --config-home root layouts clear CONFIG_HOME and set CONFIG_ROOT
+# (deva.sh), so honor the root before falling back to the XDG default.
 auth_store_dir() {
     if [ -n "${CONFIG_HOME:-}" ]; then
         printf '%s' "$CONFIG_HOME"
+    elif [ -n "${CONFIG_ROOT:-}" ]; then
+        printf '%s/%s' "$CONFIG_ROOT" "${ACTIVE_AGENT:-claude}"
     elif command -v default_config_home_for_agent >/dev/null 2>&1; then
         default_config_home_for_agent "${ACTIVE_AGENT:-claude}"
     else
