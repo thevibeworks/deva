@@ -9,7 +9,6 @@ LABEL org.opencontainers.image.title="deva-rust"
 LABEL org.opencontainers.image.description="Rust development environment with full toolchain"
 
 ARG CLAUDE_CODE_VERSION=2.1.143
-ARG CCTRACE_VERSION=0.11.0
 ARG CODEX_VERSION=0.131.0
 ARG GEMINI_CLI_VERSION=0.42.0
 ARG GROK_CLI_VERSION=0.2.93
@@ -20,7 +19,6 @@ ARG RUST_DEFAULT_TOOLCHAIN="stable"
 ARG RUST_TARGETS="wasm32-unknown-unknown"
 
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
-LABEL org.opencontainers.image.cctrace_version=${CCTRACE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 LABEL org.opencontainers.image.grok_cli_version=${GROK_CLI_VERSION}
@@ -115,8 +113,7 @@ USER $DEVA_USER
 COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooling.sh
 
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
-    bash /tmp/install-agent-tooling.sh && \
-    rm -f /tmp/install-agent-tooling.sh
+    DEVA_TOOLING_STAGE=agents bash /tmp/install-agent-tooling.sh
 
 # Install Playwright + both chromium binaries. Runs after install-agent-tooling.sh
 # so npm prefix ($DEVA_HOME/.npm-global) is already configured. System deps are
@@ -147,6 +144,15 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
     ls "$PLAYWRIGHT_BROWSERS_PATH" && \
     test -d "$(find "$PLAYWRIGHT_BROWSERS_PATH" -maxdepth 1 -type d -name 'chromium_headless_shell-*' -print -quit)" && \
     npm cache clean --force
+
+# cctrace moves fast: own ARG + layer, declared last among the tool layers
+# so a pin bump rebuilds only this, not npm tooling or playwright above.
+ARG CCTRACE_VERSION=0.11.0
+LABEL org.opencontainers.image.cctrace_version=${CCTRACE_VERSION}
+
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    DEVA_TOOLING_STAGE=cctrace bash /tmp/install-agent-tooling.sh && \
+    rm -f /tmp/install-agent-tooling.sh
 
 USER root
 

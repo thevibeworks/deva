@@ -315,12 +315,29 @@ install_cctrace() {
     log "cctrace installed"
 }
 
+# DEVA_TOOLING_STAGE splits installs across Docker layers so fast-moving
+# tools (cctrace) can bump without busting the big npm layer.
 main() {
     ensure_safe_cwd
-    log "Installing shared agent tooling into $DEVA_HOME"
-    install_npm_agent_tooling
-    install_ccx
-    install_cctrace
+    local stage="${DEVA_TOOLING_STAGE:-all}"
+    log "Installing shared agent tooling into $DEVA_HOME (stage: $stage)"
+    case "$stage" in
+        agents)
+            install_npm_agent_tooling
+            install_ccx
+            ;;
+        cctrace)
+            install_cctrace
+            ;;
+        all)
+            install_npm_agent_tooling
+            install_ccx
+            install_cctrace
+            ;;
+        *)
+            die "unknown DEVA_TOOLING_STAGE: $stage (agents|cctrace|all)"
+            ;;
+    esac
 }
 
 main "$@"

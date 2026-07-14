@@ -247,6 +247,7 @@ versions-up:
 	 RUST_IMAGE=$(RUST_IMAGE) \
 	 DOCKERFILE=$(DOCKERFILE) \
 	 RUST_DOCKERFILE=$(RUST_DOCKERFILE) \
+	 ONLY=$(ONLY) \
 	 $(VERSION_QUERY_OVERRIDES) \
 	 ./scripts/version-upgrade.sh
 
@@ -406,6 +407,7 @@ help:
 	@echo "  toolchains           List pinned toolchains and managed build tools"
 	@echo "  versions             Compare built vs latest versions with changelogs"
 	@echo "  versions-up          Build both images with latest upstream agent versions"
+	@echo "                       ONLY=cctrace upgrades one tool, rest stay pinned"
 	@echo "  versions-pin         Refresh $(VERSION_PINS_FILE) from upstream"
 	@echo "  scripts              List repo helper scripts"
 	@echo "  commands             Alias for help"
@@ -458,3 +460,4 @@ help:
 	@echo "  make versions                                 # Check current versions"
 	@echo "  make PLAYWRIGHT_VERSION=1.60.0 build-rust     # Override rust browser tooling"
 	@echo "  make versions-up                              # Upgrade to latest upstream versions"
+	@echo "  make versions-up ONLY=cctrace                 # Upgrade just cctrace, rest pinned"

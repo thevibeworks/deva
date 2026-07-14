@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the agent config home (`~/.config/deva/<agent>/`) as a named
   credentials store; CWD checked first for compat. Provisioning a missing
   bare name creates it in the store (#417)
+- Selective tool upgrade: `make versions-up ONLY=cctrace` upgrades one
+  tool (comma list supported) while everything else stays pinned to
+  versions.env (#419)
+- cctrace installs in its own Docker layer in both images, with its ARG
+  declared adjacent — a cctrace-only bump no longer rebuilds the npm
+  agent layer or (rust image) the Playwright layer (#419)
 - `--trace` for codex and grok via cctrace client profiles (#418).
   `deva codex -- --trace exec "..."` / `deva grok -- --trace -p "..."`
   wrap the agent with `cctrace <client> --no-open --`; always MITM capture

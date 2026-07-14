@@ -58,9 +58,14 @@ Usage: $(basename "$0") [OPTIONS]
 
 Options:
   -y, --yes       Skip confirmation countdown
+  --only LIST     Upgrade only these tools (comma-separated); the rest
+                  stay pinned to versions.env. Tools: claude-code,
+                  cctrace, codex, gemini-cli, grok-cli, ccx,
+                  copilot-api, playwright
   -h, --help      Show this help
 
 Environment:
+  ONLY                  Same as --only (e.g. make versions-up ONLY=cctrace)
   MAIN_IMAGE            Main image name (default: ghcr.io/thevibeworks/deva:latest)
   CORE_IMAGE            Core image name (default: ghcr.io/thevibeworks/deva:core)
   RUST_IMAGE            Rust image name (default: ghcr.io/thevibeworks/deva:rust)
@@ -76,16 +81,55 @@ Environment:
 EOF
 }
 
+ONLY="${ONLY:-}"
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         -y|--yes) AUTO_YES=1; shift ;;
+        --only) ONLY="${2:-}"; [[ -n $ONLY ]] || { echo "--only requires a tool list"; exit 1; }; shift 2 ;;
+        --only=*) ONLY="${1#--only=}"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1"; usage; exit 1 ;;
     esac
 done
 
+tool_selected() {
+    [[ -z $ONLY ]] || [[ ",$ONLY," == *",$1,"* ]]
+}
+
+# --only: fold every non-selected tool into the "pinned" pathway by
+# treating its versions.env pin as a CLI override. Downstream resolution,
+# manifest display, and build args need no changes.
+apply_only_filter() {
+    [[ -n $ONLY ]] || return 0
+
+    local tool
+    local known="claude-code cctrace codex gemini-cli grok-cli ccx copilot-api playwright"
+    for tool in ${ONLY//,/ }; do
+        case " $known " in
+            *" $tool "*) ;;
+            *) echo "error: unknown tool in --only: $tool" >&2
+               echo "known: $known" >&2
+               exit 1 ;;
+        esac
+    done
+
+    tool_selected claude-code || _CLI_CLAUDE_CODE="${_CLI_CLAUDE_CODE:-$CLAUDE_CODE_VERSION}"
+    tool_selected cctrace     || _CLI_CCTRACE="${_CLI_CCTRACE:-$CCTRACE_VERSION}"
+    tool_selected codex       || _CLI_CODEX="${_CLI_CODEX:-$CODEX_VERSION}"
+    tool_selected gemini-cli  || _CLI_GEMINI="${_CLI_GEMINI:-$GEMINI_CLI_VERSION}"
+    tool_selected grok-cli    || _CLI_GROK="${_CLI_GROK:-$GROK_CLI_VERSION}"
+    tool_selected ccx         || _CLI_CCX="${_CLI_CCX:-$CCX_VERSION}"
+    tool_selected copilot-api || _CLI_COPILOT="${_CLI_COPILOT:-$COPILOT_API_VERSION}"
+    tool_selected playwright  || _CLI_PLAYWRIGHT="${_CLI_PLAYWRIGHT:-$PLAYWRIGHT_VERSION}"
+
+    echo "Selective upgrade: $ONLY (all other tools pinned to versions.env)"
+    echo ""
+}
+
 main() {
     load_version_pins
+    apply_only_filter
 
     echo -e "${CYAN}${BOLD}╔════════════════════════════════════════════════════╗${RESET}"
     echo -e "${CYAN}${BOLD}║  Upgrading to Latest Versions                      ║${RESET}"
@@ -101,6 +145,23 @@ main() {
     if print_version_summary; then
         echo -e "${GREEN}All versions up-to-date. Nothing to upgrade.${RESET}"
         exit 0
+    fi
+
+    # --only: gate on the selected tools, not the whole manifest — a lagging
+    # unselected tool must not trigger a rebuild of nothing but pins.
+    if [[ -n $ONLY ]]; then
+        local _t _cur _lat _only_needs_update=0
+        for _t in ${ONLY//,/ }; do
+            _cur=$(normalize_version "$(get_current "$_t")")
+            _lat=$(normalize_version "$(get_latest "$_t")")
+            if [[ -z $_cur || $_cur == "-" || $_cur != "$_lat" ]]; then
+                _only_needs_update=1
+            fi
+        done
+        if [[ $_only_needs_update -eq 0 ]]; then
+            echo -e "${GREEN}Selected tool(s) up-to-date: ${ONLY}. Nothing to upgrade.${RESET}"
+            exit 0
+        fi
     fi
 
     print_changelogs
