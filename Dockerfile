@@ -230,7 +230,7 @@ RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sh
 
 # cctrace moves fast: own ARG + layer, declared here so a pin bump
 # rebuilds only this layer, not the npm agent layer above.
-ARG CCTRACE_VERSION=0.11.0
+ARG CCTRACE_VERSION=0.16.0
 LABEL org.opencontainers.image.cctrace_version=${CCTRACE_VERSION}
 
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
