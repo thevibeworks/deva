@@ -397,6 +397,47 @@ setup_trace_ca() {
     return 0
 }
 
+# Start the always-on CloakBrowser daemon (DEVA_CLOAK_BROWSER=1, cloak image
+# only). Runs AFTER setup_nonroot_user so the browser writes the mounted
+# profile as the remapped host UID -- starting it in cloak-entrypoint (pre-
+# remap) would leave root/1001-owned files the agent can't touch. Idempotent
+# under flock + a CDP-port probe: the boot invocation (tail -f /dev/null) starts
+# it once as a child of PID 1's tree, later agent execs find it up and skip.
+maybe_start_cloak_browser() {
+    [ "${DEVA_CLOAK:-}" = "1" ] || return 0
+    [ "${DEVA_CLOAK_BROWSER:-}" = "1" ] || return 0
+    local daemon=/usr/local/lib/cloak/cloak-browserd.mjs
+    if ! command -v node >/dev/null 2>&1 || [ ! -f "$daemon" ]; then
+        echo "[cloak] browser daemon unavailable (node or $daemon missing); skipping" >&2
+        return 0
+    fi
+
+    local port="${DEVA_CLOAK_CDP_PORT:-9222}"
+    local profile="${DEVA_CLOAK_PROFILE_DIR:-$DEVA_HOME/.cloak-profile}"
+    local lock=/run/lock/deva-cloak-browserd.lock
+    (
+        if ! flock -x -w 30 9; then
+            echo "[cloak] browser daemon lock timeout; skipping" >&2
+            exit 0
+        fi
+        # Already listening -> a prior invocation started it; nothing to do.
+        if (exec 8<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            exit 0
+        fi
+        mkdir -p "$profile"
+        chown "$DEVA_UID:$DEVA_GID" "$profile" 2>/dev/null || true
+        local log="$DEVA_HOME/.cloak-browserd.log"
+        # setsid+nohup so the daemon outlives the exec/boot process that spawns it.
+        setsid nohup gosu "$DEVA_USER" env \
+            "HOME=$DEVA_HOME" "PATH=$PATH" "DISPLAY=${DISPLAY:-:99}" \
+            "CLOAK_APP_DIR=${CLOAK_APP_DIR:-/opt/cloak}" \
+            "DEVA_CLOAK_PROFILE_DIR=$profile" "DEVA_CLOAK_CDP_PORT=$port" \
+            node "$daemon" >"$log" 2>&1 &
+        echo "[cloak] browser daemon starting (CDP 127.0.0.1:$port, profile $profile, log $log)" >&2
+    ) 9>"$lock"
+    return 0
+}
+
 ensure_agent_binaries() {
     case "$DEVA_AGENT" in
     claude)
@@ -451,6 +492,7 @@ main() {
     fix_rust_permissions
     fix_docker_socket_permissions
     setup_trace_ca
+    maybe_start_cloak_browser
     ensure_agent_binaries
 
     if [ $# -eq 0 ]; then

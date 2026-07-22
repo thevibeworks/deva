@@ -71,6 +71,10 @@ KIMI_CODE_VERSION=$KIMI_CODE_VERSION
 CCX_VERSION=$CCX_VERSION
 COPILOT_API_VERSION=$COPILOT_API_VERSION
 PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION
+# CloakBrowser npm wrapper version. This also pins the Chromium binary:
+# the wrapper hardcodes per-arch free-binary versions (linux-x64 146.x.x.5,
+# linux-arm64 146.x.x.3), so bumping the wrapper is what moves Chromium.
+CLOAKBROWSER_WRAPPER_VERSION=$CLOAKBROWSER_WRAPPER_VERSION
 
 RUST_TOOLCHAINS=$RUST_TOOLCHAINS
 RUST_DEFAULT_TOOLCHAIN=$RUST_DEFAULT_TOOLCHAIN
@@ -110,6 +114,7 @@ main() {
     refresh_pin CCX_VERSION "$(fetch_latest_git_tag https://github.com/thevibeworks/ccx.git)"
     refresh_pin COPILOT_API_VERSION "$(fetch_latest_commit https://github.com/ericc-ch/copilot-api.git refs/heads/master)"
     refresh_pin PLAYWRIGHT_VERSION "$(fetch_npm_version playwright)"
+    refresh_pin CLOAKBROWSER_WRAPPER_VERSION "$(fetch_npm_version cloakbrowser)"
 
     if [[ $DRY_RUN -eq 1 ]]; then
         emit_version_pins

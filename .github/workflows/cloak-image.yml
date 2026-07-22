@@ -1,0 +1,54 @@
+name: Cloak Image
+
+# Paths-filtered on purpose: the cloak build bakes a ~200MB Chromium binary,
+# too heavy for every PR. Nightly also skips cloak deliberately — it only
+# refreshes agent CLI versions, none of which live in the cloak layer.
+# Release builds and pushes the real :cloak tag.
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "Dockerfile.cloak"
+      - "scripts/cloak-entrypoint.sh"
+      - "versions.env"
+      - ".github/workflows/cloak-image.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "Dockerfile.cloak"
+      - "scripts/cloak-entrypoint.sh"
+      - "versions.env"
+      - ".github/workflows/cloak-image.yml"
+
+jobs:
+  build-and-test:
+    name: Build and Test Cloak Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load pinned versions
+        id: pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./scripts/version-pins.sh
+          load_version_pins
+          emit_github_outputs "$GITHUB_OUTPUT"
+
+      # Build on top of the published rust image: this validates the cloak
+      # layer itself without rebuilding the whole base/rust stack in CI.
+      - name: Build cloak image
+        run: |
+          make build-cloak-image \
+            IMAGE_NAME=deva-smoke \
+            CLOAK_TAG=ci-cloak \
+            RUST_IMAGE=ghcr.io/thevibeworks/deva:rust \
+            CLOAKBROWSER_WRAPPER_VERSION="${{ steps.pins.outputs.cloakbrowser_wrapper_version }}"
+
+      - name: Test cloak image
+        run: |
+          make test-cloak \
+            IMAGE_NAME=deva-smoke \
+            CLOAK_TAG=ci-cloak

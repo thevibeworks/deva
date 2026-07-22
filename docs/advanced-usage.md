@@ -96,15 +96,25 @@ Supported profiles:
 
 - `base` -> `ghcr.io/thevibeworks/deva:latest`
 - `rust` -> `ghcr.io/thevibeworks/deva:rust`
+- `cloak` -> `ghcr.io/thevibeworks/deva:cloak`
 
 Use them like this:
 
 ```bash
 deva.sh claude -p rust
 deva.sh codex -p rust
+deva.sh claude -p cloak
 ```
 
 If the image tag is missing locally, deva pulls it. If that fails and a matching Dockerfile exists, it points you at the build command.
+
+The `cloak` profile extends the rust image with [CloakBrowser](https://www.npmjs.com/package/cloakbrowser) —
+a stealth Chromium with source-level fingerprint patches, running headed on a
+virtual display (Xvfb) inside the container. Use it when an agent needs a
+browser that passes bot detection; the baked-in `deva-cloak` skill (keyed off
+`DEVA_CLOAK=1` in the image) tells agents how to drive it. The Chromium
+binary is baked at build time with auto-update off, so the container needs no
+network to launch a browser. Build locally with `make build-cloak`.
 
 If you want your own image entirely, read [Custom Images](custom-images.md).
 That covers local builds, private tags, per-project overrides, and personal-only setups.
