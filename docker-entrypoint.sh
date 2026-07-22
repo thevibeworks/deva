@@ -355,22 +355,45 @@ setup_trace_ca() {
         return 0
     fi
 
-    # --print-ca generates the CA on first use; it must run as the deva user
-    # so the key lands under $DEVA_HOME/.local/share/cctrace with sane ownership.
-    local ca_path
-    ca_path=$(gosu "$DEVA_USER" env "HOME=$DEVA_HOME" "PATH=$PATH" cctrace --print-ca 2>/dev/null | tail -1)
-    if [ -z "$ca_path" ] || [ ! -f "$ca_path" ]; then
-        echo "[entrypoint] warning: cctrace --print-ca gave no usable path; skipping CA trust" >&2
-        return 0
-    fi
+    # The persistent-container flow runs this concurrently in PID 1
+    # (`docker run -d ... tail -f /dev/null` boot) and in the `docker exec`
+    # entrypoint that launches the agent. A bare cp loses that race: cp
+    # creates the destination O_EXCL, and the loser dies under set -e with
+    # "cannot create regular file '$crt': File exists" (#414). Serialize the
+    # whole install on a lock; the second entrant skips the copy when the
+    # installed cert is already current.
+    local lock=/run/lock/deva-trace-ca.lock
+    (
+        if ! flock -x -w 60 9; then
+            echo "[entrypoint] warning: trace CA lock timeout; skipping container-wide CA trust (cctrace env-scoped trust still applies)" >&2
+            exit 0
+        fi
 
-    cp "$ca_path" "$crt"
-    chmod 644 "$crt"
-    if update-ca-certificates >/dev/null 2>&1; then
-        [ "$VERBOSE" = "true" ] && echo "[entrypoint] cctrace MITM CA trusted container-wide: $crt"
-    else
-        echo "[entrypoint] warning: trust-store update failed; container-wide CA trust incomplete (cctrace env-scoped trust still applies)" >&2
-    fi
+        # --print-ca generates the CA on first use; it must run as the deva user
+        # so the key lands under $DEVA_HOME/.local/share/cctrace with sane ownership.
+        local ca_path
+        ca_path=$(gosu "$DEVA_USER" env "HOME=$DEVA_HOME" "PATH=$PATH" cctrace --print-ca 2>/dev/null | tail -1)
+        if [ -z "$ca_path" ] || [ ! -f "$ca_path" ]; then
+            echo "[entrypoint] warning: cctrace --print-ca gave no usable path; skipping CA trust" >&2
+            exit 0
+        fi
+
+        if [ ! -f "$crt" ] || ! cmp -s "$ca_path" "$crt"; then
+            cp "$ca_path" "$crt"
+            chmod 644 "$crt"
+        fi
+        if update-ca-certificates >/dev/null 2>&1; then
+            if [ "$VERBOSE" = "true" ]; then
+                echo "[entrypoint] cctrace MITM CA trusted container-wide: $crt"
+            fi
+        else
+            echo "[entrypoint] warning: trust-store update failed; container-wide CA trust incomplete (cctrace env-scoped trust still applies)" >&2
+        fi
+        # Explicit success: the subshell's exit status is this script's life
+        # under set -e — a failed `[ VERBOSE ] && echo` here killed every
+        # traced launch with no output.
+        exit 0
+    ) 9>"$lock"
     return 0
 }
 

@@ -84,7 +84,7 @@ If the dry-run shape is correct but the agent still cannot authenticate, the wra
 
 Symptom:
 
-- first run warns that `.claude`, `.codex`, `.gemini`, or `.grok` is empty
+- first run warns that `.claude`, `.codex`, `.gemini`, `.grok`, or `.kimi-code` is empty
 
 Meaning:
 

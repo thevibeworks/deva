@@ -21,6 +21,7 @@ This guide documents what `deva.sh` actually supports, what env vars it reads, a
 | Codex | `chatgpt` | `api-key`, `copilot`, credentials file | `.codex/auth.json`, `OPENAI_API_KEY`, `GH_TOKEN` |
 | Gemini | `oauth` | `api-key`, `gemini-api-key`, `vertex`, `compute-adc`, `gemini-app-oauth`, credentials file | `.gemini`, `GEMINI_API_KEY`, gcloud, service-account JSON |
 | Grok | `oauth` | `api-key` | `.grok/auth.json`, `XAI_API_KEY` |
+| Kimi | `oauth` | `api-key` | `.kimi-code` (device-code), `KIMI_CODE_API_KEY` -> `KIMI_MODEL_*` |
 
 ## Claude
 
@@ -356,6 +357,60 @@ container-local tmpfs: in-container `grok update` works, its writes die
 with the container, and the host install stays intact. The image pin
 (`GROK_CLI_VERSION`) is the only version that matters.
 
+## Kimi
+
+### Default: `--auth-with oauth`
+
+Mounts:
+
+- `/home/deva/.kimi-code`
+
+Kimi Code stores config, sessions, and its OAuth token under `~/.kimi-code`
+(overridable via `KIMI_CODE_HOME`). First login has no browser, so run
+the device-code flow inside the container:
+
+- run `kimi` then `/login` (or `kimi login`): it prints a URL + code; open
+  it on any device to authorize, and
+- authenticate on the host once; deva auto-links `~/.kimi-code` and the
+  mount carries the token in.
+
+### `--auth-with api-key`
+
+Inputs:
+
+- `KIMI_CODE_API_KEY` (from [platform.kimi.com](https://platform.kimi.com));
+  `KIMI_API_KEY` is accepted as a fallback when `KIMI_CODE_API_KEY` is unset
+
+Kimi is the odd one out: it reads **no** API key from the shell environment.
+Its docs are explicit — `export KIMI_API_KEY=...` gives no provider its key;
+credentials come only from `~/.kimi-code/config.toml`. The single exception
+is the `KIMI_MODEL_*` family, which reads the shell and synthesizes an
+in-memory provider. So deva maps your `KIMI_CODE_API_KEY` onto that channel:
+
+```text
+KIMI_MODEL_NAME=k3                                # DEVA_KIMI_MODEL to override
+KIMI_MODEL_API_KEY=$KIMI_CODE_API_KEY
+KIMI_MODEL_PROVIDER_TYPE=kimi
+KIMI_MODEL_BASE_URL=https://api.kimi.com/coding/v1  # DEVA_KIMI_BASE_URL to override
+```
+
+The key is never written to `config.toml` (it lives in memory), so this mode
+mounts no `~/.kimi-code` and nothing lands on disk. `sk-kim…` keys hit the
+Kimi Code coding endpoint above; for a direct Moonshot key
+(`platform.moonshot.ai`) set `DEVA_KIMI_BASE_URL=https://api.moonshot.ai/v1`.
+
+```bash
+export KIMI_CODE_API_KEY=...
+deva.sh kimi --auth-with api-key
+# pick a different model:
+DEVA_KIMI_MODEL=kimi-for-coding deva.sh kimi --auth-with api-key
+```
+
+Unlike grok, kimi's npm bin is a plain symlink to `dist/main.mjs` (no
+self-update trampoline, no platform binary), so there is no host-mount
+shadowing to guard against. The image pin (`KIMI_CODE_VERSION`) is the only
+version that matters.
+
 ## Config Homes And Auth Isolation
 
 Default homes live under:
@@ -365,6 +420,7 @@ Default homes live under:
 ~/.config/deva/codex
 ~/.config/deva/gemini
 ~/.config/deva/grok
+~/.config/deva/kimi
 ```
 
 Use `--config-home` when you want a separate identity:

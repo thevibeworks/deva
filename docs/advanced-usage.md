@@ -48,7 +48,8 @@ Deva-root layout:
 ├── claude/
 ├── codex/
 ├── gemini/
-└── grok/
+├── grok/
+└── kimi/
 ```
 
 ```bash
@@ -175,8 +176,8 @@ verbatim and is never intercepted by deva.
 `--trace` wraps the agent with [cctrace](https://github.com/thevibeworks/cctrace),
 which records every API call the agent makes — messages, OAuth, usage/credits,
 MCP — not just the chat endpoint. Everything else on the line goes to the
-agent unchanged. Codex and Grok use cctrace client profiles (cctrace >= 0.11)
-and always run MITM capture.
+agent unchanged. Codex, Grok, and Kimi use cctrace client profiles
+(cctrace >= 0.11) and always run MITM capture.
 
 When tracing is on, the entrypoint installs the cctrace MITM CA into the
 container's system trust store (`update-ca-certificates`) so subprocesses and

@@ -62,13 +62,14 @@ Default per-agent homes live under:
 ├── claude/
 ├── codex/
 ├── gemini/
-└── grok/
+├── grok/
+└── kimi/
 ```
 
 `--config-home` supports two layouts:
 
-- leaf home: `DIR/.claude`, `DIR/.claude.json`, `DIR/.codex`, `DIR/.gemini`, `DIR/.grok`
-- deva root: `DIR/claude`, `DIR/codex`, `DIR/gemini`, `DIR/grok`
+- leaf home: `DIR/.claude`, `DIR/.claude.json`, `DIR/.codex`, `DIR/.gemini`, `DIR/.grok`, `DIR/.kimi-code`
+- deva root: `DIR/claude`, `DIR/codex`, `DIR/gemini`, `DIR/grok`, `DIR/kimi`
 
 `-Q` disables config-home resolution, autolink, and host config mounts entirely.
 
@@ -83,6 +84,7 @@ Examples:
 - Codex default: `.codex/auth.json`
 - Gemini default: `.gemini`
 - Grok default: `.grok/auth.json`
+- Kimi default: `.kimi-code` (device-code OAuth); api-key maps `KIMI_CODE_API_KEY` onto `KIMI_MODEL_*`
 
 When non-default auth is active, deva mounts a blank overlay over the default credential file path so the agent cannot silently fall back to some unrelated OAuth state. That is the point of the overlay fix.
 
@@ -114,7 +116,7 @@ Persistent is default:
 
 - one default container shape per project
 - reused across runs
-- same workspace can run Claude, Codex, Gemini, and Grok in the same container when mounts, config, and auth line up
+- same workspace can run Claude, Codex, Gemini, Grok, and Kimi in the same container when mounts, config, and auth line up
 - different volumes, explicit config homes, or auth modes create separate persistent containers
 
 Ephemeral with `--rm`:

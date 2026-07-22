@@ -67,6 +67,7 @@ CCTRACE_VERSION=$CCTRACE_VERSION
 CODEX_VERSION=$CODEX_VERSION
 GEMINI_CLI_VERSION=$GEMINI_CLI_VERSION
 GROK_CLI_VERSION=$GROK_CLI_VERSION
+KIMI_CODE_VERSION=$KIMI_CODE_VERSION
 CCX_VERSION=$CCX_VERSION
 COPILOT_API_VERSION=$COPILOT_API_VERSION
 PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION
@@ -105,6 +106,7 @@ main() {
     refresh_pin CODEX_VERSION "$(fetch_npm_version @openai/codex)"
     refresh_pin GEMINI_CLI_VERSION "$(fetch_npm_version @google/gemini-cli)"
     refresh_pin GROK_CLI_VERSION "$(fetch_npm_version @xai-official/grok)"
+    refresh_pin KIMI_CODE_VERSION "$(fetch_npm_version @moonshot-ai/kimi-code)"
     refresh_pin CCX_VERSION "$(fetch_latest_git_tag https://github.com/thevibeworks/ccx.git)"
     refresh_pin COPILOT_API_VERSION "$(fetch_latest_commit https://github.com/ericc-ch/copilot-api.git refs/heads/master)"
     refresh_pin PLAYWRIGHT_VERSION "$(fetch_npm_version playwright)"

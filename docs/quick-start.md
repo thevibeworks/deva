@@ -27,6 +27,7 @@ That installs:
 - `agents/codex.sh`
 - `agents/gemini.sh`
 - `agents/grok.sh`
+- `agents/kimi.sh`
 - `agents/shared_auth.sh`
 
 It also pulls `ghcr.io/thevibeworks/deva:latest`, with Docker Hub as fallback.
@@ -75,6 +76,7 @@ Same project, same default container shape:
 deva.sh claude
 deva.sh gemini
 deva.sh grok
+deva.sh kimi
 ```
 
 That is one of the main reasons this wrapper exists. You do not need a separate pet workflow for every vendor.
@@ -117,6 +119,14 @@ Grok with xAI API key:
 ```bash
 export XAI_API_KEY=xai-...
 deva.sh grok --auth-with api-key
+```
+
+Kimi with a Kimi Code API key (deva maps it onto the `KIMI_MODEL_*` channel;
+default model `k3`, coding endpoint):
+
+```bash
+export KIMI_CODE_API_KEY=sk-...
+deva.sh kimi --auth-with api-key
 ```
 
 More auth details live in [Authentication Guide](authentication.md).

@@ -101,7 +101,7 @@ _step() {
 
 usage() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi)
 
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
@@ -196,6 +196,7 @@ Examples:
   deva.sh codex                       # Launch codex in the same default container shape
   deva.sh gemini                      # Launch gemini in the same default container shape
   deva.sh grok                        # Launch grok in the same default container shape
+  deva.sh kimi                        # Launch kimi (oauth default; api-key via KIMI_CODE_API_KEY)
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -213,6 +214,7 @@ Examples:
 Advanced:
   deva.sh codex -v ~/.ssh:/home/deva/.ssh:ro -- -m gpt-5-codex
   deva.sh claude --trace -- --continue   # Trace requests with cctrace
+  deva.sh kimi --trace                   # Trace kimi requests with cctrace
   deva.sh --show-config                  # Debug configuration
   deva.sh --no-docker claude             # Disable Docker-in-Docker auto-mount
 USAGE
@@ -916,7 +918,7 @@ generate_auth_tag() {
     fi
 
     case "$agent:$auth_method" in
-        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth)
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth)
             printf '%s' "auth-default"
             return
             ;;
@@ -939,6 +941,7 @@ generate_auth_tag() {
                 codex)  key_val="${OPENAI_API_KEY:-}" ;;
                 gemini) key_val="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}" ;;
                 grok)   key_val="${XAI_API_KEY:-}" ;;
+                kimi)   key_val="${KIMI_CODE_API_KEY:-${KIMI_API_KEY:-}}" ;;
             esac
             if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
                 printf '%s' "api-key-${key_val: -4}"
@@ -984,6 +987,7 @@ agent_version_tag() {
         codex) label="org.opencontainers.image.codex_version" ;;
         gemini) label="org.opencontainers.image.gemini_cli_version" ;;
         grok) label="org.opencontainers.image.grok_cli_version" ;;
+        kimi) label="org.opencontainers.image.kimi_code_version" ;;
     esac
 
     local ver=""
@@ -1329,7 +1333,7 @@ categorize_mount() {
     elif [[ "$dest" == /deva-host-chrome-bridge* ]]; then printf 'bridge'
     elif [[ "$dest" == /home/deva/.claude* ]] || [[ "$dest" == /home/deva/.codex* ]] || \
          [[ "$dest" == /home/deva/.gemini* ]] || [[ "$dest" == /home/deva/.grok* ]] || \
-         [ "$dest" = "/home/deva/.agents" ]; then
+         [[ "$dest" == /home/deva/.kimi-code* ]] || [ "$dest" = "/home/deva/.agents" ]; then
         printf 'config'
     else printf 'user'
     fi
@@ -1712,7 +1716,7 @@ cmd_status() {
 
     if [ -d "$config_root" ]; then
         echo "Agent Homes ($(shorten_path "$config_root")):"
-        for agent_name in claude codex gemini grok; do
+        for agent_name in claude codex gemini grok kimi; do
             local agent_dir="$config_root/$agent_name"
             if [ -d "$agent_dir" ]; then
                 local canonical="" other_count=0 entry is_canonical
@@ -1724,6 +1728,7 @@ cmd_status() {
                         codex:.codex) is_canonical=true ;;
                         gemini:.gemini) is_canonical=true ;;
                         grok:.grok) is_canonical=true ;;
+                        kimi:.kimi-code) is_canonical=true ;;
                     esac
                     if [ "$is_canonical" = true ]; then
                         if [ -L "$agent_dir/$entry" ]; then
@@ -2192,6 +2197,16 @@ should_skip_env_for_auth() {
             ;;
         esac
         ;;
+    kimi)
+        # kimi ignores shell creds except the KIMI_MODEL_* family, which deva
+        # injects itself in api-key mode. Drop any host-set KIMI_* auth vars so
+        # they can't hijack the managed OAuth provider or override our wiring.
+        case "$name" in
+        KIMI_CODE_API_KEY | KIMI_API_KEY | KIMI_MODEL_NAME | KIMI_MODEL_API_KEY | KIMI_MODEL_PROVIDER_TYPE | KIMI_MODEL_BASE_URL)
+            return 0
+            ;;
+        esac
+        ;;
     esac
 
     return 1
@@ -2249,6 +2264,7 @@ agent_canonical_basenames() {
     codex)  printf '%s\n' '.codex' ;;
     gemini) printf '%s\n' '.gemini' ;;
     grok)   printf '%s\n' '.grok' ;;
+    kimi)   printf '%s\n' '.kimi-code' ;;
     *)      return 0 ;;
     esac
 }
@@ -2260,6 +2276,14 @@ agent_canonical_basenames() {
 # silently bill another account.
 grok_api_key_no_mount() {
     [ "$ACTIVE_AGENT" = "grok" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
+}
+
+# kimi api-key contract: the key travels as KIMI_MODEL_* env only — kimi
+# reads no credential from the shell and the synth key is never written to
+# config.toml. A mounted ~/.kimi-code would put its config.toml providers
+# above the env-synth model, so api-key mode mounts nothing.
+kimi_api_key_no_mount() {
+    [ "$ACTIVE_AGENT" = "kimi" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
 }
 
 # grok's self-updater writes Linux binaries into ~/.grok/bin and
@@ -2296,6 +2320,9 @@ mount_agent_canonical() {
     if [ "$agent" = "grok" ] && grok_api_key_no_mount; then
         return 0
     fi
+    if [ "$agent" = "kimi" ] && kimi_api_key_no_mount; then
+        return 0
+    fi
 
     local entry src
     while IFS= read -r entry; do
@@ -2325,7 +2352,7 @@ mount_config_home() {
     mount_agent_canonical "$ACTIVE_AGENT" "$CONFIG_HOME"
 }
 
-# Effective config base: where agent config dirs (.claude/, .codex/, .gemini/, .grok/) live.
+# Effective config base: where agent config dirs (.claude/, .codex/, .gemini/, .grok/, .kimi-code/) live.
 resolve_config_base() {
     if [ -n "$CONFIG_HOME" ]; then
         printf '%s' "$CONFIG_HOME"
@@ -2352,7 +2379,7 @@ has_auth_override() {
     # Non-default --auth-with
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth) ;;
             *) return 0 ;;
         esac
     fi
@@ -2364,6 +2391,7 @@ has_auth_override() {
         codex)  auth_vars="OPENAI_API_KEY" ;;
         gemini) auth_vars="GEMINI_API_KEY" ;;
         grok)   auth_vars="XAI_API_KEY" ;;
+        kimi)   auth_vars="KIMI_CODE_API_KEY KIMI_API_KEY" ;;
     esac
 
     local var
@@ -3572,7 +3600,7 @@ if [ "$CONFIG_HOME_AUTO" = true ]; then
 fi
 
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
-    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ]; then
+    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
         CONFIG_HOME=""
         CONFIG_HOME_AUTO=false
@@ -3634,6 +3662,17 @@ autolink_legacy_into_deva_root() {
     if [ -d "$CONFIG_ROOT" ]; then
         [ -d "$CONFIG_ROOT/grok/.grok" ] || [ -L "$CONFIG_ROOT/grok/.grok" ] || mkdir -p "$CONFIG_ROOT/grok/.grok"
     fi
+
+    if [ -d "$HOME/.kimi-code" ]; then
+        [ -d "$CONFIG_ROOT/kimi" ] || mkdir -p "$CONFIG_ROOT/kimi"
+        if [ ! -e "$CONFIG_ROOT/kimi/.kimi-code" ] && [ ! -L "$CONFIG_ROOT/kimi/.kimi-code" ]; then
+            ln -s "$HOME/.kimi-code" "$CONFIG_ROOT/kimi/.kimi-code"
+            echo "autolink: ~/.kimi-code -> $CONFIG_ROOT/kimi/.kimi-code" >&2
+        fi
+    fi
+    if [ -d "$CONFIG_ROOT" ]; then
+        [ -d "$CONFIG_ROOT/kimi/.kimi-code" ] || [ -L "$CONFIG_ROOT/kimi/.kimi-code" ] || mkdir -p "$CONFIG_ROOT/kimi/.kimi-code"
+    fi
 }
 
 check_agent "$ACTIVE_AGENT"
@@ -3660,6 +3699,9 @@ if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
         ;;
     grok)
         [ -d "$CONFIG_HOME/.grok" ] || mkdir -p "$CONFIG_HOME/.grok"
+        ;;
+    kimi)
+        [ -d "$CONFIG_HOME/.kimi-code" ] || mkdir -p "$CONFIG_HOME/.kimi-code"
         ;;
     esac
 fi
@@ -3701,6 +3743,11 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ] && [ "$_config_ho
             echo "warning: $CONFIG_HOME/.grok is empty; authentication will need to be set up" >&2
         fi
         ;;
+    kimi)
+        if [ ! -d "$CONFIG_HOME/.kimi-code" ] || [ -z "$(ls -A "$CONFIG_HOME/.kimi-code" 2>/dev/null)" ]; then
+            echo "warning: $CONFIG_HOME/.kimi-code is empty; authentication will need to be set up" >&2
+        fi
+        ;;
     esac
 fi
 
@@ -3735,7 +3782,7 @@ _step "agent_prepare"
 
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth) ;;
             *) _needs_rewrite=true ;;
         esac
 
@@ -3743,6 +3790,12 @@ _step "agent_prepare"
             _needs_rewrite=true
             _env_auth_override=true
         fi
+    fi
+
+    # --trace changes port mappings; the container must have a distinct name
+    # so a traced run never reattaches to a non-traced container (#414).
+    if [ "${DEVA_TRACE_ACTIVE:-false}" = true ]; then
+        _needs_rewrite=true
     fi
 
     if [ "$_needs_rewrite" = true ]; then
@@ -3758,7 +3811,9 @@ _step "agent_prepare"
             [ -z "$_rw_cfg_input" ] && [ -n "$CONFIG_ROOT" ] && _rw_cfg_input="$CONFIG_ROOT"
         fi
 
-        _rw_shape=$(compute_shape_hash "$(docker_image_ref)" "$_rw_vol_input" "$_rw_cfg_input")
+        _rw_trace_input=""
+        [ "${DEVA_TRACE_ACTIVE:-false}" = true ] && _rw_trace_input="trace"
+        _rw_shape=$(compute_shape_hash "$(docker_image_ref)" "$_rw_vol_input" "${_rw_cfg_input}${_rw_trace_input:+|${_rw_trace_input}}")
         _rw_auth_tag=$(generate_auth_tag "$ACTIVE_AGENT" "$AUTH_METHOD" "${CUSTOM_CREDENTIALS_FILE:-}" "$_env_auth_override")
 
         _rw_name=$(build_container_name \
@@ -3834,6 +3889,10 @@ else
         [ -d "$HOME/.gemini" ] && DOCKER_ARGS+=("-v" "$HOME/.gemini:/home/deva/.gemini")
         if [ -d "$HOME/.grok" ] && ! grok_api_key_no_mount; then
             DOCKER_ARGS+=("-v" "$HOME/.grok:/home/deva/.grok")
+        fi
+        # kimi api-key uses KIMI_MODEL_* env (no mount); only oauth wants ~/.kimi-code.
+        if [ -d "$HOME/.kimi-code" ] && ! kimi_api_key_no_mount; then
+            DOCKER_ARGS+=("-v" "$HOME/.kimi-code:/home/deva/.kimi-code")
         fi
     fi
 fi

@@ -31,6 +31,7 @@ main() {
     resolve_tool "codex_version" "codex"
     resolve_tool "gemini_cli_version" "gemini-cli"
     resolve_tool "grok_cli_version" "grok-cli"
+    resolve_tool "kimi_code_version" "kimi-code"
     resolve_tool "ccx_version" "ccx"
     resolve_tool "copilot_api_version" "copilot-api"
 }

@@ -13,6 +13,21 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-21] Dev Log: traced launches die silently in freshly built images #414
+- Why: after rebuilding images, every `--trace` launch died with "failed to launch ephemeral container" and no error.
+- What:
+  - The #414 flock rework ended the CA-install subshell on `[ "$VERBOSE" = "true" ] && echo ...`; with VERBOSE unset the failed test became the subshell's exit status, and under `set -e` the entrypoint died right after the agent banner — silently, only in freshly built images (the entrypoint is baked). Fix: explicit `exit 0` before the subshell closes. Verified A/B: baked image dies, overlay-fixed image runs `deva.sh claude --trace --rm -Q -- --version` end-to-end (cctrace MITM up, trace file written). Rebuild images to pick this up.
+- Result: traced launch verified live against the host daemon.
+
+# [2026-07-20] Dev Log: add kimi agent (Moonshot Kimi Code CLI) #455
+- Why: Moonshot shipped an official coding-agent CLI (@moonshot-ai/kimi-code, bin `kimi`); deva should launch it like claude/codex/gemini/grok. Traced the grok integration (commit 93a59e0) via ccx as the template.
+- What:
+  - agents/kimi.sh: oauth default (mount ~/.kimi-code; device-code `kimi login`, no browser needed) + api-key; appends `--yolo` (auto-approve tool calls, still allows clarifying questions — not `--auto`) since the container is the sandbox.
+  - The auth divergence that broke the premise: kimi reads NO API key from the shell (docs: `export KIMI_API_KEY` does nothing; creds only from ~/.kimi-code/config.toml). The one shell channel is the `KIMI_MODEL_*` family, which synthesizes an in-memory provider. So api-key mode maps `KIMI_CODE_API_KEY` -> `KIMI_MODEL_{NAME=k3,API_KEY,PROVIDER_TYPE=kimi,BASE_URL=https://api.kimi.com/coding/v1}` (override via DEVA_KIMI_MODEL/DEVA_KIMI_BASE_URL). Verified end-to-end with a real sk-kim… key: the key auths only against api.kimi.com/coding/v1 (moonshot.ai rejects it), models k3/kimi-for-coding/highspeed, and the key is never persisted to config.toml -> no ~/.kimi-code mount in api-key mode, nothing on disk.
+  - deva.sh: canonical entry .kimi-code, autolink ~/.kimi-code, KIMI_* env filtering, config-home mkdir/warn/dispatch. Simpler than grok — no default_credential_target_path (env-only key), so no auth.json overlay; kimi's npm bin is a plain symlink to dist/main.mjs (no self-update trampoline, native/ only darwin+win32), so no pin_platform_binary and no update-guard tmpfs.
+  - KIMI_CODE_VERSION=0.28.0 pinned through versions.env, Makefile, Dockerfile(+rust), version-pins/upgrade/update scripts, release-utils TOOL_REGISTRY, ci/nightly/release workflows, install.sh + install-agent-tooling.sh. Tests: release-utils registry counts, version-upgrade mock (curl fixtures + outage label), install-tooling stub, and new scripts/test-kimi-auth.sh (12 assertions on the KIMI_MODEL_* wiring, redaction, naming, no-mount, overrides, missing-key error).
+- Result: deva.sh kimi works in both auth modes (DEVA_NO_DOCKER dry-run + local `kimi -p` through KIMI_MODEL_* verified); full test suite green. Docker image build not verifiable in this container (no daemon); the fan-out is validated by the version tooling + assertions. NOTE: docs/authentication.md documents the unique no-shell-env auth model so users don't hit the same KIMI_CODE_API_KEY confusion.
+
 # [2026-07-10] Dev Log: deva-tmux — tmux as a built-in module, both transports #412
 - Why: tmux interaction was four loose scripts with zero deva.sh integration; #406 built the right transport (ssh) but deleted the socat fallback and stayed a loose script. Direction split matters: host->container (deva.sh shell) and agent<->agent (tmux-bridge) keep the sandbox; container->host breaks it and must be opt-in.
 - What:

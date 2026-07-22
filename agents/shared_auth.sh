@@ -226,6 +226,29 @@ is_file_path() {
     [[ "$arg" == /* ]] || [[ "$arg" == ~* ]] || [[ "$arg" == ./* ]] || [[ "$arg" == ../* ]] || [[ "$arg" == *.json ]]
 }
 
+# Detect and strip a --trace flag — only before the -- sentinel; after it,
+# args belong to the agent CLI verbatim (#427). First -- is stripped.
+# Sets TRACE_FLAG_PRESENT (true/false) and TRACE_FILTERED_ARGS.
+# Shared by the agents whose only deva-side flag is --trace (codex, grok,
+# kimi); claude.sh scans more flags and keeps its own loop.
+TRACE_FLAG_PRESENT=false
+TRACE_FILTERED_ARGS=()
+filter_trace_flag() {
+    TRACE_FLAG_PRESENT=false
+    TRACE_FILTERED_ARGS=()
+    local seen_sep=false
+    local arg
+    for arg in "$@"; do
+        if [ "$arg" = "--" ] && [ "$seen_sep" = false ]; then
+            seen_sep=true
+        elif [ "$arg" = "--trace" ] && [ "$seen_sep" = false ]; then
+            TRACE_FLAG_PRESENT=true
+        else
+            TRACE_FILTERED_ARGS+=("$arg")
+        fi
+    done
+}
+
 # Publish the cctrace live UI (container port 9317, binds 0.0.0.0) to the
 # host loopback so the browser can reach it. Probe host ports from 9317 so
 # concurrent traced containers land on predictable neighbors (#425).
@@ -439,6 +462,9 @@ parse_auth_args() {
         grok)
             supported_methods=(oauth api-key)
             ;;
+        kimi)
+            supported_methods=(oauth api-key)
+            ;;
         *)
             auth_error "Unknown agent: $agent_name"
             ;;
@@ -505,6 +531,7 @@ parse_auth_args() {
             codex) auth_method="chatgpt" ;;
             gemini) auth_method="oauth" ;;
             grok) auth_method="oauth" ;;
+            kimi) auth_method="oauth" ;;
         esac
     fi
 
