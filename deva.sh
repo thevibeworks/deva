@@ -4,13 +4,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$SCRIPT_DIR/agents"
 
+# Image/tag precedence: environment > .deva config files > -p profile > default.
+# *_ENV_SET means "explicitly set somewhere" (profile must not clobber it);
+# *_SOURCE records where, so config files never override the real environment
+# and an explicit CLI -p can still beat a config-file value (resolve_profile).
 DEVA_DOCKER_IMAGE_ENV_SET=false
+DEVA_DOCKER_IMAGE_SOURCE=""
 if [ -n "${DEVA_DOCKER_IMAGE+x}" ]; then
     DEVA_DOCKER_IMAGE_ENV_SET=true
+    DEVA_DOCKER_IMAGE_SOURCE="env"
 fi
 DEVA_DOCKER_TAG_ENV_SET=false
+DEVA_DOCKER_TAG_SOURCE=""
 if [ -n "${DEVA_DOCKER_TAG+x}" ]; then
     DEVA_DOCKER_TAG_ENV_SET=true
+    DEVA_DOCKER_TAG_SOURCE="env"
 fi
 
 VERSION="0.16.0"
@@ -22,6 +30,7 @@ DEVA_CODEX_BROWSER_MCP_PACKAGE="${DEVA_CODEX_BROWSER_MCP_PACKAGE:-${DEVA_PLAYWRI
 DEVA_PLAYWRIGHT_MCP_PACKAGE="${DEVA_PLAYWRIGHT_MCP_PACKAGE:-$DEVA_CODEX_BROWSER_MCP_PACKAGE}"
 
 PROFILE="${DEVA_PROFILE:-${DEVA_IMAGE_PROFILE:-}}"
+PROFILE_FROM_CLI=false
 
 CONFIG_ROOT=""
 
@@ -135,7 +144,16 @@ Deva flags:
                           Mount an alternate auth/config home into /home/deva
   -e VAR[=VALUE]          Pass environment variable into the container (pulls from host when VALUE omitted)
   -p NAME, --profile      NAME
-                          Select profile: base (default), rust. Pulls tag, falls back to Dockerfile.<profile>
+                          Select profile: base (default), rust, cloak. Pulls tag, falls back to Dockerfile.<profile>
+  --cloak-browser         Start an always-on CloakBrowser the agent drives via
+                          CLOAK_CDP_ENDPOINT; auto-mounts a persistent profile
+                          (~/.config/deva/cloak-profile). Only with -p cloak.
+  --cloak-vnc             Docker-Desktop fallback: publish the cloak VNC display
+                          on a host loopback port for interactive login
+                          (MFA/captcha). On OrbStack/Linux skip this -- the host
+                          reaches the container directly; start x11vnc on demand.
+                          Auto-generates a VNC password (or set
+                          DEVA_CLOAK_VNC_PASSWORD). Port fixed at create. -p cloak.
   -Q, --quick             Bare mode: no host config mounts, no .deva loading, no autolink,
                           implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
@@ -364,7 +382,7 @@ default_config_home_for_agent() {
 
 validate_profile() {
     case "$1" in
-    base | rust | "") return 0 ;;
+    base | rust | cloak | "") return 0 ;;
     *) return 1 ;;
     esac
 }
@@ -408,8 +426,8 @@ check_image() {
     # Digest-pinned refs are exact; tag fallback does not make sense there.
     local available_tags=""
     if [[ "$DEVA_DOCKER_IMAGE" != *@* ]]; then
-        # Check common profile tags (prefer rust as it's a superset of base)
-        for tag in rust latest; do
+        # Check common profile tags (prefer cloak > rust > latest)
+        for tag in cloak rust latest; do
             if [ "$tag" = "$DEVA_DOCKER_TAG" ]; then
                 continue  # Skip the one we already tried
             fi
@@ -434,6 +452,9 @@ check_image() {
     rust)
         [ -f "${SCRIPT_DIR}/Dockerfile.rust" ] && df="${SCRIPT_DIR}/Dockerfile.rust" || df=""
         ;;
+    cloak)
+        [ -f "${SCRIPT_DIR}/Dockerfile.cloak" ] && df="${SCRIPT_DIR}/Dockerfile.cloak" || df=""
+        ;;
     esac
 
     echo "Docker image $image_ref not found locally" >&2
@@ -442,6 +463,10 @@ check_image() {
         case "${PROFILE:-}" in
         rust)
             echo "Build with: make build-rust" >&2
+            echo "Manual docker builds need explicit build args and BASE_IMAGE; see docs/custom-images.md" >&2
+            ;;
+        cloak)
+            echo "Build with: make build-cloak" >&2
             echo "Manual docker builds need explicit build args and BASE_IMAGE; see docs/custom-images.md" >&2
             ;;
         "" | base)
@@ -797,7 +822,7 @@ prepare_browser_integration() {
     "" | base)
         PROFILE="rust"
         ;;
-    rust)
+    rust | cloak)
         ;;
     *)
         echo "warning: --browser-mcp assumes the selected image contains node/npx and browser runtime deps" >&2
@@ -2945,18 +2970,32 @@ process_var_config() {
         fi
         ;;
     DEVA_DOCKER_IMAGE)
-        DEVA_DOCKER_IMAGE="$value"
-        DEVA_DOCKER_IMAGE_ENV_SET=true
-        normalize_docker_image_parts
-        export DEVA_DOCKER_IMAGE
-        USER_ENVS+=("$name=$value")
+        # Real environment beats config files — a .deva default must not
+        # clobber an explicit `DEVA_DOCKER_IMAGE=... deva.sh ...`.
+        if [ "$DEVA_DOCKER_IMAGE_SOURCE" != "env" ]; then
+            local _tag_was_set="$DEVA_DOCKER_TAG_ENV_SET"
+            DEVA_DOCKER_IMAGE="$value"
+            DEVA_DOCKER_IMAGE_ENV_SET=true
+            DEVA_DOCKER_IMAGE_SOURCE="config"
+            normalize_docker_image_parts
+            # normalize may adopt an image-embedded tag: that tag came from
+            # this config value, so it is config-sourced too.
+            if [ "$_tag_was_set" = false ] && [ "$DEVA_DOCKER_TAG_ENV_SET" = true ]; then
+                DEVA_DOCKER_TAG_SOURCE="config"
+            fi
+            export DEVA_DOCKER_IMAGE
+            USER_ENVS+=("$name=$value")
+        fi
         ;;
     DEVA_DOCKER_TAG)
-        DEVA_DOCKER_TAG="$value"
-        DEVA_DOCKER_TAG_ENV_SET=true
-        normalize_docker_image_parts
-        export DEVA_DOCKER_TAG
-        USER_ENVS+=("$name=$value")
+        if [ "$DEVA_DOCKER_TAG_SOURCE" != "env" ]; then
+            DEVA_DOCKER_TAG="$value"
+            DEVA_DOCKER_TAG_ENV_SET=true
+            DEVA_DOCKER_TAG_SOURCE="config"
+            normalize_docker_image_parts
+            export DEVA_DOCKER_TAG
+            USER_ENVS+=("$name=$value")
+        fi
         ;;
     DEFAULT_AGENT)
         DEFAULT_AGENT="$value"
@@ -3128,8 +3167,9 @@ parse_wrapper_args() {
             fi
             local prof="${incoming[$((i + 1))]}"
             PROFILE="$prof"
+            PROFILE_FROM_CLI=true
             if ! validate_profile "$prof"; then
-                echo "error: unknown profile '$prof'. Valid: base, rust." >&2
+                echo "error: unknown profile '$prof'. Valid: base, rust, cloak." >&2
                 echo "hint: if you intended '-p' for the agent, place it after '--' (e.g., deva.sh claude -- -p 'task')" >&2
                 exit 1
             fi
@@ -3184,6 +3224,21 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --cloak-vnc)
+            # Expose the cloak display over VNC for interactive logins: publishes
+            # a host-loopback port + mounts a persistent profile. The AGENT drives
+            # its own browser on the display -- no daemon. No-op outside -p cloak.
+            DEVA_CLOAK_VNC=1
+            i=$((i + 1))
+            continue
+            ;;
+        --cloak-browser)
+            # Start the always-on CloakBrowser daemon and mount a persistent
+            # profile; the agent drives it via CLOAK_CDP_ENDPOINT. -p cloak only.
+            DEVA_CLOAK_BROWSER=1
+            i=$((i + 1))
+            continue
+            ;;
         --verbose | --debug)
             DEBUG_MODE=true
             i=$((i + 1))
@@ -3218,6 +3273,17 @@ load_agent_module() {
     fi
 }
 
+# A named profile fills in image/tag that nothing else set. One exception:
+# an explicit CLI -p is this run's intent and beats a .deva config-file tag
+# (else a config `DEVA_DOCKER_TAG=rust` makes `-p cloak` a silent no-op).
+# The real environment still wins over both.
+profile_may_set_tag() {
+    if [ "$DEVA_DOCKER_TAG_ENV_SET" = false ]; then
+        return 0
+    fi
+    [ "$PROFILE_FROM_CLI" = true ] && [ "$DEVA_DOCKER_TAG_SOURCE" = "config" ]
+}
+
 resolve_profile() {
     local default_repo="ghcr.io/thevibeworks/deva"
     case "${PROFILE:-}" in
@@ -3225,7 +3291,7 @@ resolve_profile() {
         if [ "$DEVA_DOCKER_IMAGE_ENV_SET" = false ]; then
             DEVA_DOCKER_IMAGE="$default_repo"
         fi
-        if [ "$DEVA_DOCKER_TAG_ENV_SET" = false ]; then
+        if profile_may_set_tag; then
             DEVA_DOCKER_TAG="latest"
         fi
         ;;
@@ -3233,8 +3299,16 @@ resolve_profile() {
         if [ "$DEVA_DOCKER_IMAGE_ENV_SET" = false ]; then
             DEVA_DOCKER_IMAGE="$default_repo"
         fi
-        if [ "$DEVA_DOCKER_TAG_ENV_SET" = false ]; then
+        if profile_may_set_tag; then
             DEVA_DOCKER_TAG="rust"
+        fi
+        ;;
+    cloak)
+        if [ "$DEVA_DOCKER_IMAGE_ENV_SET" = false ]; then
+            DEVA_DOCKER_IMAGE="$default_repo"
+        fi
+        if profile_may_set_tag; then
+            DEVA_DOCKER_TAG="cloak"
         fi
         ;;
     *)
@@ -3246,6 +3320,134 @@ resolve_profile() {
 }
 
 is_known_agent() { [ -f "$AGENTS_DIR/$1.sh" ]; }
+
+# 0 if this run targets the cloak image (via -p cloak or a cloak tag).
+is_cloak_image() {
+    [ "${PROFILE:-}" = "cloak" ] || [[ "${DEVA_DOCKER_TAG:-}" == *cloak* ]]
+}
+
+# Cloak runtime knobs: the always-on browser daemon (--cloak-browser) and VNC
+# (--cloak-vnc). Both opt-in and independent -- with --cloak-vnc the agent
+# drives its own browser on the display; --cloak-browser holds a shared one on
+# CDP. One image guard, one warning, correct ordering.
+setup_cloak_runtime() {
+    { [ "${DEVA_CLOAK_VNC:-}" = "1" ] || [ "${DEVA_CLOAK_BROWSER:-}" = "1" ]; } || return 0
+    if ! is_cloak_image; then
+        echo "warning: --cloak-vnc/--cloak-browser ignored -- they ship only in the cloak image (use -p cloak)" >&2
+        DEVA_CLOAK_VNC=""
+        DEVA_CLOAK_BROWSER=""
+        return 0
+    fi
+    # A persistent profile is what makes a login survive; mount it for either
+    # path. VNC and the always-on daemon are independent: with --cloak-vnc the
+    # AGENT drives its own browser on the display (no daemon); --cloak-browser is
+    # a separate opt-in that holds one always-on browser on CDP.
+    mount_cloak_profile
+    setup_cloak_vnc
+    setup_cloak_browser
+}
+
+# Mount a host dir at the Chromium userDataDir so the whole session (cookies,
+# localStorage, IndexedDB, history, cache) persists to the host across container
+# removal. Shared by the VNC and daemon paths. First-writer-wins: a user mount
+# at the same target wins.
+mount_cloak_profile() {
+    local ctr_dir=/home/deva/.cloak-profile
+    DOCKER_ARGS+=("-e" "DEVA_CLOAK_PROFILE_DIR=${ctr_dir}")
+    if ! user_volumes_declares_target "$ctr_dir"; then
+        local host_dir="${DEVA_CLOAK_PROFILE_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/deva/cloak-profile}"
+        mkdir -p "$host_dir" 2>/dev/null || true
+        DOCKER_ARGS+=("-v" "${host_dir}:${ctr_dir}")
+        DEVA_CLOAK_PROFILE_HOST="$host_dir"
+    fi
+}
+
+# Opt-in always-on CloakBrowser daemon: pass the daemon flag + CDP endpoint so
+# the agent can attach (connectOverCDP) to one shared, always-on browser. The
+# profile is mounted separately (mount_cloak_profile). This is the heavy path;
+# the default/VNC path has the agent drive its own browser instead.
+setup_cloak_browser() {
+    [ "${DEVA_CLOAK_BROWSER:-}" = "1" ] || return 0
+    local cdp_port="${DEVA_CLOAK_CDP_PORT:-9222}"
+    DOCKER_ARGS+=("-e" "DEVA_CLOAK_BROWSER=1")
+    DOCKER_ARGS+=("-e" "DEVA_CLOAK_CDP_PORT=${cdp_port}")
+    DOCKER_ARGS+=("-e" "CLOAK_CDP_ENDPOINT=http://127.0.0.1:${cdp_port}")
+}
+
+# Opt-in VNC helper for the Docker-Desktop case. On OrbStack/native Linux the
+# host reaches the container directly, so you don't need this: the agent starts
+# x11vnc on the :99 display on demand and you connect at the container IP -- no
+# flag, no publish. --cloak-vnc is the Docker-Desktop fallback, where the
+# container IP is NOT routable from the host: it publishes a HOST-loopback port
+# -> container 5900 (probe up from 5900 for concurrent containers). That publish
+# is fixed at container CREATE, so a warm container created without it cannot
+# gain the mapping (announce_cloak_vnc warns).
+DEVA_CLOAK_VNC_URL=""
+DEVA_CLOAK_PROFILE_HOST=""
+setup_cloak_vnc() {
+    [ "${DEVA_CLOAK_VNC:-}" = "1" ] || return 0
+    local port=5900 tries=0 free_port=""
+    while [ "$tries" -lt 12 ]; do
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            free_port="$port"
+            break
+        fi
+        port=$((port + 1))
+        tries=$((tries + 1))
+    done
+    if [ -z "$free_port" ]; then
+        echo "warning: no free host port in 5900-5911; VNC will not be reachable from the host" >&2
+        return 0
+    fi
+    # Secure by default: if the user gave no password, generate one so VNC is
+    # never unauthenticated. VNC caps passwords at 8 chars, so generate 8.
+    DEVA_CLOAK_VNC_PASSWORD_EFFECTIVE="${DEVA_CLOAK_VNC_PASSWORD:-}"
+    DEVA_CLOAK_VNC_PASSWORD_GENERATED=false
+    if [ -z "$DEVA_CLOAK_VNC_PASSWORD_EFFECTIVE" ]; then
+        # Read a FINITE chunk of urandom, then filter+cut. Piping an unbounded
+        # `</dev/urandom` into `head -c 8` makes head close the pipe early, tr
+        # takes SIGPIPE, and pipefail+set -e would kill the whole launch.
+        DEVA_CLOAK_VNC_PASSWORD_EFFECTIVE="$(head -c 128 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-8)"
+        DEVA_CLOAK_VNC_PASSWORD_GENERATED=true
+    fi
+
+    DOCKER_ARGS+=("-p" "127.0.0.1:${free_port}:5900")
+    DOCKER_ARGS+=("-e" "DEVA_CLOAK_VNC=1")
+    DOCKER_ARGS+=("-e" "DEVA_CLOAK_VNC_PASSWORD=${DEVA_CLOAK_VNC_PASSWORD_EFFECTIVE}")
+    DEVA_CLOAK_VNC_URL="vnc://127.0.0.1:${free_port}"
+}
+
+# Announce the always-on browser: where the profile persists and how the
+# agent reaches the browser. Only at create; the daemon is a container fixture.
+announce_cloak_browser() {
+    [ "${DEVA_CLOAK_BROWSER:-}" = "1" ] || return 0
+    [ "$1" = "existing" ] && return 0
+    echo "Cloak browser: always-on, agent attaches via CLOAK_CDP_ENDPOINT (http://127.0.0.1:${DEVA_CLOAK_CDP_PORT:-9222})" >&2
+    [ -n "$DEVA_CLOAK_PROFILE_HOST" ] && echo "  profile persists to: $DEVA_CLOAK_PROFILE_HOST" >&2
+}
+
+# "new": trust the URL (container is about to be created with the port).
+# "existing": the port was fixed at create; if this run asked for VNC but is
+# attaching to a container created without it, say so instead of printing a
+# dead URL.
+announce_cloak_vnc() {
+    local phase="$1"
+    if [ "$phase" = "existing" ] && [ "${DEVA_CLOAK_VNC:-}" = "1" ] && [ -z "$DEVA_CLOAK_VNC_URL" ]; then
+        echo "note: DEVA_CLOAK_VNC=1 but this container was created without a VNC port; recreate it (--rm, or stop/remove) to enable VNC" >&2
+        return 0
+    fi
+    [ -n "$DEVA_CLOAK_VNC_URL" ] || return 0
+    echo "Cloak VNC: $DEVA_CLOAK_VNC_URL (open in a VNC client to watch/drive the browser the agent opens)" >&2
+    if [ "${DEVA_CLOAK_VNC_PASSWORD_GENERATED:-false}" = true ]; then
+        echo "  VNC password (auto-generated): ${DEVA_CLOAK_VNC_PASSWORD_EFFECTIVE}" >&2
+    else
+        echo "  VNC password: (your DEVA_CLOAK_VNC_PASSWORD)" >&2
+    fi
+    # The daemon announce already prints the profile path; only print it here
+    # when there is no daemon (the VNC-only path still mounts a profile).
+    [ "${DEVA_CLOAK_BROWSER:-}" != "1" ] && [ -n "$DEVA_CLOAK_PROFILE_HOST" ] && \
+        echo "  profile persists to: $DEVA_CLOAK_PROFILE_HOST" >&2
+}
 
 ACTION="run"
 MANAGEMENT_MODE="launch"
@@ -3926,6 +4128,9 @@ _step "append_grok_update_guard"
 
 append_user_envs
 _step "append_user_envs"
+
+setup_cloak_runtime
+_step "setup_cloak_runtime"
 validate_bind_mount_shape
 _step "validate_bind_mount_shape"
 
@@ -4061,6 +4266,8 @@ if [ "$EPHEMERAL_MODE" = false ]; then
     # Trace UI reachability is fixed at container create (port publish);
     # attaching to a container created without it cannot gain the mapping.
     announce_trace_ui existing
+    announce_cloak_browser existing
+    announce_cloak_vnc existing
 
     if [ "$AUTH_PROVISION_MODE" = true ]; then
         docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
@@ -4072,6 +4279,8 @@ else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
     write_session_file
     announce_trace_ui new
+    announce_cloak_browser new
+    announce_cloak_vnc new
     if [ "$AUTH_PROVISION_MODE" = true ]; then
         docker "${DOCKER_ARGS[@]}" "${AGENT_COMMAND[@]}" || true
         finish_auth_provision
