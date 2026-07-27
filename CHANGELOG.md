@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `DEVA_AUTH_TAG` container env (#496): the auth tag deva already computes
+  for container naming (`auth-default` | `auth-file-<stem>` |
+  `api-key-<last4>` | `env`) is now exported into every container.
+  Credentials files carry no identity (tokens rotate), so the tag is the
+  only stable in-container handle for WHICH account a session runs as.
+  First consumer: claude-code-statusline — account chip plus per-account
+  cache scoping, so multi-account `--auth-with` runs stop sharing one
+  quota/profile cache under the shared `~/.claude`.
+
 ## [0.17.0] - 2026-07-27
 
 ### Added
