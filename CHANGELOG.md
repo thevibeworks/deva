@@ -50,8 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in versions.env pins the wrapper and thereby Chromium. Ships the
   `deva-cloak` skill (keyed off `DEVA_CLOAK=1`), `make build-cloak` /
   `test-cloak` targets, a paths-filtered `cloak-image.yml` CI workflow,
-  and release pushes `:cloak` / `:vX.Y.Z-cloak` tags. Nightly skips cloak
-  on purpose — that layer contains no agent CLIs.
+  and release pushes `:cloak` / `:vX.Y.Z-cloak` tags. cloak is an auxiliary
+  image on its own cadence: nightly skips it (that layer holds no agent
+  CLIs) and the release cloak job is non-gating (`continue-on-error`, not
+  in the `release` job's `needs`) — a ~200MB Chromium bake per arch must
+  never hold the GitHub Release hostage.
 
 ### Fixed
 - `--trace` launch killed by `cp: cannot create regular file

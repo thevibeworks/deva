@@ -169,6 +169,12 @@ jobs:
           set -euo pipefail
           ./scripts/test-install-agent-tooling.sh
 
+      - name: Smoke image/tag precedence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test-image-precedence.sh
+
       - name: Smoke kimi auth wiring
         shell: bash
         run: |

@@ -13,6 +13,14 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-27] Dev Log: cloak release policy + closing the unverified VNC/daemon gap #456
+- Why: two loose ends before shipping. (1) The 2026-07-21 entry left "x11vnc serving RFB and a live daemon inside the built image" unverified — that env couldn't apt-install. (2) release.yml made the GitHub Release `needs` the cloak build, so a ~200MB Chromium bake per arch (arm64 under QEMU) sat on the critical path of every release, including patch releases that touch nothing in that layer.
+- What:
+  - Live verification against the built `:cloak` image (wrapper 0.5.2, Chrome 146.0.7680.177): x11vnc answers the RFB handshake on :5900 with `RFB 003.008`; cloak-browserd serves CDP on 127.0.0.1:9222; a separate playwright-core client `connectOverCDP`s, drives a page, and the daemon survives that client's `close()`. Stealth confirmed live: UA spoofs `Windows NT 10.0`, `navigator.webdriver === false`. First probe raced the daemons — both are up ~4s after boot, so poll the ports, don't poll only the display.
+  - Agent-facing footgun found while proving it: `page.setContent()` on a fresh daemon page hangs waiting for a `load` event that never fires. `goto('data:text/html,...', {waitUntil:'domcontentloaded'})` is the working equivalent — documented in the skill.
+  - Release policy: cloak is an auxiliary image on its own cadence, NOT a general releasable profile. It holds no agent CLIs, and its content only moves when Dockerfile.cloak / cloak-entrypoint.sh / CLOAKBROWSER_WRAPPER_VERSION move — never on a deva.sh version bump. So the cloak job is now `continue-on-error: true` and is OUT of the `release` job's `needs`; release notes present `:cloak` as the rolling tag and mark `:vX.Y.Z-cloak` as possibly lagging. Nightly already skipped cloak for the same reason.
+- Result: all four live proofs pass; `make test-cloak` green. The structural point: an optional 200MB capability layer must never be able to fail the mandatory release artifact. Follow-up filed for the profile registry — profile identity is currently duplicated across deva.sh, Makefile, and three workflows.
+
 # [2026-07-21] Dev Log: cloak always-on browser + VNC + persistent profile #456
 - Why: three asks for auth sites in the cloak browser — (1) VNC auto-secured with a password, (2) an always-on browser the agent can drive freely, (3) mount what preserves the whole session to the host. Verified the load-bearing assumption first in a throwaway cloak container: a persistent CloakBrowser launched with `--remote-debugging-port` exposes a CDP endpoint a SEPARATE Playwright client reaches via connectOverCDP, drives, and the browser survives that client disconnecting. So one daemon can back both the human (VNC) and the agent (CDP).
 - What:
