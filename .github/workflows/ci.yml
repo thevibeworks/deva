@@ -80,6 +80,7 @@ jobs:
             --build-arg CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
             --build-arg GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
             --build-arg GROK_CLI_VERSION="${{ steps.pins.outputs.grok_cli_version }}" \
+            --build-arg KIMI_CODE_VERSION="${{ steps.pins.outputs.kimi_code_version }}" \
             --build-arg CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             --build-arg COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             .
@@ -102,6 +103,7 @@ jobs:
             CODEX_VERSION="${{ steps.pins.outputs.codex_version }}" \
             GEMINI_CLI_VERSION="${{ steps.pins.outputs.gemini_cli_version }}" \
             GROK_CLI_VERSION="${{ steps.pins.outputs.grok_cli_version }}" \
+            KIMI_CODE_VERSION="${{ steps.pins.outputs.kimi_code_version }}" \
             CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             PLAYWRIGHT_VERSION="${{ steps.pins.outputs.playwright_version }}" \
@@ -127,6 +129,7 @@ jobs:
           deva.sh codex -Q -- --version
           deva.sh gemini -Q -- --version
           deva.sh grok -Q -- --version
+          deva.sh kimi -Q -- --version
 
       - name: Smoke Claude --chrome mount assembly
         shell: bash
@@ -165,6 +168,14 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/test-install-agent-tooling.sh
+
+      - name: Smoke kimi auth wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVA_DOCKER_IMAGE=deva-smoke \
+          DEVA_DOCKER_TAG=ci \
+          ./scripts/test-kimi-auth.sh
 
       - name: Smoke version targets
         shell: bash

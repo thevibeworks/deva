@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- kimi agent (Moonshot Kimi Code CLI, #455): `deva.sh kimi` launches the
+  official `@moonshot-ai/kimi-code` CLI like claude/codex/gemini/grok.
+  `oauth` default (device-code `/login`, mounts `~/.kimi-code`) and
+  `api-key`. kimi reads no API key from the shell — its only shell channel
+  is the `KIMI_MODEL_*` family — so api-key mode maps `KIMI_CODE_API_KEY`
+  onto `KIMI_MODEL_{NAME,API_KEY,PROVIDER_TYPE,BASE_URL}` (default model
+  `k3`, coding endpoint `https://api.kimi.com/coding/v1`; override with
+  `DEVA_KIMI_MODEL` / `DEVA_KIMI_BASE_URL`). The key is synthesized
+  in-memory, never written to `config.toml`, so api-key mode mounts no
+  `~/.kimi-code` and nothing lands on disk. Unlike grok, kimi's npm bin is
+  a plain symlink (no self-update trampoline), so no binary-pinning guard
+  is needed. `KIMI_CODE_VERSION` pinned at 0.28.0 through versions.env,
+  Makefile, Dockerfile(+rust), version-pins/upgrade/update scripts,
+  ci/nightly/release workflows; tests added (release-utils registry,
+  version-upgrade mock, install-tooling, and `test-kimi-auth.sh`).
+
+### Fixed
+- `--trace` launch killed by `cp: cannot create regular file
+  '/usr/local/share/ca-certificates/cctrace-mitm.crt': File exists` (#414):
+  the persistent-container flow runs the entrypoint's `setup_trace_ca`
+  concurrently — once in PID 1 (`docker run -d ... tail -f /dev/null` boot)
+  and once in the `docker exec` entrypoint that starts the agent — and GNU
+  cp creates the destination `O_EXCL`, so the loser of the race died under
+  `set -e`. The CA install is now serialized with `flock` and skips the
+  copy when the installed cert is already current. The first cut of the
+  flock subshell ended on `[ "$VERBOSE" = "true" ] && echo`, whose failed
+  test became the subshell's exit status and `set -e` killed every
+  non-verbose traced launch right after the banner; the subshell now
+  exits 0 explicitly.
+
 ## [0.16.0] - 2026-07-14
 
 ### Added

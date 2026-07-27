@@ -27,6 +27,7 @@ inspect)
   "org.opencontainers.image.codex_version":"0.116.0",
   "org.opencontainers.image.gemini_cli_version":"0.35.0",
   "org.opencontainers.image.grok_cli_version":"0.2.90",
+  "org.opencontainers.image.kimi_code_version":"0.28.0",
   "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
@@ -103,12 +104,14 @@ case "$url" in
 */-/package/@openai/codex/dist-tags)             echo '{"latest":"0.117.0"}' ;;
 */-/package/@google/gemini-cli/dist-tags)        echo '{"latest":"0.35.3"}' ;;
 */-/package/@xai-official/grok/dist-tags)        echo '{"latest":"0.2.93"}' ;;
+*/-/package/@moonshot-ai/kimi-code/dist-tags)    echo '{"latest":"0.28.0"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 *registry.npmjs.org/@anthropic-ai%2fclaude-code) echo '{"time":{"2.1.87":"2026-03-29T01:40:00Z"}}' ;;
 *registry.npmjs.org/@thevibeworks%2fcctrace)     echo '{"time":{"0.4.0":"2026-03-29T01:40:00Z"}}' ;;
 *registry.npmjs.org/@openai%2fcodex)             echo '{"time":{"0.117.0":"2026-03-26T22:28:00Z"}}' ;;
 *registry.npmjs.org/@google%2fgemini-cli)        echo '{"time":{"0.35.3":"2026-03-28T03:17:00Z"}}' ;;
 *registry.npmjs.org/@xai-official%2fgrok)        echo '{"time":{"0.2.93":"2026-07-01T00:00:00Z"}}' ;;
+*registry.npmjs.org/@moonshot-ai%2fkimi-code)    echo '{"time":{"0.28.0":"2026-07-10T00:00:00Z"}}' ;;
 *registry.npmjs.org/playwright)                  echo '{"time":{"1.60.0":"2026-05-14T08:00:00Z"}}' ;;
 *)
     echo "unexpected curl url: $url" >&2
@@ -157,6 +160,7 @@ for expected in \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg GROK_CLI_VERSION=0.2.93" \
+    "--build-arg KIMI_CODE_VERSION=0.28.0" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "--build-arg GO_VERSION=1.26.2"
@@ -174,6 +178,7 @@ for expected in \
     "--build-arg CODEX_VERSION=0.117.0" \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg GROK_CLI_VERSION=0.2.93" \
+    "--build-arg KIMI_CODE_VERSION=0.28.0" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do
@@ -255,5 +260,30 @@ if ! grep -F -- "All versions up-to-date" <<<"$outage_out" >/dev/null; then
 fi
 if [[ -s "$OUTAGE_BUILD_LOG" ]]; then
     echo "no builds should run during a registry outage" >&2
+    exit 1
+fi
+
+# ───── update-version-pins: write_version_pins round-trips versions.env ─────
+# The heredoc in write_version_pins is a second copy of the file layout: a
+# pin present in versions.env but missing from the heredoc is silently
+# deleted on the next `make versions-pin`. With every upstream fetch failing
+# (curl still exits 22 from the outage block, git stubbed below), a rewrite
+# must reproduce the file byte-for-byte, comments included.
+cat >"$FAKE_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$FAKE_BIN/git"
+
+PINS_COPY="$TMP_ROOT/versions.env"
+cp "$REPO_ROOT/versions.env" "$PINS_COPY"
+if ! PATH="$FAKE_BIN:$PATH" \
+    VERSION_PINS_FILE="$PINS_COPY" \
+    bash "$REPO_ROOT/scripts/update-version-pins.sh" >/dev/null 2>&1; then
+    echo "update-version-pins.sh failed during round-trip check" >&2
+    exit 1
+fi
+if ! diff -u "$REPO_ROOT/versions.env" "$PINS_COPY"; then
+    echo "write_version_pins does not round-trip versions.env: pins or comments lost" >&2
     exit 1
 fi

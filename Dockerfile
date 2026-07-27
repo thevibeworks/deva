@@ -212,12 +212,14 @@ ARG CLAUDE_CODE_VERSION=2.1.143
 ARG CODEX_VERSION=0.131.0
 ARG GEMINI_CLI_VERSION=0.42.0
 ARG GROK_CLI_VERSION=0.2.93
+ARG KIMI_CODE_VERSION=0.28.0
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
 LABEL org.opencontainers.image.codex_version=${CODEX_VERSION}
 LABEL org.opencontainers.image.gemini_cli_version=${GEMINI_CLI_VERSION}
 LABEL org.opencontainers.image.grok_cli_version=${GROK_CLI_VERSION}
+LABEL org.opencontainers.image.kimi_code_version=${KIMI_CODE_VERSION}
 
 ARG CCX_VERSION=v0.7.0
 

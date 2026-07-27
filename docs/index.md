@@ -1,6 +1,6 @@
 # deva.sh
 
-Run Codex, Claude Code, Gemini, and Grok inside Docker without pretending
+Run Codex, Claude Code, Gemini, Grok, and Kimi inside Docker without pretending
 the agent's own sandbox is the thing keeping you safe.
 
 The container is the sandbox. Explicit mounts are the contract.
@@ -24,7 +24,7 @@ If you want the internals instead of vague hand-waving:
 
 ## What This Is
 
-- a Docker-based launcher for Codex, Claude, Gemini, and Grok
+- a Docker-based launcher for Codex, Claude, Gemini, Grok, and Kimi
 - one warm default container shape per project by default
 - explicit mount and env wiring instead of mystery behavior
 - per-agent config homes under `~/.config/deva/`

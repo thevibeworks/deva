@@ -8,6 +8,7 @@ set -euo pipefail
 : "${CODEX_VERSION:?CODEX_VERSION is required}"
 : "${GEMINI_CLI_VERSION:?GEMINI_CLI_VERSION is required}"
 : "${GROK_CLI_VERSION:?GROK_CLI_VERSION is required}"
+: "${KIMI_CODE_VERSION:?KIMI_CODE_VERSION is required}"
 
 CCTRACE_VERSION="${CCTRACE_VERSION:-0.4.0}"
 CCX_VERSION="${CCX_VERSION:-v0.7.0}"
@@ -137,7 +138,7 @@ install_npm_agent_tooling() {
     log "Installing npm agent tooling"
     log "Proxy config:"
     log_proxy_config
-    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION}"
+    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION} kimi=${KIMI_CODE_VERSION}"
 
     mkdir -p "$DEVA_HOME/.npm-global" "$DEVA_HOME/.local/bin"
     npm config set prefix "$DEVA_HOME/.npm-global"
@@ -149,6 +150,7 @@ install_npm_agent_tooling() {
         "@openai/codex@${CODEX_VERSION}" \
         "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
         "@xai-official/grok@${GROK_CLI_VERSION}" \
+        "@moonshot-ai/kimi-code@${KIMI_CODE_VERSION}" \
         || die "npm install failed"
 
     npm cache clean --force
@@ -158,7 +160,10 @@ install_npm_agent_tooling() {
     "$DEVA_HOME/.npm-global/bin/codex" --version
     "$DEVA_HOME/.npm-global/bin/gemini" --version
     pin_grok_platform_binary
-    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli @xai-official/grok || true)
+    # kimi's npm bin is a plain symlink to dist/main.mjs (no self-update
+    # trampoline, no platform binary), so it needs no pinning — just verify.
+    "$DEVA_HOME/.npm-global/bin/kimi" --version
+    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli @xai-official/grok @moonshot-ai/kimi-code || true)
 }
 
 # grok's npm postinstall puts the real binary in ~/.grok/bin (the CLI's

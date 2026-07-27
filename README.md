@@ -6,11 +6,11 @@
 [![Checks](https://img.shields.io/badge/checks-shellcheck%20%7C%20docs%20%7C%20smoke-222222)](#development)
 [![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-thevibeworks%2Fdeva-blue)](https://github.com/thevibeworks/deva/pkgs/container/deva)
-[![Agents](https://img.shields.io/badge/agents-codex%20%7C%20claude%20%7C%20gemini%20%7C%20grok-222222)](#what-this-is)
+[![Agents](https://img.shields.io/badge/agents-codex%20%7C%20claude%20%7C%20gemini%20%7C%20grok%20%7C%20kimi-222222)](#what-this-is)
 
 <sub>AI agents / LLMs: read [llms.txt](llms.txt) — the whole product in one fetch.</sub>
 
-Run Codex, Claude Code, Gemini, and Grok inside Docker without pretending the agent's own sandbox is the thing keeping you safe.
+Run Codex, Claude Code, Gemini, Grok, and Kimi inside Docker without pretending the agent's own sandbox is the thing keeping you safe.
 
 The container is the sandbox. Explicit mounts are the contract. Persistent project containers keep the workflow fast instead of rebuilding the same state every run.
 
@@ -18,7 +18,7 @@ This repo is the source of truth for `deva.sh`.
 
 ## What This Is
 
-- a Docker-based launcher for Codex, Claude, Gemini, and Grok
+- a Docker-based launcher for Codex, Claude, Gemini, Grok, and Kimi
 - one warm default container shape per project by default
 - explicit mount and env wiring instead of mystery behavior
 - per-agent config homes under `~/.config/deva/`
@@ -56,7 +56,7 @@ deva.sh ps
 deva.sh stop
 ```
 
-If you already use Codex, Claude, Gemini, or Grok locally, deva will auto-link those auth homes into `~/.config/deva/` by default. If not, first run will ask you to authenticate inside the container.
+If you already use Codex, Claude, Gemini, Grok, or Kimi locally, deva will auto-link those auth homes into `~/.config/deva/` by default. If not, first run will ask you to authenticate inside the container.
 
 ## Docs
 
@@ -118,6 +118,7 @@ deva.sh
 deva.sh codex
 deva.sh gemini
 deva.sh grok
+deva.sh kimi
 
 # Throwaway run
 deva.sh claude --rm
