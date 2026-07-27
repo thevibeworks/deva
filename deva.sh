@@ -4004,6 +4004,8 @@ _step "agent_prepare"
         _needs_rewrite=true
     fi
 
+    _auth_tag=$(generate_auth_tag "$ACTIVE_AGENT" "${AUTH_METHOD:-}" "${CUSTOM_CREDENTIALS_FILE:-}" "$_env_auth_override")
+
     if [ "$_needs_rewrite" = true ]; then
         _rw_slug="$(generate_container_slug)"
 
@@ -4020,10 +4022,9 @@ _step "agent_prepare"
         _rw_trace_input=""
         [ "${DEVA_TRACE_ACTIVE:-false}" = true ] && _rw_trace_input="trace"
         _rw_shape=$(compute_shape_hash "$(docker_image_ref)" "$_rw_vol_input" "${_rw_cfg_input}${_rw_trace_input:+|${_rw_trace_input}}")
-        _rw_auth_tag=$(generate_auth_tag "$ACTIVE_AGENT" "$AUTH_METHOD" "${CUSTOM_CREDENTIALS_FILE:-}" "$_env_auth_override")
 
         _rw_name=$(build_container_name \
-            "$DEVA_CONTAINER_PREFIX" "$ACTIVE_AGENT" "$_rw_auth_tag" \
+            "$DEVA_CONTAINER_PREFIX" "$ACTIVE_AGENT" "$_auth_tag" \
             "$_rw_slug" "$_rw_shape" "$EPHEMERAL_MODE" "$$")
 
         for ((i = 0; i < ${#DOCKER_ARGS[@]}; i++)); do
@@ -4033,7 +4034,7 @@ _step "agent_prepare"
             fi
         done
 
-        DOCKER_ARGS+=(--label "deva.auth_tag=${_rw_auth_tag}")
+        DOCKER_ARGS+=(--label "deva.auth_tag=${_auth_tag}")
     fi
 
     if [ -n "${AUTH_METHOD:-}" ]; then
@@ -4041,6 +4042,12 @@ _step "agent_prepare"
         DOCKER_ARGS+=(-e "DEVA_AUTH_METHOD=${AUTH_METHOD}")
         [ -n "${AUTH_DETAILS:-}" ] && DOCKER_ARGS+=(-e "DEVA_AUTH_DETAILS=${AUTH_DETAILS}")
     fi
+
+    # Account identity for in-container tooling (#496). The credentials file
+    # carries no identity (tokens rotate) — the tag is the only stable handle
+    # for WHICH account this container runs as. claude-code-statusline keys
+    # its per-account cache scoping and account chip on it.
+    DOCKER_ARGS+=(-e "DEVA_AUTH_TAG=${_auth_tag}")
 }
 
 # Determine container name early for env injection

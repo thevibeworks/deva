@@ -13,6 +13,11 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-27] Dev Log: DEVA_AUTH_TAG for in-container account identity #496
+- Why: two claude containers on `--auth-with a.credentials.json` / `b.credentials.json` are indistinguishable from inside — /status shows the shared `.claude.json`'s oauthAccount (whoever logged in last), and claude-code-statusline's "account-scoped" caches under the shared `~/.claude/statusline` actively bleed across accounts (B renders A's 5h/7d bars whenever A fetched last; profile.cache sticks to the first account for 24h). Credentials files carry no identity — tokens rotate, no email/uuid — so the runner is the only party that knows which account a container talks as.
+- What: hoist generate_auth_tag() out of the container-name rewrite branch (it already produced `auth-default | auth-file-<stem> | api-key-<last4> | env` for naming and the `deva.auth_tag` label) and export it as `DEVA_AUTH_TAG` on every run. No naming/label change. Verified all three modes via scratch-HOME `--dry-run`.
+- Result: in-container tooling gets a stable account handle. Statusline side (chip + per-account cache dirs keyed on the tag) lands in claude-code-statusline. /status stays wrong by design until a per-account `.claude.json` overlay exists — follow-up candidate for `--auth-with`.
+
 # [2026-07-27] Dev Log: cloak release policy + closing the unverified VNC/daemon gap #456
 - Why: two loose ends before shipping. (1) The 2026-07-21 entry left "x11vnc serving RFB and a live daemon inside the built image" unverified — that env couldn't apt-install. (2) release.yml made the GitHub Release `needs` the cloak build, so a ~200MB Chromium bake per arch (arm64 under QEMU) sat on the critical path of every release, including patch releases that touch nothing in that layer.
 - What:
