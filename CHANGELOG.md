@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- launch receipts (#499): `--goal SLUG` stamps intent at launch.
+  Exports `DEVA_GOAL` into the container (create-time env; attach
+  restamps when a fresh `--goal` is given) and appends one JSONL
+  receipt host-side to `$XDG_DATA_HOME/ccx/launches/YYYY-MM-DD.jsonl`
+  (`ts`, `goal`, `agent`, `cwd`, `container`, `source`). ccx joins
+  receipt->session by cwd+time so sessions stop being born orphans.
+  Receipt writes never block a launch; no `--goal` = zero change.
+
 ## [0.18.1] - 2026-07-28
 
 ### Fixed

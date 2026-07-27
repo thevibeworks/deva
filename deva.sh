@@ -89,6 +89,7 @@ DEBUG_MODE=false
 DRY_RUN=false
 CODEX_BROWSER_MCP=false
 HOST_TMUX=false
+GOAL=""
 
 if [ -t 0 ] && [ -t 1 ]; then
     DOCKER_TERMINAL_ARGS=(-it)
@@ -157,6 +158,10 @@ Deva flags:
   -Q, --quick             Bare mode: no host config mounts, no .deva loading, no autolink,
                           implies --rm. Like emacs -Q. Mutually exclusive with -c.
   --host-net              Use host networking for the agent container
+  --goal SLUG             Stamp this launch with a goal slug ([a-z0-9-]):
+                          exports DEVA_GOAL in-container and appends a
+                          launch receipt to $XDG_DATA_HOME/ccx/launches/
+                          for ccx session attribution
   --host-tmux             Opt in to container->host tmux: mounts ~/.ssh (ro)
                           and passes DEVA_HOST_USER so the in-container
                           deva-tmux CLI can reach the host tmux server.
@@ -3196,6 +3201,19 @@ parse_wrapper_args() {
             i=$((i + 1))
             continue
             ;;
+        --goal)
+            if [ $((i + 1)) -ge ${#incoming[@]} ]; then
+                echo "error: --goal requires a slug" >&2
+                exit 1
+            fi
+            GOAL="${incoming[$((i + 1))]}"
+            if ! [[ "$GOAL" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+                echo "error: --goal slug must match [a-z0-9][a-z0-9-]* (got '$GOAL')" >&2
+                exit 1
+            fi
+            i=$((i + 2))
+            continue
+            ;;
         --browser-mcp | --codex-browser-mcp | --with-browser)
             CODEX_BROWSER_MCP=true
             i=$((i + 1))
@@ -4064,6 +4082,7 @@ done
 DOCKER_ARGS+=(-e "DEVA_CONTAINER_NAME=${CONTAINER_NAME}")
 DOCKER_ARGS+=(-e "DEVA_WORKSPACE=$(pwd)")
 DOCKER_ARGS+=(-e "DEVA_EPHEMERAL=${EPHEMERAL_MODE}")
+[ -n "$GOAL" ] && DOCKER_ARGS+=(-e "DEVA_GOAL=${GOAL}")
 
 # Back up .claude.json before mounting, without touching live credential files.
 if [ "$QUICK_MODE" != true ] && [ "$DRY_RUN" != true ]; then
@@ -4206,6 +4225,24 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
+# Launch receipt: one JSONL line per --goal launch, host-side, into the
+# ccx data dir. Receipts are evidence (ccx joins receipt->session by
+# cwd+time); the ops ledger cites session IDs, it does not store these.
+# Never blocks a launch: a failed write is a warning, not an error.
+write_launch_receipt() {
+    [ -n "$GOAL" ] || return 0
+    local dir="${XDG_DATA_HOME:-$HOME/.local/share}/ccx/launches"
+    if ! mkdir -p "$dir" 2>/dev/null; then
+        echo "warning: cannot create $dir; skipping launch receipt" >&2
+        return 0
+    fi
+    printf '{"ts":"%s","goal":"%s","agent":"%s","cwd":"%s","container":"%s","source":"deva"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GOAL" "${ACTIVE_AGENT:-}" "$(pwd)" "$CONTAINER_NAME" \
+        >>"$dir/$(date -u +%Y-%m-%d).jsonl" 2>/dev/null ||
+        echo "warning: failed to write launch receipt" >&2
+}
+write_launch_receipt
+
 inject_workspace_context
 
 if [ "$EPHEMERAL_MODE" = false ]; then
@@ -4274,6 +4311,11 @@ if [ "$EPHEMERAL_MODE" = false ]; then
     _trace_env="DEVA_TRACE=0"
     [ "${DEVA_TRACE_ACTIVE:-false}" = true ] && _trace_env="DEVA_TRACE=1"
 
+    # Same override rule for the goal: attach with a fresh --goal restamps
+    # the container; without it the create-time DEVA_GOAL (if any) stands.
+    _goal_env=()
+    [ -n "$GOAL" ] && _goal_env=(-e "DEVA_GOAL=${GOAL}")
+
     # Trace UI reachability is fixed at container create (port publish);
     # attaching to a container created without it cannot gain the mapping.
     announce_trace_ui existing
@@ -4281,10 +4323,10 @@ if [ "$EPHEMERAL_MODE" = false ]; then
     announce_cloak_vnc existing
 
     if [ "$AUTH_PROVISION_MODE" = true ]; then
-        docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
+        docker exec -e "$_trace_env" ${_goal_env[@]+"${_goal_env[@]}"} "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
         finish_auth_provision
     else
-        exec docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+        exec docker exec -e "$_trace_env" ${_goal_env[@]+"${_goal_env[@]}"} "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
     fi
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
