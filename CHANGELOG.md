@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-27
+
 ### Added
 - kimi agent (Moonshot Kimi Code CLI, #455): `deva.sh kimi` launches the
   official `@moonshot-ai/kimi-code` CLI like claude/codex/gemini/grok.
@@ -76,6 +78,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back to the config value. Precedence is now environment > config files >
   `-p` profile > default, with explicit CLI `-p` beating a config-file tag.
   Guarded by `scripts/test-image-precedence.sh` in CI.
+- `--dry-run` pulled images and rewrote the resolved tag: `check_image` ran
+  unconditionally, so a dry run could fetch a multi-GB image and, when the
+  requested tag was missing, its availability fallback rewrote
+  `DEVA_DOCKER_TAG` — reporting a tag the user never asked for. Resolution
+  is what `--dry-run` reports; availability is a launch-time concern.
+- `deva.sh` exited silently when docker rejected a `.deva` mount (#484):
+  "Creating persistent container: <name>" and nothing else. Under
+  `set -euo pipefail` a failing command-substitution assignment aborts at
+  the assignment, so `docker_exit=$?` and the whole error block below it
+  were dead code on the one path they exist for. docker's own stderr now
+  surfaces.
+- `update-version-pins.sh` aborted the whole sweep when a single registry
+  fetch failed (same `set -e` assignment trap), and skipped rewriting
+  `versions.env` when nothing moved — leaving the heredoc round-trip guard
+  unexercised on exactly the runs where every fetch failed.
 
 ## [0.16.0] - 2026-07-14
 
