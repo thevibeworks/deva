@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-27
+
 ### Added
 - `DEVA_AUTH_TAG` container env (#496): the auth tag deva already computes
   for container naming (`auth-default` | `auth-file-<stem>` |
