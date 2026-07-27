@@ -3958,7 +3958,11 @@ if dangerous_directory; then
 fi
 
 resolve_profile
-check_image
+# A dry run reports what would happen: it must not pull a multi-GB image, and
+# it must not let check_image's availability fallback rewrite DEVA_DOCKER_TAG,
+# which would report a tag the user did not ask for. Resolution is what --dry-run
+# is for; availability is a launch-time concern.
+[ "$DRY_RUN" = true ] || check_image
 prepare_base_docker_args
 dedup_user_volumes
 append_user_volumes
