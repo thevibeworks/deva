@@ -179,6 +179,7 @@ Stable release tags:
 
 - `ghcr.io/thevibeworks/deva:latest`
 - `ghcr.io/thevibeworks/deva:rust`
+- `ghcr.io/thevibeworks/deva:cloak` (CloakBrowser stealth Chromium, headed; `deva.sh -p cloak`)
 
 Nightly refresh tags:
 

@@ -31,6 +31,7 @@ compose.yaml
 
 # References directory (don't need in image)
 references/
+reference/
 
 # Claude trace logs
 .claude-trace/

@@ -5,12 +5,15 @@ VERSION_PINS_FILE ?= versions.env
 IMAGE_NAME := ghcr.io/thevibeworks/deva
 TAG := latest
 RUST_TAG := rust
+CLOAK_TAG := cloak
 CORE_TAG := core
 DOCKERFILE := Dockerfile
 RUST_DOCKERFILE := Dockerfile.rust
+CLOAK_DOCKERFILE := Dockerfile.cloak
 MULTI_ARCH_PLATFORMS := linux/amd64,linux/arm64
 MAIN_IMAGE := $(IMAGE_NAME):$(TAG)
 RUST_IMAGE := $(IMAGE_NAME):$(RUST_TAG)
+CLOAK_IMAGE := $(IMAGE_NAME):$(CLOAK_TAG)
 CORE_IMAGE := $(IMAGE_NAME):$(CORE_TAG)
 CONTAINER_NAME := deva-$(shell basename $(PWD))-$(shell date +%s)
 
@@ -39,6 +42,7 @@ KIMI_CODE_VERSION ?= 0.28.0
 CCX_VERSION ?= v0.1.4
 COPILOT_API_VERSION ?= 0ea08febdd7e3e055b03dd298bf57e669500b5c1
 PLAYWRIGHT_VERSION ?= 1.60.0
+CLOAKBROWSER_WRAPPER_VERSION ?= 0.4.12
 RUST_TOOLCHAINS ?= stable
 RUST_DEFAULT_TOOLCHAIN ?= stable
 RUST_TARGETS ?= wasm32-unknown-unknown
@@ -97,6 +101,9 @@ RUST_BUILD_ARGS := $(AGENT_BUILD_ARGS) \
 	--build-arg RUST_DEFAULT_TOOLCHAIN=$(RUST_DEFAULT_TOOLCHAIN) \
 	--build-arg RUST_TARGETS=$(RUST_TARGETS)
 
+CLOAK_BUILD_ARGS := \
+	--build-arg CLOAKBROWSER_WRAPPER_VERSION=$(CLOAKBROWSER_WRAPPER_VERSION)
+
 VERSION_QUERY_OVERRIDES := \
 	$(if $(filter command line environment environment\ override override,$(origin NODE_MAJOR)),NODE_MAJOR=$(NODE_MAJOR)) \
 	$(if $(filter command line environment environment\ override override,$(origin GO_VERSION)),GO_VERSION=$(GO_VERSION)) \
@@ -113,6 +120,7 @@ VERSION_QUERY_OVERRIDES := \
 	$(if $(filter command line environment environment\ override override,$(origin CCX_VERSION)),CCX_VERSION=$(CCX_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin COPILOT_API_VERSION)),COPILOT_API_VERSION=$(COPILOT_API_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin PLAYWRIGHT_VERSION)),PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin CLOAKBROWSER_WRAPPER_VERSION)),CLOAKBROWSER_WRAPPER_VERSION=$(CLOAKBROWSER_WRAPPER_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin RUST_TOOLCHAINS)),RUST_TOOLCHAINS=$(RUST_TOOLCHAINS)) \
 	$(if $(filter command line environment environment\ override override,$(origin RUST_DEFAULT_TOOLCHAIN)),RUST_DEFAULT_TOOLCHAIN=$(RUST_DEFAULT_TOOLCHAIN)) \
 	$(if $(filter command line environment environment\ override override,$(origin RUST_TARGETS)),RUST_TARGETS=$(RUST_TARGETS))
@@ -122,9 +130,9 @@ export VERSION_PINS_FILE
 
 .DEFAULT_GOAL := help
 
-.PHONY: build build-network-check build-main rebuild build-core build-rust-image build-rust build-all
-.PHONY: buildx buildx-multi buildx-multi-rust buildx-multi-local
-.PHONY: versions-up versions versions-pin toolchains scripts commands clean clean-all shell test test-rust test-local
+.PHONY: build build-network-check build-main rebuild build-core build-rust-image build-rust build-cloak-image build-cloak build-all
+.PHONY: buildx buildx-multi buildx-multi-rust buildx-multi-cloak buildx-multi-local
+.PHONY: versions-up versions versions-pin toolchains scripts commands clean clean-all shell test test-rust test-cloak test-local
 .PHONY: info push pull build-test dev context-size lint version-check
 .PHONY: release-patch release-minor release-major help
 
@@ -216,11 +224,22 @@ build-rust-image: build-network-check
 
 build-rust: build-core build-rust-image
 
+build-cloak-image: build-network-check
+	@echo "🔨 Building CloakBrowser Docker image..."
+	docker build $(DOCKER_BUILD_FLAGS) -f $(CLOAK_DOCKERFILE) \
+		--build-arg BASE_IMAGE=$(RUST_IMAGE) \
+		$(CLOAK_BUILD_ARGS) \
+		-t $(CLOAK_IMAGE) .
+	@echo "✅ Cloak build completed: $(CLOAK_IMAGE)"
+
+build-cloak: build-rust build-cloak-image
+
 build-all:
 	@echo "🔨 Building all images with pins from $(VERSION_PINS_FILE)..."
 	@$(MAKE) build-core
 	@$(MAKE) build-main
 	@$(MAKE) build-rust-image
+	@$(MAKE) build-cloak-image
 	@echo "✅ All images built successfully"
 
 buildx:
@@ -242,6 +261,14 @@ buildx-multi-rust:
 		$(RUST_BUILD_ARGS) \
 		--push -t $(RUST_IMAGE) .
 	@echo "✅ Multi-arch Rust build completed and pushed: $(RUST_IMAGE)"
+
+buildx-multi-cloak:
+	@echo "🔨 Building multi-arch Cloak images for amd64 and arm64..."
+	docker buildx build $(DOCKER_BUILD_FLAGS) -f $(CLOAK_DOCKERFILE) --platform $(MULTI_ARCH_PLATFORMS) \
+		--build-arg BASE_IMAGE=$(RUST_IMAGE) \
+		$(CLOAK_BUILD_ARGS) \
+		--push -t $(CLOAK_IMAGE) .
+	@echo "✅ Multi-arch Cloak build completed and pushed: $(CLOAK_IMAGE)"
 
 buildx-multi-local:
 	@echo "🔨 Building multi-arch images locally..."
@@ -342,6 +369,18 @@ test-rust:
 	docker run --rm $(RUST_IMAGE) bash -c 'cargo-watch --version && wasm-pack --version'
 	@echo "✅ Rust tests passed"
 
+test-cloak:
+	@echo "🧪 Testing $(CLOAK_IMAGE)..."
+	@echo "Testing CloakBrowser binary..."
+	docker run --rm $(CLOAK_IMAGE) bash -c 'cloakbrowser info --quick'
+	@echo "Testing Xvfb display..."
+	docker run --rm $(CLOAK_IMAGE) bash -c 'xdotool getdisplaygeometry'
+	@echo "Testing x11vnc present (VNC login path)..."
+	docker run --rm $(CLOAK_IMAGE) bash -c 'command -v x11vnc'
+	@echo "Testing always-on browser daemon present..."
+	docker run --rm $(CLOAK_IMAGE) bash -c 'node --check /usr/local/lib/cloak/cloak-browserd.mjs'
+	@echo "✅ Cloak tests passed"
+
 test-local:
 	@echo "🧪 Testing $(MAIN_IMAGE) with local directory..."
 	docker run --rm -it \
@@ -409,7 +448,8 @@ help:
 	@echo "  build-core           Build stable core image only"
 	@echo "  build-main           Build main Docker image only"
 	@echo "  build-rust           Build Rust Docker image"
-	@echo "  build-all            Build all images (main + rust)"
+	@echo "  build-cloak          Build CloakBrowser Docker image"
+	@echo "  build-all            Build all images (main + rust + cloak)"
 	@echo "  rebuild              Rebuild without cache"
 	@echo "  buildx               Build with buildx"
 	@echo "  buildx-multi         Build multi-arch and push"
@@ -423,6 +463,7 @@ help:
 	@echo "  commands             Alias for help"
 	@echo "  test                 Test main image"
 	@echo "  test-rust            Test Rust image"
+	@echo "  test-cloak           Test CloakBrowser image"
 	@echo "  shell                Open shell in container"
 	@echo "  clean                Aggressive cleanup (unused containers/images/networks/cache)"
 	@echo "  clean-all            NUCLEAR cleanup (ALL unused Docker resources + volumes)"
@@ -452,6 +493,7 @@ help:
 	@echo "  KIMI_CODE_VERSION    Kimi Code CLI version (default: $(KIMI_CODE_VERSION))"
 	@echo "  CCX_VERSION    Atlas CLI version (default: $(CCX_VERSION))"
 	@echo "  PLAYWRIGHT_VERSION   Playwright version (default: $(PLAYWRIGHT_VERSION))"
+	@echo "  CLOAKBROWSER_WRAPPER_VERSION CloakBrowser npm wrapper version (default: $(CLOAKBROWSER_WRAPPER_VERSION))"
 	@echo "  RUST_TOOLCHAINS      Rust toolchains to install (default: $(RUST_TOOLCHAINS))"
 	@echo "  RUST_DEFAULT_TOOLCHAIN Rust default toolchain (default: $(RUST_DEFAULT_TOOLCHAIN))"
 	@echo ""
@@ -460,6 +502,7 @@ help:
 	@echo "  make build-core                               # Build stable core image only"
 	@echo "  make build-main                               # Build main image only"
 	@echo "  make build-rust                               # Build Rust image only"
+	@echo "  make build-cloak                              # Build CloakBrowser image only"
 	@echo "  make TAG=dev build                            # Build all with custom tag"
 	@echo "  make CLAUDE_CODE_VERSION=2.0.5 build          # Override with specific version"
 	@echo "  make GEMINI_CLI_VERSION=0.18.0 build          # Override gemini version"

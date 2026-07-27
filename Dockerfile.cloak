@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1.4
+# deva.sh - Cloak Browser Image
+# Extends rust image with CloakBrowser stealth Chromium + headed display server
+
+ARG BASE_IMAGE=ghcr.io/thevibeworks/deva:rust
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="deva-cloak"
+LABEL org.opencontainers.image.description="Stealth browser environment with CloakBrowser headed Chromium"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+# Xvfb + openbox for headed mode; xdotool for display-ready polling.
+# x11vnc exposes the Xvfb display so a human can drive the browser for
+# interactive logins (MFA/captcha) -- started on demand, see cloak-entrypoint.
+# CloakBrowser needs the same Chromium system deps already in the rust image,
+# plus the font packages that anti-bot canvas checks require.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        xvfb xdotool openbox x11vnc \
+        fonts-noto-color-emoji fonts-freefont-ttf fonts-unifont \
+        fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf
+
+# Hermetic image: the free Chromium binary is baked at build time, so disable
+# runtime auto-update -- no surprise network fetch or binary drift on launch
+# inside the sandbox. v146 stays free on GitHub Releases forever, so the pinned
+# binary never disappears; bump CLOAKBROWSER_WRAPPER_VERSION to move it.
+# DEVA_CLOAK=1     detection marker -- the deva-cloak skill and agents key off it.
+# CLOAK_APP_DIR    fixed dir holding the wrapper's node_modules, so a script run
+#                  from here can `import 'cloakbrowser'` (bare ESM specifiers
+#                  resolve from cwd; a global install is not importable).
+ENV DEVA_CLOAK=1 \
+    CLOAK_APP_DIR=/opt/cloak \
+    DISPLAY=:99 \
+    CLOAKBROWSER_CACHE_DIR=/opt/cloakbrowser \
+    CLOAKBROWSER_AUTO_UPDATE=false
+
+RUN mkdir -p "$CLOAKBROWSER_CACHE_DIR" "$CLOAK_APP_DIR" && \
+    chown -R "$DEVA_UID:$DEVA_GID" "$CLOAKBROWSER_CACHE_DIR" "$CLOAK_APP_DIR"
+
+USER $DEVA_USER
+
+# npm wrapper version. NOT the cloakbrowser CLOAKBROWSER_VERSION env var, which
+# is a Chromium binary pin -- keep these names distinct. The wrapper hardcodes
+# the per-arch free Chromium version, so pinning the wrapper pins Chromium too.
+# Declared here, below the apt layer: an in-scope ARG is part of every later
+# RUN's cache key, and a wrapper bump must not rebuild the apt/font layer.
+ARG CLOAKBROWSER_WRAPPER_VERSION=0.4.12
+
+LABEL org.opencontainers.image.cloakbrowser_wrapper_version=${CLOAKBROWSER_WRAPPER_VERSION}
+
+# Install the CloakBrowser JS wrapper + playwright-core into CLOAK_APP_DIR (not
+# global -- ESM can't import a bare specifier from a global install), then
+# pre-download the stealth Chromium binary during build so runtime needs no net.
+# The npm cache lives in a build-cache mount, not the layer -- no clean needed.
+RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
+    cd "$CLOAK_APP_DIR" && \
+    npm init -y >/dev/null && \
+    npm install --no-audit --no-fund \
+        "cloakbrowser@${CLOAKBROWSER_WRAPPER_VERSION}" playwright-core && \
+    ./node_modules/.bin/cloakbrowser install && \
+    ./node_modules/.bin/cloakbrowser info
+
+USER root
+
+# Expose the CloakBrowser CLI globally (`cloakbrowser info|install|update`)
+RUN ln -sf "$CLOAK_APP_DIR/node_modules/.bin/cloakbrowser" /usr/local/bin/cloakbrowser
+
+COPY --chmod=755 scripts/cloak-entrypoint.sh /usr/local/bin/cloak-entrypoint.sh
+
+# Always-on browser daemon: launched by docker-entrypoint when
+# DEVA_CLOAK_BROWSER=1. Lives outside CLOAK_APP_DIR and imports cloakbrowser
+# by absolute path, so it runs from anywhere.
+COPY scripts/cloak-browserd.mjs /usr/local/lib/cloak/cloak-browserd.mjs
+
+WORKDIR /root
+
+# Start Xvfb + openbox, then chain to the standard entrypoint. Keep tini as
+# PID 1 (same as base/rust) -- cloak-entrypoint backgrounds Xvfb and openbox,
+# and their orphans need a reaper. Redeclaring ENTRYPOINT resets the
+# inherited CMD, so restate the default agent.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cloak-entrypoint.sh"]
+
+CMD ["claude"]

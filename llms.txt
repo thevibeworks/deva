@@ -5,9 +5,9 @@
 > project container serves all five agents. A bash script, not a framework. MIT.
 
 deva.sh is a single entry point installed on the host; agents run inside
-`ghcr.io/thevibeworks/deva` images (`:latest`, `:rust` for stable, `:nightly`,
-`:nightly-rust` refreshed daily). Agent-level permission prompts are disabled
-by design — isolation comes from Docker, not permission theater:
+`ghcr.io/thevibeworks/deva` images (`:latest`, `:rust`, `:cloak` for stable,
+`:nightly`, `:nightly-rust` refreshed daily). Agent-level permission prompts
+are disabled by design — isolation comes from Docker, not permission theater:
 `claude --dangerously-skip-permissions`,
 `codex --dangerously-bypass-approvals-and-sandbox`,
 `gemini --yolo`, `grok --always-approve`, and `kimi --yolo`. Auth
@@ -29,6 +29,7 @@ deva.sh codex           # same container shape, other agents
 deva.sh gemini
 deva.sh grok
 deva.sh kimi
+deva.sh claude -p cloak # stealth-browser image (CloakBrowser, headed Xvfb)
 deva.sh claude --debug --dry-run   # inspect the docker run before trusting it
 ```
 

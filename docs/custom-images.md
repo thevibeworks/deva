@@ -42,6 +42,7 @@ Supported path:
 ```bash
 make build-main
 make build-rust
+make build-cloak
 ```
 
 If you only changed the late agent-install layer and want the fastest rebuild:
@@ -98,6 +99,11 @@ docker build -f Dockerfile.rust -t deva-local:rust \
   --build-arg RUST_TOOLCHAINS="$RUST_TOOLCHAINS" \
   --build-arg RUST_DEFAULT_TOOLCHAIN="$RUST_DEFAULT_TOOLCHAIN" \
   --build-arg RUST_TARGETS="$RUST_TARGETS" \
+  .
+
+docker build -f Dockerfile.cloak -t deva-local:cloak \
+  --build-arg BASE_IMAGE=deva-local:rust \
+  --build-arg CLOAKBROWSER_WRAPPER_VERSION="$CLOAKBROWSER_WRAPPER_VERSION" \
   .
 ```
 

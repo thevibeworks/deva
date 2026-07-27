@@ -23,6 +23,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Makefile, Dockerfile(+rust), version-pins/upgrade/update scripts,
   ci/nightly/release workflows; tests added (release-utils registry,
   version-upgrade mock, install-tooling, and `test-kimi-auth.sh`).
+- cloak authenticated-session support (#456): composable pieces for logging
+  into sites inside the stealth browser. The session persists via a host
+  profile dir (`~/.config/deva/cloak-profile` -> Chromium `userDataDir`,
+  auto-mounted for either path below) so a login done once survives container
+  removal.
+  - Interactive login over VNC: on OrbStack/native Linux the host reaches the
+    container directly, so the agent starts `x11vnc` on the `:99` display on
+    demand and you connect at the container IP -- no flag, no port publish.
+  - `--cloak-vnc` (`DEVA_CLOAK_VNC=1`): Docker-Desktop fallback that publishes
+    the VNC display on a host-loopback port (there the container IP is not
+    routable). Auto-generates a VNC password (printed once) unless
+    `DEVA_CLOAK_VNC_PASSWORD` is set; the published port is fixed at container
+    create. Independent of `--cloak-browser`.
+  - `--cloak-browser` (`DEVA_CLOAK_BROWSER=1`): an always-on CloakBrowser
+    daemon (`cloak-browserd`) holds one headed, persistent browser on the
+    cloak display with a loopback CDP endpoint. The agent drives it via
+    `connectOverCDP(CLOAK_CDP_ENDPOINT)` -- the same live browser, not a
+    throwaway. Starts post-UID-remap in docker-entrypoint so profile files
+    match the mounted host owner.
+  Documented in the `deva-cloak` skill.
+- cloak profile (#456): `deva.sh -p cloak <agent>` runs agents in a new
+  image (`Dockerfile.cloak`, extends `:rust`) with CloakBrowser stealth
+  Chromium, headed on Xvfb `:99` + openbox. The Chromium binary is baked
+  at build time (hermetic, auto-update off); `CLOAKBROWSER_WRAPPER_VERSION`
+  in versions.env pins the wrapper and thereby Chromium. Ships the
+  `deva-cloak` skill (keyed off `DEVA_CLOAK=1`), `make build-cloak` /
+  `test-cloak` targets, a paths-filtered `cloak-image.yml` CI workflow,
+  and release pushes `:cloak` / `:vX.Y.Z-cloak` tags. cloak is an auxiliary
+  image on its own cadence: nightly skips it (that layer holds no agent
+  CLIs) and the release cloak job is non-gating (`continue-on-error`, not
+  in the `release` job's `needs`) — a ~200MB Chromium bake per arch must
+  never hold the GitHub Release hostage.
 
 ### Fixed
 - `--trace` launch killed by `cp: cannot create regular file
@@ -37,6 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test became the subshell's exit status and `set -e` killed every
   non-verbose traced launch right after the banner; the subshell now
   exits 0 explicitly.
+- image/tag precedence: a `.deva` config file setting `DEVA_DOCKER_TAG`
+  (or `DEVA_DOCKER_IMAGE`) silently overrode the real environment and made
+  CLI `-p` a no-op — `deva.sh -p cloak` with a config `DEVA_DOCKER_TAG=rust`
+  launched rust, and even `DEVA_DOCKER_TAG=cloak deva.sh ...` was clobbered
+  back to the config value. Precedence is now environment > config files >
+  `-p` profile > default, with explicit CLI `-p` beating a config-file tag.
+  Guarded by `scripts/test-image-precedence.sh` in CI.
 
 ## [0.16.0] - 2026-07-14
 
