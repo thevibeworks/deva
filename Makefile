@@ -294,8 +294,7 @@ versions:
 	 ./scripts/version-report.sh
 
 versions-pin:
-	@bash ./scripts/update-version-pins.sh
-	@echo "✅ Updated $(VERSION_PINS_FILE)"
+	@./scripts/update-version-pins.sh $(if $(filter 1 yes true,$(CHANGELOG)),--changelog)
 
 toolchains:
 	@bash ./scripts/toolchain-report.sh
@@ -459,6 +458,7 @@ help:
 	@echo "  versions-up          Build both images with latest upstream agent versions"
 	@echo "                       ONLY=cctrace upgrades one tool, rest stay pinned"
 	@echo "  versions-pin         Refresh $(VERSION_PINS_FILE) from upstream"
+	@echo "                       CHANGELOG=1 also shows changelogs for updated tools"
 	@echo "  scripts              List repo helper scripts"
 	@echo "  commands             Alias for help"
 	@echo "  test                 Test main image"
@@ -511,6 +511,7 @@ help:
 	@echo "  make toolchains                               # Show pinned toolchain inventory"
 	@echo "  make scripts                                  # List helper scripts"
 	@echo "  make versions-pin                             # Refresh shared pin file"
+	@echo "  make versions-pin CHANGELOG=1                 # Refresh pins + show changelogs"
 	@echo "  make versions                                 # Check current versions"
 	@echo "  make PLAYWRIGHT_VERSION=1.60.0 build-rust     # Override rust browser tooling"
 	@echo "  make versions-up                              # Upgrade to latest upstream versions"
