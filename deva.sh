@@ -3950,8 +3950,12 @@ if [ "$EPHEMERAL_MODE" = false ]; then
     else
         # Container doesn't exist - try to create it
         echo "Creating persistent container: $CONTAINER_NAME"
-        error_output=$(docker "${DOCKER_ARGS[@]}" tail -f /dev/null 2>&1)
-        docker_exit=$?
+        # `|| docker_exit=$?` is load-bearing: under `set -e` a failing
+        # command-substitution assignment aborts the script AT the assignment,
+        # so the error handling below would be dead code on the exact path it
+        # exists for. Keep the assignment left of `||` to suspend `set -e`.
+        docker_exit=0
+        error_output=$(docker "${DOCKER_ARGS[@]}" tail -f /dev/null 2>&1) || docker_exit=$?
         if [ $docker_exit -ne 0 ]; then
             # Check if specifically a name collision (concurrent run)
             if echo "$error_output" | grep -qE 'already in use|Conflict'; then
