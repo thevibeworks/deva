@@ -164,6 +164,10 @@ await b.close();                           // detaches; the daemon browser stays
 absence means there is no daemon and you should launch your own browser as
 above.
 
+Use `goto()`, not `setContent()`: on a fresh daemon page `setContent` waits for
+a `load` event that never fires and times out. `page.goto('data:text/html,...',
+{waitUntil: 'domcontentloaded'})` is the working equivalent for injected markup.
+
 **Persistence / what to mount.** `--cloak-vnc` (and `--cloak-browser`)
 auto-mounts `~/.config/deva/cloak-profile` (host) to the Chromium `userDataDir`
 `/home/deva/.cloak-profile`. That one dir is the whole session -- cookies,

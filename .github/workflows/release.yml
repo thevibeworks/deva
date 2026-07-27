@@ -217,10 +217,17 @@ jobs:
             RUST_DEFAULT_TOOLCHAIN=${{ needs.load-version-pins.outputs.rust_default_toolchain }}
             RUST_TARGETS=${{ needs.load-version-pins.outputs.rust_targets }}
 
+  # Optional, non-gating: the cloak layer bakes a ~200MB Chromium per arch
+  # (arm64 under QEMU), holds no agent CLIs, and changes only when
+  # Dockerfile.cloak / cloak-entrypoint.sh / CLOAKBROWSER_WRAPPER_VERSION move
+  # -- not on a deva.sh version bump. The GitHub Release must not be hostage to
+  # it, so `release` does not wait on this job and a failure here does not fail
+  # the release. Re-run this job alone to publish a missing -cloak tag.
   build-and-push-cloak:
     name: Build and Push Cloak Profile Image
     runs-on: ubuntu-latest
     needs: [prepare, load-version-pins, build-and-push-rust]
+    continue-on-error: true
     permissions:
       contents: read
       packages: write
@@ -270,7 +277,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [prepare, build-and-push, build-and-push-rust, build-and-push-cloak]
+    needs: [prepare, build-and-push, build-and-push-rust]
     permissions:
       contents: write
     steps:
@@ -309,9 +316,9 @@ jobs:
           echo "- \`ghcr.io/${{ env.IMAGE_NAME }}:${RELEASE_TAG}-rust\`" >> release_notes.md
           echo "- \`ghcr.io/${{ env.IMAGE_NAME }}:rust\`" >> release_notes.md
           echo "" >> release_notes.md
-          echo "**Cloak Profile (CloakBrowser stealth Chromium, headed):**" >> release_notes.md
-          echo "- \`ghcr.io/${{ env.IMAGE_NAME }}:${RELEASE_TAG}-cloak\`" >> release_notes.md
+          echo "**Cloak Profile (CloakBrowser stealth Chromium, headed) - optional:**" >> release_notes.md
           echo "- \`ghcr.io/${{ env.IMAGE_NAME }}:cloak\`" >> release_notes.md
+          echo "- \`ghcr.io/${{ env.IMAGE_NAME }}:${RELEASE_TAG}-cloak\` (published when the non-gating cloak build finishes; it may lag this release)" >> release_notes.md
           echo "" >> release_notes.md
           echo "## Supported Architectures" >> release_notes.md
           echo "" >> release_notes.md
