@@ -258,6 +258,13 @@ setup_nonroot_user() {
                 DEVA_UID="$actual_uid"
             fi
         fi
+        # usermod's implicit home chown walks the whole tree (including live
+        # host mounts) and shadow chowns $DEVA_HOME itself LAST -- any
+        # transient error mid-walk (rc=12) leaves the home dir at the
+        # build-time UID with mode 750, so the remapped user cannot even
+        # traverse into its own home ("env: 'claude': Permission denied").
+        # Chown the home dir itself explicitly, non-recursively.
+        chown "$DEVA_UID:$DEVA_GID" "$DEVA_HOME" 2>/dev/null || true
         # Fix container-managed directories (whitelist approach - safe for mounted volumes)
         # These directories are created at image build time and must be chowned to match host UID
         for dir in .npm-global .local .oh-my-zsh .skills .config .cache go; do

@@ -1,0 +1,79 @@
+* [2026-07-28] Home dir chown race: usermod aborts, $DEVA_HOME stays untraversable  :FIX:ENTRYPOINT:RELIABILITY:
+
+** Tension
+Fresh persistent container, credentials-file auth, latest image:
+
+#+BEGIN_EXAMPLE
+[deva] Starting Claude Code v2.1.220
+env: 'claude': Permission denied
+#+END_EXAMPLE
+
+Same launcher, same image family, eleven sibling containers running fine.
+The 2026-01-08 devlog claims this exact symptom was fixed by the whitelist
+chown (=7511464=). It wasn't — the whitelist fixed the subdirs and left a
+hole one level up.
+
+** Observation
+Inside the broken container:
+
+- =claude.exe= is =-rwxr-xr-x= and every dir on the way down is 755. Not the binary.
+- =namei -l= shows the one bad component: =/home/deva= itself is
+  =drwxr-x--- 1001:1001= while the remapped user is 501:20. Mode 750 comes
+  from Ubuntu noble's =useradd= default (=HOME_MODE 0750=); owner 1001 is the
+  build-time UID. The user cannot traverse into its own home, so =env=
+  reports EACCES on everything under it.
+- Whitelist subdirs (=.npm-global=, =.local=, ...) ARE 501:20 — so
+  =setup_nonroot_user= ran and its chowns worked. Only the home dir itself
+  was left behind.
+- Working siblings show =/home/deva= at 501:20. Same entrypoint bytes
+  (diffed baked scripts), same shadow-utils version, same home mounts.
+
+Mechanism: =usermod -u= implicitly chowns the home tree, and shadow's
+=chown_tree= recurses first, chowning the top-level dir LAST. The walk
+crosses live host mounts inside home (=~/.claude= and friends, actively
+written by concurrent sessions). Any transient mid-walk error aborts the
+tree chown — usermod exits 12, passwd IS already updated — and the top
+dir never gets chowned. Our code suppresses stderr and only reacts when
+the UID itself failed to change. Reproduced the exact broken state by
+recreating a container with the same home-mount set; one-shot runs with
+idle mounts come out clean, which is why this stayed latent for months.
+
+There is a second, benign variant: usermod fails outright (rc != 0, UID
+unchanged). The entrypoint adapts =DEVA_UID= to reality and everything
+stays self-consistent at 1001 — launches work. Only the half-success
+(passwd updated, chown aborted) bricks the container.
+
+** Decision
+Add one explicit non-recursive chown of =$DEVA_HOME= itself after the
+usermod block, before the whitelist loop. It runs with the (possibly
+adapted) =DEVA_UID=, so both usermod outcomes stay consistent.
+
+Rejected:
+- Restoring =chown -R "$DEVA_HOME"= (pre-=5807889= behavior): recursive
+  chown across host mounts is the thing we deliberately stopped doing.
+- Adding =$DEVA_HOME= to the whitelist loop: the loop is =chown -R= per
+  entry; home needs exactly depth-0.
+- Replacing usermod with passwd-file editing + targeted chowns: right
+  long-term answer (usermod's implicit tree walk over host mounts is both
+  the race and a hazard), but a bigger change than this fix needs.
+
+** Tradeoff
+usermod still walks the whole home tree on every UID remap — wasted IO
+and a lingering hazard of chowning through bind mounts. The fix makes the
+outcome correct, not the mechanism. If launches ever get slow on big
+mounted homes, kill the implicit walk (=usermod= → passwd edit) instead
+of tuning around it.
+
+** Next
+The fault-injection trick (stub =usermod= that updates passwd, skips the
+chown, exits 12) is exactly a regression test waiting for a harness —
+tests/ has no entrypoint coverage at all, which is why two "Permission
+denied" regressions in this same function (=5807889=, now this) shipped.
+
+** Artifacts
+- =docker-entrypoint.sh=: explicit =chown "$DEVA_UID:$DEVA_GID" "$DEVA_HOME"=
+  in =setup_nonroot_user=.
+- Verified: patched entrypoint + stubbed usermod (passwd updated, chown
+  skipped, rc=12) → home 501:20, claude launches. Unpatched + same stub →
+  reproduces the failure.
+- Bricked-container first aid: =docker exec <c> chown <uid>:<gid> /home/deva=.
