@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-07-28
+
 ### Fixed
 - Intermittent `env: 'claude': Permission denied` at container start
   (#506): `usermod -u` chowns the home tree with the top-level dir last,
