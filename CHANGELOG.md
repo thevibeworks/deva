@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Intermittent `env: 'claude': Permission denied` at container start
+  (#506): `usermod -u` chowns the home tree with the top-level dir last,
+  so a transient error while walking live host mounts inside home left
+  `/home/deva` at the build UID with mode 750 — untraversable for the
+  remapped user. The entrypoint now chowns `$DEVA_HOME` itself explicitly
+  (non-recursive) after the UID remap. Latent since 5807889; the 7511464
+  whitelist fixed subdirs but never the home dir itself.
+
 ## [0.18.0] - 2026-07-27
 
 ### Added
