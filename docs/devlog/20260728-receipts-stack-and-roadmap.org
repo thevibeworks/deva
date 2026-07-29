@@ -1,0 +1,86 @@
+* [2026-07-28] Shipping the receipts stack + session-manager roadmap  :FEAT:ARCH:PROCESS:
+
+** Tension
+The "launcher -> session manager" direction existed only as a chat
+brainstorm. On disk: =feat/goal-receipts= (#499) committed but never
+pushed, with two UNRELATED dirty files riding the worktree (pin bumps
+in =versions.env=, a stale container-context block in =AGENTS.md=).
+Receipts themselves were write-only — nothing read them back, so
+=--goal= bought attribution for ccx archaeology but zero operator
+visibility. And the roadmap (config/state split, options registry,
+ps/doctor/serve) had no issues, so nothing was actionable.
+
+** Observation
+- =deva ps= ALREADY EXISTS (=list_containers_pretty=, dispatch token
+  =ps | --ps=), and =deva status= already prints per-container
+  agent/auth/uptime/mounts plus a Health section that is half of the
+  imagined =deva doctor=. The brainstorm was designing features the
+  script already had. Filed issue #520 before checking; the PR
+  carries the scope correction.
+- The #518 double-mount is live, not theoretical: =status= on a real
+  container shows =~/.config/deva/claude/.claude -> /home/deva/.claude=
+  AND =~/.config/deva -> /home/deva/.config/deva= simultaneously.
+- =origin/main= had moved TWO releases (0.18.0, 0.18.1) under the
+  unpushed receipts branch. Both prepend-at-top files (CHANGELOG,
+  DEV-LOGS) conflict by construction on every rebase; everything else
+  merged clean.
+- The =claude= security-audit action fails in ~2-4s on EVERY PR
+  (#507, #508 included — both merged anyway). Empty
+  =ANTHROPIC_API_KEY=, oauth token passed, dies right after settings
+  setup: smells like an expired secret (#524). A permanently red
+  check is training everyone to ignore it.
+- Two test scripts (=test-ccx-args.sh=, =test-status-helpers.sh=) are
+  =100644= in git — the suite silently can't run via =./=.
+
+** Decision
+- Three PRs, not one: #516 receipts as-committed, #517 chore
+  (pins + AGENTS block + exec bits), #523 goal column STACKED on #516
+  (=--base feat/goal-receipts=) so its diff is only the join.
+  Rejected: folding the dirty files into #516 (unrelated concerns),
+  and waiting for #516 to merge before building on it (serializes an
+  autonomous session on a human review).
+- Goal source of truth: last matching receipt wins, =docker inspect=
+  =DEVA_GOAL= env as fallback. Rejected: env-only (attach restamps
+  never reach create-time env, so it goes stale) and receipts-only
+  (writes are warning-only and the dir is prunable — the fallback is
+  the honest path for exactly those cases).
+- =container_goal()= assignments are =|| goal=""= guarded — under
+  =set -euo pipefail= a failed pipeline substitution aborts AT the
+  assignment (same trap as the #484 silent exit); the receipt glob
+  loop uses =if/fi= not =[ ] &&= so the subshell never ends on a
+  failed test (the #414 flock lesson).
+- CHANGELOG entries written in main's CURRENT Keep-a-Changelog format.
+  The claude-code-style restyle sits on local =chore/changelog-style=
+  with no PR; matching an unmerged style would conflict every branch.
+
+** Tradeoff
+- Stacked PRs put a merge-order burden on the reviewer (#516 first;
+  GitHub retargets #523 to main when the branch deletes).
+- =container_goal()= scans every =launches/*.jsonl= per container per
+  =ps= invocation. Fine at day-file scale; if launches accumulate for
+  years this wants a "recent files only" cut. Not built now — no
+  evidence it's needed.
+- Issue #520's body describes a feature that didn't need building.
+  Left as-is with the correction in the PR; the lesson (check the
+  dispatch table before filing) is cheaper than rewriting history.
+
+** Next
+The live wire is #518: the config/state split must be decided BEFORE
+the bun port freezes the current layout, and it interlocks with the
+accounts/<tag> scoping from #497. Everything else on the roadmap
+(#519 registry, #521 doctor, #522 serve) composes cleanly after it.
+
+** Artifacts
+- PRs: #516 (receipts, rebased onto v0.18.1), #517 (pins chore,
+  2 commits), #523 (goal column, stacked)
+- Issues: #518 config/state split (+live evidence comment),
+  #519 options registry, #520 ps/goal, #521 doctor, #522 serve
+  umbrella, #524 broken PR bot
+- =scripts/test-launch-receipts.sh=: 13 hermetic cases (scratch XDG,
+  stubbed docker), wired into ci.yml — first coverage for
+  =write_launch_receipt= at all
+- Verified: shellcheck severity=error clean; local suite green
+  (mount-shape, image-precedence, kimi-auth, version-targets,
+  container-slug, status-helpers, launch-receipts); live =ps -g= /
+  =status -g= against the real daemon renders the GOAL column; all
+  five bumped pins resolve on npm.
