@@ -189,6 +189,12 @@ jobs:
           set -euo pipefail
           ./scripts/test-version-targets.sh
 
+      - name: Smoke launch receipts and goal column
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test-launch-receipts.sh
+
       - name: Smoke Chrome bridge entrypoint symlink
         shell: bash
         run: |

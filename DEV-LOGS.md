@@ -13,6 +13,14 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-28] Dev Log: goal column in ps/status #520
+- Why: #499 receipts were write-only — nothing read them back, so "what agents run where, on what goal" stayed docker ps + memory. First rung of the ps -> attach -> serve ladder (#522).
+- What:
+  - `container_goal()`: last matching receipt from `$XDG_DATA_HOME/ccx/launches/*.jsonl` wins (attach restamps write fresh receipts; create-time env cannot change), `docker inspect` `DEVA_GOAL` env as fallback (receipt writes are warning-only). Guarded assignments (`|| goal=""`) because a failed pipeline substitution aborts at the assignment under `set -e`.
+  - `deva ps` grows a GOAL column; `deva status` prints a `goal:` line when set.
+  - `scripts/test-launch-receipts.sh`: 13 hermetic round-trip cases (scratch XDG, stubbed docker) covering write_launch_receipt + container_goal; wired into ci.yml. First test coverage for the receipt writer at all.
+- Result: receipts now have a reader. Scoping note: #520 was filed as a new `deva ps` command — ps already existed (list_containers_pretty); the real gap was only the goal join.
+
 # [2026-07-28] Dev Log: home dir chown race bricks containers #506
 - Why: intermittent `env: 'claude': Permission denied` on fresh containers. /home/deva stuck at build UID 1001 mode 750 (noble HOME_MODE) after remap to host UID — user can't traverse its own home. usermod's implicit home-tree chown walks live host mounts (~/.claude churning under concurrent sessions), aborts mid-walk with rc=12 AFTER updating passwd; shadow chowns the top dir last, so it never gets fixed. The 7511464 whitelist chowns subdirs, never $DEVA_HOME itself. Latent since 5807889 dropped the recursive home chown; only bites when the walk races live mounts, which is why sibling containers were fine.
 - What: explicit non-recursive `chown "$DEVA_UID:$DEVA_GID" "$DEVA_HOME"` in setup_nonroot_user, after the usermod block, using the adapted DEVA_UID so the usermod-failed-entirely variant stays consistent. Devlog with full forensics in docs/devlog/20260728-home-dir-chown-race.org. Verified by fault injection: stub usermod (passwd updated, chown skipped, exit 12) reproduces the brick unpatched, comes out clean patched.

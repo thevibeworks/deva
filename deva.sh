@@ -1246,6 +1246,28 @@ pick_container() {
     return 1
 }
 
+# Goal for a container: the last launch receipt wins (attach with a fresh
+# --goal restamps via a new receipt; create-time env cannot change), the
+# create-time DEVA_GOAL env is the fallback when receipts are missing
+# (receipt writes are warning-only and the launches dir is prunable).
+container_goal() {
+    local name="$1" goal=""
+    local dir="${XDG_DATA_HOME:-$HOME/.local/share}/ccx/launches"
+    if [ -d "$dir" ]; then
+        goal=$(
+            for f in "$dir"/*.jsonl; do
+                if [ -f "$f" ]; then cat "$f"; fi
+            done | jq -rs --arg c "$name" \
+                '[.[] | select(.container == $c) | .goal] | last // empty' 2>/dev/null
+        ) || goal=""
+    fi
+    if [ -z "$goal" ]; then
+        goal=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null |
+            sed -n 's/^DEVA_GOAL=//p' | head -n 1) || goal=""
+    fi
+    printf '%s' "${goal:---}"
+}
+
 list_containers_pretty() {
     local rows
     rows=$(project_container_rows)
@@ -1257,9 +1279,9 @@ list_containers_pretty() {
     local output
     output=$(
         {
-            printf 'NAME\tAGENT\tSTATUS\tCREATED AT\n'
+            printf 'NAME\tAGENT\tGOAL\tSTATUS\tCREATED AT\n'
             printf '%s\n' "$rows" | while IFS=$'\t' read -r name status created; do
-                printf '%s\t%s\t%s\t%s\n' "$name" "$(extract_agent_from_name "$name")" "$status" "$created"
+                printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$(extract_agent_from_name "$name")" "$(container_goal "$name")" "$status" "$created"
             done
         }
     )
@@ -1686,6 +1708,10 @@ cmd_status() {
             printf '    agent: %-10s auth: %-16s status: %-8s' "$agent" "$auth_tag" "$state"
             [ "$state" = "running" ] && printf '  up: %s' "$uptime_str"
             echo ""
+
+            local goal
+            goal=$(container_goal "$name")
+            [ "$goal" != "--" ] && printf '    goal: %s\n' "$goal"
 
             if [ "$show_all" = true ]; then
                 local ws_label

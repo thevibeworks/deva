@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- goal column in `deva ps` and `deva status` (#520): launches stamped
+  with `--goal` now show it. The last launch receipt wins (an attach
+  with a fresh `--goal` restamps via a new receipt); create-time
+  `DEVA_GOAL` env is the fallback when receipts are missing. Receipts
+  and the join are covered by `scripts/test-launch-receipts.sh` in CI.
 - launch receipts (#499): `--goal SLUG` stamps intent at launch.
   Exports `DEVA_GOAL` into the container (create-time env; attach
   restamps when a fresh `--goal` is given) and appends one JSONL
