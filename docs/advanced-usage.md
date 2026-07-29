@@ -255,3 +255,27 @@ deva.sh gemini --auth-with ~/keys/gcp-service-account.json
 ```
 
 Deva mounts the file onto the agent's expected credential path. It does not need to dump a directory full of backup junk into the container to make that work.
+
+## Cache Handoff Hook
+
+Claude Code's prompt cache dies after 1h idle. Walk away mid-task and
+the model's working state dies with it; the next turn re-reads
+everything at full price.
+
+`hooks/cache-handoff.sh` is an opt-in Stop hook that wakes an idle
+session at ~50min and has it write a hand-off file while the re-read is
+still nearly free. It never interrupts a running turn.
+
+Copy-in install, per workspace:
+
+```bash
+mkdir -p .claude/hooks
+cp hooks/cache-handoff.sh .claude/hooks/
+```
+
+Then add the hook block to `.claude/settings.json`. Full wiring,
+knobs, and caveats (it rides an undocumented claude internal) in
+[hooks/README.md](https://github.com/thevibeworks/deva/blob/main/hooks/README.md).
+
+Deva does not install this for you. `~/.claude` is your host config;
+deva keeps its hands off it.

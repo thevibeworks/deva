@@ -13,6 +13,14 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-07-28] Dev Log: cache-handoff Stop hook #525
+- Why: idle claude sessions burn the 1h prompt cache with nothing written down — the built-in away-summary needs terminal blur and skips past 0.9x TTL, so headless/container sessions (deva's whole mode) never get one. Binary dig (claude 2.1.220) found the only idle-wake primitive: command hook with asyncRewake:true exiting 2 injects a priority-next notification.
+- What:
+  - new `hooks/` dir (skills/-style copy-in assets): `cache-handoff.sh` sleeps 50min after Stop, exits 2 with a hand-off prompt on stderr only if still idle. Three gates: transcript-growth abort (turn in flight), pidfile supersede (async hooks aren't deduplicated — every Stop spawns a sleeper), donefile dedup (once per transcript position). Knobs: CC_HANDOFF_AFTER_SEC, CC_HANDOFF_STATE_DIR.
+  - deliberately NOT wired into deva.sh: ~/.claude is host-mounted; same non-mutation call as the statusline non-redirect. Install is documented copy-in to workspace .claude/.
+  - `scripts/test-cache-handoff.sh`: 6 hermetic gate cases, in CI. Docs section in advanced-usage.md + hooks/README.md.
+- Result: walk away mid-task, come back to a written hand-off instead of a dead cache. Caveat on record: asyncRewake/rewakeMessage/rewakeSummary are internal unflagged fields — a claude release can break this silently; the hook then just never wakes anything (fails closed).
+
 # [2026-07-28] Dev Log: home dir chown race bricks containers #506
 - Why: intermittent `env: 'claude': Permission denied` on fresh containers. /home/deva stuck at build UID 1001 mode 750 (noble HOME_MODE) after remap to host UID — user can't traverse its own home. usermod's implicit home-tree chown walks live host mounts (~/.claude churning under concurrent sessions), aborts mid-walk with rc=12 AFTER updating passwd; shadow chowns the top dir last, so it never gets fixed. The 7511464 whitelist chowns subdirs, never $DEVA_HOME itself. Latent since 5807889 dropped the recursive home chown; only bites when the walk races live mounts, which is why sibling containers were fine.
 - What: explicit non-recursive `chown "$DEVA_UID:$DEVA_GID" "$DEVA_HOME"` in setup_nonroot_user, after the usermod block, using the adapted DEVA_UID so the usermod-failed-entirely variant stays consistent. Devlog with full forensics in docs/devlog/20260728-home-dir-chown-race.org. Verified by fault injection: stub usermod (passwd updated, chown skipped, exit 12) reproduces the brick unpatched, comes out clean patched.

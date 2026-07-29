@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- cache-handoff hook (#525): opt-in Claude Code Stop hook under new
+  `hooks/` dir that wakes an idle session ~50min in — while the 1h
+  prompt cache is still warm — and has it write a hand-off file (goal,
+  state, decisions, next action). Uses the asyncRewake exit-2 wake
+  primitive verified in claude 2.1.220; never interrupts a running
+  turn (transcript-growth abort, per-session sleeper supersede,
+  once-per-position dedup). Copy-in install like `skills/` — deva does
+  not touch `~/.claude`. Gates covered by
+  `scripts/test-cache-handoff.sh` in CI.
+
 ## [0.18.1] - 2026-07-28
 
 ### Fixed

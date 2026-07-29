@@ -189,6 +189,12 @@ jobs:
           set -euo pipefail
           ./scripts/test-version-targets.sh
 
+      - name: Smoke cache-handoff hook gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test-cache-handoff.sh
+
       - name: Smoke Chrome bridge entrypoint symlink
         shell: bash
         run: |
