@@ -19,6 +19,7 @@ runtime is Linux.
 - $HOME is /home/deva (not /root). sudo works without password.
 - Pre-installed: Node.js, Python (use `uv`, not pip), Go, git,
   gh, make, curl. pip is NOT in PATH.
-- Ephemeral container. Installed packages will not persist.
+- Docker is available (socket mounted from host).
+- System packages and build caches persist across sessions.
 - Container details are in DEVA_* environment variables.
 <!-- /deva:container-context -->
