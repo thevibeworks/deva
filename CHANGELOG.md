@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-08-04
+
 ### Changed
 - README restyled around the core value — the container is the sandbox,
   mounts are the contract; 190 -> ~80 lines, bilingual
