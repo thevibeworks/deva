@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- README restyled around the core value — the container is the sandbox,
+  mounts are the contract; 190 -> ~80 lines, bilingual
+  (README.zh-CN.md), animated terminal hero SVG echoing deva.sh (#533)
+- Agent CLI pins refreshed: cctrace 0.25.1, codex 0.146.0, gemini-cli
+  0.53.0, grok 0.2.114, kimi-code 0.30.0 (#517)
+
 ## [0.18.1] - 2026-07-28
 
 ### Fixed
