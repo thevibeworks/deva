@@ -9,12 +9,14 @@ English | [简体中文](README.zh-CN.md)
 
 Run Claude Code, Codex, Gemini, Grok, and Kimi inside Docker without pretending the agents' own permission prompts are the thing keeping you safe.
 
-The core, in four lines:
+The container is the sandbox, mounts are the contract. What that buys you:
 
-- The container is the sandbox. All five agents run inside it with their built-in permission systems disabled (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `gemini --yolo`, `grok --always-approve`, `kimi --yolo`). Isolation comes from Docker, not permission theater.
-- Mounts are the contract. Nothing crosses the host boundary except what you explicitly mount. No mystery behavior.
-- One warm persistent container per project, shared by all five agents. Packages, build caches, and scratch state stay warm instead of being rebuilt every run.
-- It's a bash script, not a framework.
+- Full-speed agents. Permission prompts exist because the blast radius is your host. Make the blast radius a container and YOLO stops being reckless — all five agents run with their permission systems off (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `gemini --yolo`, `grok --always-approve`, `kimi --yolo`). Worst case dies with the container.
+- The vendor's code never sees your host. Agent CLIs are fast-moving npm trees with auto-updaters. Here they are born inside the image: no `~/.ssh`, no `~/.aws`, no shell env soup, no browser profiles. Nothing to harvest.
+- Everything that crosses the boundary is explicit. Files: mounts. Secrets: the env you pass. Network: the posture you pick — default bridge, your proxy, `--host-net`, or nothing. If you didn't wire it, the agent doesn't have it.
+- Identity is a launch flag, not a global singleton. Per-agent config homes under `~/.config/deva/`, `--auth-with` / `--config-home` for the second account or API-key billing. Switch accounts per run; project, sessions, and container state stay put.
+- Official CLIs, stock. No protocol shims, no knockoff clients, no proxy MITM on your credentials. The compatibility layer is the container, not a translation layer — the best model always comes with its own best harness.
+- Feels like the naked CLI. Same cwd, same TTY, same OAuth flow. One warm container per project keeps packages and build caches hot. It's a bash script, not a framework.
 
 ## Quick Start
 

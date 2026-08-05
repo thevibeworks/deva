@@ -9,12 +9,14 @@
 
 在 Docker 里跑 Claude Code、Codex、Gemini、Grok、Kimi 五个 agent CLI，并且不再假装 agent 自带的权限弹窗是在保护你。
 
-核心就四条：
+容器即沙箱，挂载即契约。这换来的是：
 
-- 容器即沙箱。五个 agent 全在容器里跑，agent 自带的权限系统全部关掉（`claude --dangerously-skip-permissions`、`codex --dangerously-bypass-approvals-and-sandbox`、`gemini --yolo`、`grok --always-approve`、`kimi --yolo`）。隔离靠 Docker，不靠 permission theater。
-- 挂载即契约。跨越主机边界的只有你显式挂载的东西，没有暗箱行为。
-- 一个项目一个常驻容器，五个 agent 共用。包、构建缓存、临时状态保温，不用每次重建。
-- 它就是一个 bash 脚本，不是框架。
+- 全速跑 agent。权限弹窗存在的理由是爆炸半径等于你的整机；把爆炸半径缩小到一个容器，YOLO 就不再是鲁莽 —— 五个 agent 全部关掉自带权限系统跑（`claude --dangerously-skip-permissions`、`codex --dangerously-bypass-approvals-and-sandbox`、`gemini --yolo`、`grok --always-approve`、`kimi --yolo`）。最坏结果随容器一起销毁。
+- 厂商代码永远见不到你的主机。agent CLI 是快速迭代、带自动更新的 npm 依赖树；在这里它们出生在镜像里：没有 `~/.ssh`、没有 `~/.aws`、没有 shell 环境变量汤、没有浏览器档案。想收集也无从下手。
+- 跨越边界的一切都是显式的。文件靠挂载，密钥靠你传的 env，网络靠你选的姿态 —— 默认 bridge、走你的代理、`--host-net`、或者干脆不联网。你没接的线，agent 就没有。
+- 身份是启动参数，不是全局单例。`~/.config/deva/` 下按 agent 分家，`--auth-with` / `--config-home` 切第二个账号或 API-key 计费。按次切账号，项目、会话、容器状态原地不动。
+- 官方 CLI，原封不动。不做协议转译、不用山寨客户端、credentials 不过任何中间人代理。兼容层是容器，不是协议 shim —— 最好的模型永远配它自家最好的 harness。
+- 手感和裸 CLI 一样。同一个 cwd、同一个 TTY、同一套 OAuth。每个项目一个保温容器，包和构建缓存常热。它就是一个 bash 脚本，不是框架。
 
 ## Quick Start
 
