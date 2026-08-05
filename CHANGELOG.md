@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- README core-value section rewritten around operator outcomes —
+  full-speed YOLO, host out of vendor code's reach, explicit boundary,
+  identity as a launch flag, official CLIs stock, zero workflow tax
+  (#536)
+
 ## [0.18.2] - 2026-08-04
 
 ### Changed

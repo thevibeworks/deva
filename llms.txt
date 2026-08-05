@@ -12,8 +12,9 @@ are disabled by design — isolation comes from Docker, not permission theater:
 `codex --dangerously-bypass-approvals-and-sandbox`,
 `gemini --yolo`, `grok --always-approve`, and `kimi --yolo`. Auth
 lives in per-agent config homes under `~/.config/deva/` with OAuth (default) or
-API-key modes per agent; nothing crosses the host boundary except what you
-mount. Known sharp edge: mounting `/var/run/docker.sock` is host-root with
+API-key modes per agent, switchable per run (`--auth-with`, `--config-home`) so
+accounts and billing modes swap without touching project or session state;
+nothing crosses the host boundary except what you mount. Known sharp edge: mounting `/var/run/docker.sock` is host-root with
 extra steps, and deva will tell you so.
 
 Full docs: https://docs.deva.sh — if you can fetch one URL, fetch that one.
