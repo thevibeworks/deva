@@ -21,6 +21,7 @@ _CLI_KIMI="${KIMI_CODE_VERSION:-}"
 _CLI_CCX="${CCX_VERSION:-}"
 _CLI_COPILOT="${COPILOT_API_VERSION:-}"
 _CLI_PLAYWRIGHT="${PLAYWRIGHT_VERSION:-}"
+_CLI_CLOAKBROWSER="${CLOAKBROWSER_WRAPPER_VERSION:-}"
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/version-pins.sh"
@@ -48,28 +49,37 @@ PROXY_ARGS=()
 # native Linux Engine needs the explicit host-gateway mapping during build.
 [[ ${#PROXY_ARGS[@]} -gt 0 ]] && PROXY_ARGS+=(--add-host "host.docker.internal:host-gateway")
 RUST_IMAGE=${RUST_IMAGE:-ghcr.io/thevibeworks/deva:rust}
+CLOAK_IMAGE=${CLOAK_IMAGE:-ghcr.io/thevibeworks/deva:cloak}
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
 RUST_DOCKERFILE=${RUST_DOCKERFILE:-Dockerfile.rust}
+CLOAK_DOCKERFILE=${CLOAK_DOCKERFILE:-Dockerfile.cloak}
 COUNTDOWN=${COUNTDOWN:-5}
 AUTO_YES=${AUTO_YES:-}
+PR=${PR:-1}
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
+
+Builds core, main, rust, and cloak images at the latest upstream
+versions, then writes versions.env from the exact versions built and
+opens a pin-bump PR (branch chore/version-pins-refresh).
 
 Options:
   -y, --yes       Skip confirmation countdown
   --only LIST     Upgrade only these tools (comma-separated); the rest
                   stay pinned to versions.env. Tools: claude-code,
                   cctrace, codex, gemini-cli, grok-cli, kimi-code,
-                  ccx, copilot-api, playwright
+                  ccx, copilot-api, playwright, cloakbrowser
   -h, --help      Show this help
 
 Environment:
   ONLY                  Same as --only (e.g. make versions-up ONLY=cctrace)
+  PR                    PR=0 skips the auto commit + pull request
   MAIN_IMAGE            Main image name (default: ghcr.io/thevibeworks/deva:latest)
   CORE_IMAGE            Core image name (default: ghcr.io/thevibeworks/deva:core)
   RUST_IMAGE            Rust image name (default: ghcr.io/thevibeworks/deva:rust)
+  CLOAK_IMAGE           Cloak image name (default: ghcr.io/thevibeworks/deva:cloak)
   VERSION_PINS_FILE     Shared version pin file (default: versions.env)
   CLAUDE_CODE_VERSION   Override claude-code version
   CCTRACE_VERSION       Override cctrace version
@@ -106,7 +116,7 @@ apply_only_filter() {
     [[ -n $ONLY ]] || return 0
 
     local tool
-    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code ccx copilot-api playwright"
+    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code ccx copilot-api playwright cloakbrowser"
     for tool in ${ONLY//,/ }; do
         case " $known " in
             *" $tool "*) ;;
@@ -125,6 +135,7 @@ apply_only_filter() {
     tool_selected ccx         || _CLI_CCX="${_CLI_CCX:-$CCX_VERSION}"
     tool_selected copilot-api || _CLI_COPILOT="${_CLI_COPILOT:-$COPILOT_API_VERSION}"
     tool_selected playwright  || _CLI_PLAYWRIGHT="${_CLI_PLAYWRIGHT:-$PLAYWRIGHT_VERSION}"
+    tool_selected cloakbrowser || _CLI_CLOAKBROWSER="${_CLI_CLOAKBROWSER:-$CLOAKBROWSER_WRAPPER_VERSION}"
 
     echo "Selective upgrade: $ONLY (all other tools pinned to versions.env)"
     echo ""
@@ -145,9 +156,27 @@ main() {
 
     load_versions "$CHECK_IMAGE"
 
+    # CloakBrowser wrapper lives outside the tool registry (its version
+    # label is only on the cloak image, which CHECK_IMAGE never is), so
+    # resolve it here: CLI override wins, then npm latest, then the pin.
+    local _pin_cloak_wrapper="$CLOAKBROWSER_WRAPPER_VERSION"
+    local cloak_wrapper_ver="$_CLI_CLOAKBROWSER"
+    if [[ -z $cloak_wrapper_ver ]]; then
+        cloak_wrapper_ver=$(_npm_registry_latest cloakbrowser) || true
+        if [[ -z $cloak_wrapper_ver ]]; then
+            echo -e "${YELLOW}Warning: Failed to fetch latest cloakbrowser, using pinned: ${_pin_cloak_wrapper}${RESET}" >&2
+            cloak_wrapper_ver="$_pin_cloak_wrapper"
+        fi
+    fi
+    local _wrapper_stale=0
+    [[ "$(normalize_version "$cloak_wrapper_ver")" != "$(normalize_version "$_pin_cloak_wrapper")" ]] && _wrapper_stale=1
+
     if print_version_summary; then
-        echo -e "${GREEN}All versions up-to-date. Nothing to upgrade.${RESET}"
-        exit 0
+        if [[ $_wrapper_stale -eq 0 ]]; then
+            echo -e "${GREEN}All versions up-to-date. Nothing to upgrade.${RESET}"
+            exit 0
+        fi
+        echo -e "${CYAN}Agent CLIs up-to-date; cloakbrowser wrapper moved ${_pin_cloak_wrapper} -> ${cloak_wrapper_ver}.${RESET}"
     fi
 
     # --only: gate on the selected tools, not the whole manifest — a lagging
@@ -155,6 +184,10 @@ main() {
     if [[ -n $ONLY ]]; then
         local _t _cur _lat _only_needs_update=0
         for _t in ${ONLY//,/ }; do
+            if [[ $_t == cloakbrowser ]]; then
+                [[ $_wrapper_stale -eq 1 ]] && _only_needs_update=1
+                continue
+            fi
             _cur=$(normalize_version "$(get_current "$_t")")
             _lat=$(normalize_version "$(get_latest "$_t")")
             if [[ -z $_cur || $_cur == "-" || $_cur != "$_lat" ]]; then
@@ -209,6 +242,7 @@ main() {
         "CCX|ccx_ver|_CLI_CCX|ccx"
         "Copilot API|copilot_ver|_CLI_COPILOT|copilot-api"
         "Playwright|playwright_ver|_CLI_PLAYWRIGHT|playwright"
+        "CloakBrowser|cloak_wrapper_ver|_CLI_CLOAKBROWSER|cloakbrowser"
     )
 
     local _lines_upgrade=() _lines_pinned=() _lines_current=() _lines_new=()
@@ -218,8 +252,15 @@ main() {
         IFS='|' read -r _label _var _cli_var _tool <<< "$_mp"
         local _val=${!_var:-}
         local _cli_val=${!_cli_var:-}
-        local _cur=$(get_current "$_tool")
-        local _type=$(get_tool_field "$_tool" type)
+        local _cur _type
+        if [[ $_tool == cloakbrowser ]]; then
+            # Not in the registry: current = the versions.env pin.
+            _cur="$_pin_cloak_wrapper"
+            _type="npm"
+        else
+            _cur=$(get_current "$_tool")
+            _type=$(get_tool_field "$_tool" type)
+        fi
         local _pad=$(printf "%-14s" "$_label")
 
         local _fmt_val _fmt_cur
@@ -345,8 +386,44 @@ main() {
         -t "$RUST_IMAGE" .
 
     echo ""
+    section "Building Cloak Image"
+    docker build -f "$CLOAK_DOCKERFILE" \
+        ${PROXY_ARGS[@]+"${PROXY_ARGS[@]}"} \
+        --build-arg BASE_IMAGE="$RUST_IMAGE" \
+        --build-arg CLOAKBROWSER_WRAPPER_VERSION="$cloak_wrapper_ver" \
+        -t "$CLOAK_IMAGE" .
+
+    echo ""
     echo -e "${GREEN}${BOLD}All images upgraded successfully${RESET}"
     echo -e "${DIM}Completed: $(date '+%Y-%m-%d %H:%M:%S')${RESET}"
+
+    # Pin exactly what was built. A re-fetch here could pick up a version
+    # published mid-build and pin something never build-tested.
+    echo ""
+    section "Pinning versions.env"
+    CLAUDE_CODE_VERSION="$claude_ver"
+    CCTRACE_VERSION="$cctrace_ver"
+    CODEX_VERSION="$codex_ver"
+    GEMINI_CLI_VERSION="$gemini_ver"
+    GROK_CLI_VERSION="$grok_ver"
+    KIMI_CODE_VERSION="$kimi_ver"
+    CCX_VERSION="$ccx_ver"
+    COPILOT_API_VERSION="$copilot_ver"
+    PLAYWRIGHT_VERSION="$playwright_ver"
+    CLOAKBROWSER_WRAPPER_VERSION="$cloak_wrapper_ver"
+    write_version_pins
+    echo -e "${GREEN}Wrote ${VERSION_PINS_FILE##*/} from the built versions${RESET}"
+
+    if [[ $PR == 0 ]]; then
+        echo -e "${DIM}PR=0: skipping pin commit + pull request${RESET}"
+        return 0
+    fi
+    echo ""
+    section "Opening Pin PR"
+    if ! bash "$SCRIPT_DIR/versions-pr.sh"; then
+        echo -e "${YELLOW}PR creation failed; pins are written locally.${RESET}" >&2
+        echo -e "${YELLOW}Retry with: ./scripts/versions-pr.sh${RESET}" >&2
+    fi
 }
 
 main

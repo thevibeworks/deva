@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `make versions-up` is now the whole pin flow: builds core, main,
+  rust, and cloak at latest upstream, writes versions.env from the
+  exact versions built (no post-build re-fetch race), and opens the
+  pin PR on chore/version-pins-refresh; PR=0 keeps the bump local
+  (#538)
 - README core-value section rewritten around operator outcomes —
   full-speed YOLO, host out of vendor code's reach, explicit boundary,
   identity as a launch flag, official CLIs stock, zero workflow tax
