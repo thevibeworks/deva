@@ -282,9 +282,12 @@ versions-up:
 	 BUILD_IMAGE=$(MAIN_IMAGE) \
 	 CORE_IMAGE=$(CORE_IMAGE) \
 	 RUST_IMAGE=$(RUST_IMAGE) \
+	 CLOAK_IMAGE=$(CLOAK_IMAGE) \
 	 DOCKERFILE=$(DOCKERFILE) \
 	 RUST_DOCKERFILE=$(RUST_DOCKERFILE) \
+	 CLOAK_DOCKERFILE=$(CLOAK_DOCKERFILE) \
 	 ONLY=$(ONLY) \
+	 $(if $(PR),PR=$(PR)) \
 	 $(VERSION_QUERY_OVERRIDES) \
 	 ./scripts/version-upgrade.sh
 
@@ -455,8 +458,10 @@ help:
 	@echo "  buildx-multi-rust    Build multi-arch Rust and push"
 	@echo "  toolchains           List pinned toolchains and managed build tools"
 	@echo "  versions             Compare built vs latest versions with changelogs"
-	@echo "  versions-up          Build both images with latest upstream agent versions"
+	@echo "  versions-up          Build all images at latest upstream versions,"
+	@echo "                       pin the built versions, and PR the bump"
 	@echo "                       ONLY=cctrace upgrades one tool, rest stay pinned"
+	@echo "                       PR=0 skips the auto commit + pull request"
 	@echo "  versions-pin         Refresh $(VERSION_PINS_FILE) from upstream"
 	@echo "                       CHANGELOG=1 also shows changelogs for updated tools"
 	@echo "  scripts              List repo helper scripts"
@@ -514,5 +519,6 @@ help:
 	@echo "  make versions-pin CHANGELOG=1                 # Refresh pins + show changelogs"
 	@echo "  make versions                                 # Check current versions"
 	@echo "  make PLAYWRIGHT_VERSION=1.60.0 build-rust     # Override rust browser tooling"
-	@echo "  make versions-up                              # Upgrade to latest upstream versions"
+	@echo "  make versions-up                              # Build latest, pin what was built, PR the bump"
+	@echo "  make versions-up PR=0                         # Same, but keep the pin bump local"
 	@echo "  make versions-up ONLY=cctrace                 # Upgrade just cctrace, rest pinned"
