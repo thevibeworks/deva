@@ -7,11 +7,11 @@ English | [简体中文](README.zh-CN.md)
 [![Docs](https://img.shields.io/badge/docs-docs.deva.sh-111111)](https://docs.deva.sh)
 [![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
 
-Run Claude Code, Codex, Gemini, Grok, and Kimi inside Docker without pretending the agents' own permission prompts are the thing keeping you safe.
+Run Claude Code, Codex, Gemini, Grok, Kimi, and opencode inside Docker without pretending the agents' own permission prompts are the thing keeping you safe.
 
 The container is the sandbox, mounts are the contract. What that buys you:
 
-- Full-speed agents. Permission prompts exist because the blast radius is your host. Make the blast radius a container and YOLO stops being reckless — all five agents run with their permission systems off (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `gemini --yolo`, `grok --always-approve`, `kimi --yolo`). Worst case dies with the container.
+- Full-speed agents. Permission prompts exist because the blast radius is your host. Make the blast radius a container and YOLO stops being reckless — all six agents run with their permission systems off (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `gemini --yolo`, `grok --always-approve`, `kimi --yolo`, opencode via `OPENCODE_PERMISSION` allow-all). Worst case dies with the container.
 - The vendor's code never sees your host. Agent CLIs are fast-moving npm trees with auto-updaters. Here they are born inside the image: no `~/.ssh`, no `~/.aws`, no shell env soup, no browser profiles. Nothing to harvest.
 - Everything that crosses the boundary is explicit. Files: mounts. Secrets: the env you pass. Network: the posture you pick — default bridge, your proxy, `--host-net`, or nothing. If you didn't wire it, the agent doesn't have it.
 - Identity is a launch flag, not a global singleton. Per-agent config homes under `~/.config/deva/`, `--auth-with` / `--config-home` for the second account or API-key billing. Switch accounts per run; project, sessions, and container state stay put.
@@ -39,6 +39,7 @@ deva.sh codex            # same container, different agent
 deva.sh gemini
 deva.sh grok
 deva.sh kimi
+deva.sh opencode
 
 deva.sh claude --rm      # throwaway container
 deva.sh claude --debug --dry-run   # inspect the docker run before trusting it

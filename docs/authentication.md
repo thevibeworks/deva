@@ -22,6 +22,7 @@ This guide documents what `deva.sh` actually supports, what env vars it reads, a
 | Gemini | `oauth` | `api-key`, `gemini-api-key`, `vertex`, `compute-adc`, `gemini-app-oauth`, credentials file | `.gemini`, `GEMINI_API_KEY`, gcloud, service-account JSON |
 | Grok | `oauth` | `api-key` | `.grok/auth.json`, `XAI_API_KEY` |
 | Kimi | `oauth` | `api-key` | `.kimi-code` (device-code), `KIMI_CODE_API_KEY` -> `KIMI_MODEL_*` |
+| opencode | `oauth` | `api-key` | `.local/share/opencode/auth.json` (device-code), `OPENCODE_API_KEY` |
 
 ## Claude
 
@@ -411,6 +412,51 @@ self-update trampoline, no platform binary), so there is no host-mount
 shadowing to guard against. The image pin (`KIMI_CODE_VERSION`) is the only
 version that matters.
 
+## opencode
+
+### Default: `--auth-with oauth`
+
+Mounts (opencode is XDG-native — three dirs instead of one dot-dir):
+
+- `/home/deva/.config/opencode` (config, plugins)
+- `/home/deva/.local/share/opencode` (auth.json, session db, logs)
+- `/home/deva/.local/state/opencode` (model prefs, prompt history)
+
+`~/.cache/opencode` stays container-local on purpose: it only holds the
+models.json cache and the self-updater's bin dir, and the image pins the
+CLI version (`OPENCODE_DISABLE_AUTOUPDATE=1` is set in the container).
+
+First login has no browser, so use the device-code flow inside the
+container: run `opencode auth login` (or `/connect` in the TUI), open the
+printed URL on any device. Or authenticate on the host once; deva
+auto-links the three XDG dirs and the mount carries `auth.json` in.
+
+opencode's permission model already allows everything inside the workspace;
+deva additionally unlocks the interactive asks (outside-workspace access,
+doom-loop guard, `.env` reads) via `OPENCODE_PERMISSION` — the container is
+the sandbox.
+
+### `--auth-with api-key`
+
+Inputs:
+
+- `OPENCODE_API_KEY` (service-account key from [console.opencode.ai](https://console.opencode.ai))
+
+The key travels as env only and authenticates the opencode gateway
+provider. This mode mounts none of the XDG dirs: a mounted `auth.json`
+outranks the env key and could silently bill another account (same
+no-mount contract as grok/kimi api-key). A blank overlay hides `auth.json`
+even if a user `-v` carries a data dir in.
+
+```bash
+export OPENCODE_API_KEY=sk-...
+deva.sh opencode --auth-with api-key
+```
+
+BYO provider keys (Anthropic, OpenAI, OpenRouter, ...) are opencode config,
+not deva auth methods — wire them with `-e` / `.deva` `ENV=` entries and
+opencode's own `opencode.jsonc`.
+
 ## Config Homes And Auth Isolation
 
 Default homes live under:
@@ -421,6 +467,7 @@ Default homes live under:
 ~/.config/deva/gemini
 ~/.config/deva/grok
 ~/.config/deva/kimi
+~/.config/deva/opencode
 ```
 
 Use `--config-home` when you want a separate identity:

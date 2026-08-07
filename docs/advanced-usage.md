@@ -49,7 +49,8 @@ Deva-root layout:
 ├── codex/
 ├── gemini/
 ├── grok/
-└── kimi/
+├── kimi/
+└── opencode/
 ```
 
 ```bash
@@ -187,7 +188,9 @@ verbatim and is never intercepted by deva.
 which records every API call the agent makes — messages, OAuth, usage/credits,
 MCP — not just the chat endpoint. Everything else on the line goes to the
 agent unchanged. Codex, Grok, and Kimi use cctrace client profiles
-(cctrace >= 0.11) and always run MITM capture.
+(cctrace >= 0.11) and always run MITM capture. opencode has no cctrace
+profile yet, so `deva.sh opencode --trace` is rejected
+(thevibeworks/cctrace#89).
 
 When tracing is on, the entrypoint installs the cctrace MITM CA into the
 container's system trust store (`update-ca-certificates`) so subprocesses and

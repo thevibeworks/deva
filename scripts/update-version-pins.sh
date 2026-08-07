@@ -132,6 +132,7 @@ registry_tool() {
         GEMINI_CLI_VERSION)  echo "gemini-cli" ;;
         GROK_CLI_VERSION)    echo "grok-cli" ;;
         KIMI_CODE_VERSION)   echo "kimi-code" ;;
+        OPENCODE_VERSION)    echo "opencode" ;;
         CCX_VERSION)         echo "ccx" ;;
         COPILOT_API_VERSION) echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)  echo "playwright" ;;
@@ -227,6 +228,7 @@ main() {
     pin "Gemini CLI"     GEMINI_CLI_VERSION    npm  "@google/gemini-cli"
     pin "Grok CLI"       GROK_CLI_VERSION      npm  "@xai-official/grok"
     pin "Kimi Code"      KIMI_CODE_VERSION     npm  "@moonshot-ai/kimi-code"
+    pin "opencode"       OPENCODE_VERSION      npm  "opencode-ai"
     pin "CCX"            CCX_VERSION           git-tag  "https://github.com/thevibeworks/ccx.git"
     pin "Copilot API"    COPILOT_API_VERSION   git-commit  "https://github.com/ericc-ch/copilot-api.git" "refs/heads/master"
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- opencode (opencode.ai) as the 6th agent: `deva.sh opencode` (#541).
+  First XDG-native agent — auth/config persist across three nested
+  canonical entries (`.config/opencode`, `.local/share/opencode`,
+  `.local/state/opencode`) instead of one dot-dir; cache stays
+  container-local. Default `oauth` mounts the trio (auth.json carries
+  the subscription); `--auth-with api-key` passes `OPENCODE_API_KEY`
+  and mounts nothing. Container-is-the-sandbox via `OPENCODE_PERMISSION`
+  (opencode is already allow-by-default in-workspace); autoupdate off,
+  image pins `opencode-ai` (OPENCODE_VERSION). `--trace` rejected until
+  cctrace ships an opencode profile (thevibeworks/cctrace#89)
+
 ### Changed
 - `make versions-up` is now the whole pin flow: builds core, main,
   rust, and cloak at latest upstream, writes versions.env from the

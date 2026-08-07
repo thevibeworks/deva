@@ -1,8 +1,8 @@
 # deva.sh
 
-> Docker-first launcher for AI coding agents — Claude Code, Codex, Gemini, Grok, and Kimi.
+> Docker-first launcher for AI coding agents — Claude Code, Codex, Gemini, Grok, Kimi, and opencode.
 > The container is the sandbox, mounts are the explicit contract, and one warm
-> project container serves all five agents. A bash script, not a framework. MIT.
+> project container serves all six agents. A bash script, not a framework. MIT.
 
 deva.sh is a single entry point installed on the host; agents run inside
 `ghcr.io/thevibeworks/deva` images (`:latest`, `:rust`, `:cloak` for stable,
@@ -10,7 +10,8 @@ deva.sh is a single entry point installed on the host; agents run inside
 are disabled by design — isolation comes from Docker, not permission theater:
 `claude --dangerously-skip-permissions`,
 `codex --dangerously-bypass-approvals-and-sandbox`,
-`gemini --yolo`, `grok --always-approve`, and `kimi --yolo`. Auth
+`gemini --yolo`, `grok --always-approve`, `kimi --yolo`, and opencode via
+`OPENCODE_PERMISSION` allow-all. Auth
 lives in per-agent config homes under `~/.config/deva/` with OAuth (default) or
 API-key modes per agent, switchable per run (`--auth-with`, `--config-home`) so
 accounts and billing modes swap without touching project or session state;
@@ -30,6 +31,7 @@ deva.sh codex           # same container shape, other agents
 deva.sh gemini
 deva.sh grok
 deva.sh kimi
+deva.sh opencode
 deva.sh claude -p cloak # stealth-browser image (CloakBrowser, headed Xvfb)
 deva.sh claude --debug --dry-run   # inspect the docker run before trusting it
 ```

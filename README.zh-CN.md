@@ -7,11 +7,11 @@
 [![Docs](https://img.shields.io/badge/docs-docs.deva.sh-111111)](https://docs.deva.sh)
 [![License](https://img.shields.io/github/license/thevibeworks/deva)](LICENSE)
 
-在 Docker 里跑 Claude Code、Codex、Gemini、Grok、Kimi 五个 agent CLI，并且不再假装 agent 自带的权限弹窗是在保护你。
+在 Docker 里跑 Claude Code、Codex、Gemini、Grok、Kimi、opencode 六个 agent CLI，并且不再假装 agent 自带的权限弹窗是在保护你。
 
 容器即沙箱，挂载即契约。这换来的是：
 
-- 全速跑 agent。权限弹窗存在的理由是爆炸半径等于你的整机；把爆炸半径缩小到一个容器，YOLO 就不再是鲁莽 —— 五个 agent 全部关掉自带权限系统跑（`claude --dangerously-skip-permissions`、`codex --dangerously-bypass-approvals-and-sandbox`、`gemini --yolo`、`grok --always-approve`、`kimi --yolo`）。最坏结果随容器一起销毁。
+- 全速跑 agent。权限弹窗存在的理由是爆炸半径等于你的整机；把爆炸半径缩小到一个容器，YOLO 就不再是鲁莽 —— 六个 agent 全部关掉自带权限系统跑（`claude --dangerously-skip-permissions`、`codex --dangerously-bypass-approvals-and-sandbox`、`gemini --yolo`、`grok --always-approve`、`kimi --yolo`、opencode 走 `OPENCODE_PERMISSION` 全放行）。最坏结果随容器一起销毁。
 - 厂商代码永远见不到你的主机。agent CLI 是快速迭代、带自动更新的 npm 依赖树；在这里它们出生在镜像里：没有 `~/.ssh`、没有 `~/.aws`、没有 shell 环境变量汤、没有浏览器档案。想收集也无从下手。
 - 跨越边界的一切都是显式的。文件靠挂载，密钥靠你传的 env，网络靠你选的姿态 —— 默认 bridge、走你的代理、`--host-net`、或者干脆不联网。你没接的线，agent 就没有。
 - 身份是启动参数，不是全局单例。`~/.config/deva/` 下按 agent 分家，`--auth-with` / `--config-home` 切第二个账号或 API-key 计费。按次切账号，项目、会话、容器状态原地不动。
@@ -39,6 +39,7 @@ deva.sh codex            # 同一个容器，换 agent
 deva.sh gemini
 deva.sh grok
 deva.sh kimi
+deva.sh opencode
 
 deva.sh claude --rm      # 一次性容器，用完即扔
 deva.sh claude --debug --dry-run   # 先看 docker run 长啥样再信它

@@ -18,6 +18,7 @@ _CLI_CODEX="${CODEX_VERSION:-}"
 _CLI_GEMINI="${GEMINI_CLI_VERSION:-}"
 _CLI_GROK="${GROK_CLI_VERSION:-}"
 _CLI_KIMI="${KIMI_CODE_VERSION:-}"
+_CLI_OPENCODE="${OPENCODE_VERSION:-}"
 _CLI_CCX="${CCX_VERSION:-}"
 _CLI_COPILOT="${COPILOT_API_VERSION:-}"
 _CLI_PLAYWRIGHT="${PLAYWRIGHT_VERSION:-}"
@@ -70,7 +71,7 @@ Options:
   --only LIST     Upgrade only these tools (comma-separated); the rest
                   stay pinned to versions.env. Tools: claude-code,
                   cctrace, codex, gemini-cli, grok-cli, kimi-code,
-                  ccx, copilot-api, playwright, cloakbrowser
+                  opencode, ccx, copilot-api, playwright, cloakbrowser
   -h, --help      Show this help
 
 Environment:
@@ -87,6 +88,7 @@ Environment:
   GEMINI_CLI_VERSION    Override gemini-cli version
   GROK_CLI_VERSION      Override grok-cli version
   KIMI_CODE_VERSION     Override kimi-code version
+  OPENCODE_VERSION      Override opencode version
   CCX_VERSION     Override ccx version
   COPILOT_API_VERSION   Override copilot-api version
   PLAYWRIGHT_VERSION    Override playwright version (rust image only)
@@ -116,7 +118,7 @@ apply_only_filter() {
     [[ -n $ONLY ]] || return 0
 
     local tool
-    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code ccx copilot-api playwright cloakbrowser"
+    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code opencode ccx copilot-api playwright cloakbrowser"
     for tool in ${ONLY//,/ }; do
         case " $known " in
             *" $tool "*) ;;
@@ -132,6 +134,7 @@ apply_only_filter() {
     tool_selected gemini-cli  || _CLI_GEMINI="${_CLI_GEMINI:-$GEMINI_CLI_VERSION}"
     tool_selected grok-cli    || _CLI_GROK="${_CLI_GROK:-$GROK_CLI_VERSION}"
     tool_selected kimi-code   || _CLI_KIMI="${_CLI_KIMI:-$KIMI_CODE_VERSION}"
+    tool_selected opencode    || _CLI_OPENCODE="${_CLI_OPENCODE:-$OPENCODE_VERSION}"
     tool_selected ccx         || _CLI_CCX="${_CLI_CCX:-$CCX_VERSION}"
     tool_selected copilot-api || _CLI_COPILOT="${_CLI_COPILOT:-$COPILOT_API_VERSION}"
     tool_selected playwright  || _CLI_PLAYWRIGHT="${_CLI_PLAYWRIGHT:-$PLAYWRIGHT_VERSION}"
@@ -204,13 +207,14 @@ main() {
 
     # Resolve build versions early so we can show the manifest before countdown.
     # CLI override wins; otherwise use whatever load_versions fetched.
-    local claude_ver cctrace_ver codex_ver gemini_ver grok_ver kimi_ver ccx_ver copilot_ver playwright_ver
+    local claude_ver cctrace_ver codex_ver gemini_ver grok_ver kimi_ver opencode_ver ccx_ver copilot_ver playwright_ver
     claude_ver="${_CLI_CLAUDE_CODE:-$(get_latest "claude-code")}"
     cctrace_ver="${_CLI_CCTRACE:-$(get_latest "cctrace")}"
     codex_ver="${_CLI_CODEX:-$(get_latest "codex")}"
     gemini_ver="${_CLI_GEMINI:-$(get_latest "gemini-cli")}"
     grok_ver="${_CLI_GROK:-$(get_latest "grok-cli")}"
     kimi_ver="${_CLI_KIMI:-$(get_latest "kimi-code")}"
+    opencode_ver="${_CLI_OPENCODE:-$(get_latest "opencode")}"
     ccx_ver="${_CLI_CCX:-$(get_latest "ccx")}"
     copilot_ver="${_CLI_COPILOT:-$(get_latest "copilot-api")}"
     playwright_ver="${_CLI_PLAYWRIGHT:-${PLAYWRIGHT_VERSION}}"
@@ -221,6 +225,7 @@ main() {
     [[ -z $gemini_ver ]] && missing+=("GEMINI_CLI_VERSION")
     [[ -z $grok_ver ]] && missing+=("GROK_CLI_VERSION")
     [[ -z $kimi_ver ]] && missing+=("KIMI_CODE_VERSION")
+    [[ -z $opencode_ver ]] && missing+=("OPENCODE_VERSION")
     [[ -z $ccx_ver ]] && missing+=("CCX_VERSION")
     [[ -z $copilot_ver ]] && missing+=("COPILOT_API_VERSION")
     [[ -z $playwright_ver ]] && missing+=("PLAYWRIGHT_VERSION")
@@ -239,6 +244,7 @@ main() {
         "Codex|codex_ver|_CLI_CODEX|codex"
         "Grok CLI|grok_ver|_CLI_GROK|grok-cli"
         "Kimi Code|kimi_ver|_CLI_KIMI|kimi-code"
+        "opencode|opencode_ver|_CLI_OPENCODE|opencode"
         "CCX|ccx_ver|_CLI_CCX|ccx"
         "Copilot API|copilot_ver|_CLI_COPILOT|copilot-api"
         "Playwright|playwright_ver|_CLI_PLAYWRIGHT|playwright"
@@ -363,6 +369,7 @@ main() {
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
         --build-arg GROK_CLI_VERSION="$grok_ver" \
         --build-arg KIMI_CODE_VERSION="$kimi_ver" \
+        --build-arg OPENCODE_VERSION="$opencode_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
         --build-arg COPILOT_API_VERSION="$copilot_ver" \
         -t "$BUILD_IMAGE" .
@@ -378,6 +385,7 @@ main() {
         --build-arg GEMINI_CLI_VERSION="$gemini_ver" \
         --build-arg GROK_CLI_VERSION="$grok_ver" \
         --build-arg KIMI_CODE_VERSION="$kimi_ver" \
+        --build-arg OPENCODE_VERSION="$opencode_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
         --build-arg PLAYWRIGHT_VERSION="$playwright_ver" \
         --build-arg RUST_TOOLCHAINS="$RUST_TOOLCHAINS" \
@@ -407,6 +415,7 @@ main() {
     GEMINI_CLI_VERSION="$gemini_ver"
     GROK_CLI_VERSION="$grok_ver"
     KIMI_CODE_VERSION="$kimi_ver"
+    OPENCODE_VERSION="$opencode_ver"
     CCX_VERSION="$ccx_ver"
     COPILOT_API_VERSION="$copilot_ver"
     PLAYWRIGHT_VERSION="$playwright_ver"

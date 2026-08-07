@@ -31,6 +31,7 @@ TOOL_REGISTRY=(
     "gemini-cli|npm|@google/gemini-cli|org.opencontainers.image.gemini_cli_version|https://www.npmjs.com/package/@google/gemini-cli||agent|main"
     "grok-cli|npm|@xai-official/grok|org.opencontainers.image.grok_cli_version|https://www.npmjs.com/package/@xai-official/grok||agent|main"
     "kimi-code|npm|@moonshot-ai/kimi-code|org.opencontainers.image.kimi_code_version|https://www.npmjs.com/package/@moonshot-ai/kimi-code||agent|main"
+    "opencode|npm|opencode-ai|org.opencontainers.image.opencode_version|https://www.npmjs.com/package/opencode-ai|github:anomalyco/opencode|agent|main"
     "ccx|github-release|thevibeworks/ccx|org.opencontainers.image.ccx_version|https://github.com/thevibeworks/ccx|github:thevibeworks/ccx|agent|main"
     "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
     "cctrace|npm|@thevibeworks/cctrace|org.opencontainers.image.cctrace_version|https://www.npmjs.com/package/@thevibeworks/cctrace|github:thevibeworks/cctrace|agent|main"

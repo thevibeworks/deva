@@ -465,6 +465,9 @@ parse_auth_args() {
         kimi)
             supported_methods=(oauth api-key)
             ;;
+        opencode)
+            supported_methods=(oauth api-key)
+            ;;
         *)
             auth_error "Unknown agent: $agent_name"
             ;;
@@ -532,6 +535,7 @@ parse_auth_args() {
             gemini) auth_method="oauth" ;;
             grok) auth_method="oauth" ;;
             kimi) auth_method="oauth" ;;
+            opencode) auth_method="oauth" ;;
         esac
     fi
 
