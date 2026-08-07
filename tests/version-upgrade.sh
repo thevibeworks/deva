@@ -109,6 +109,7 @@ case "$url" in
 */-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
+*cdn.kimi.com/webbridge/latest/version.json)     echo '{"version":"v1.12.0","binaries":{}}' ;;
 *registry.npmjs.org/@anthropic-ai%2fclaude-code) echo '{"time":{"2.1.87":"2026-03-29T01:40:00Z"}}' ;;
 *registry.npmjs.org/@thevibeworks%2fcctrace)     echo '{"time":{"0.4.0":"2026-03-29T01:40:00Z"}}' ;;
 *registry.npmjs.org/@openai%2fcodex)             echo '{"time":{"0.117.0":"2026-03-26T22:28:00Z"}}' ;;
@@ -227,6 +228,7 @@ for expected in \
     "COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "PLAYWRIGHT_VERSION=1.60.0" \
     "CLOAKBROWSER_WRAPPER_VERSION=0.6.0" \
+    "KIMI_WEBBRIDGE_VERSION=v1.12.0" \
     "GO_VERSION=1.26.2"
 do
     grep -qx "$expected" "$MAIN_PINS" || {
@@ -367,6 +369,7 @@ case "$url" in
 */-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
+*cdn.kimi.com/webbridge/latest/version.json)     echo '{"version":"v1.12.0","binaries":{}}' ;;
 *registry.npmjs.org/*)                           echo '{"time":{}}' ;;
 *)
     echo "unexpected curl url: $url" >&2

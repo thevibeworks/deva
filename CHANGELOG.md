@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- KIMI_WEBBRIDGE_VERSION as a managed pin: `make versions-up` and
+  `make versions-pin` resolve Kimi WebBridge from
+  cdn.kimi.com/webbridge/latest/version.json (no npm package; same
+  out-of-registry pathway as the cloakbrowser wrapper). No build
+  consumes the pin yet — #543 bakes WebBridge into the cloak image
+  (#544)
 - opencode (opencode.ai) as the 6th agent: `deva.sh opencode` (#541).
   First XDG-native agent — auth/config persist across three nested
   canonical entries (`.config/opencode`, `.local/share/opencode`,

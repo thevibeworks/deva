@@ -124,6 +124,7 @@ VERSION_QUERY_OVERRIDES := \
 	$(if $(filter command line environment environment\ override override,$(origin COPILOT_API_VERSION)),COPILOT_API_VERSION=$(COPILOT_API_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin PLAYWRIGHT_VERSION)),PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin CLOAKBROWSER_WRAPPER_VERSION)),CLOAKBROWSER_WRAPPER_VERSION=$(CLOAKBROWSER_WRAPPER_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin KIMI_WEBBRIDGE_VERSION)),KIMI_WEBBRIDGE_VERSION=$(KIMI_WEBBRIDGE_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin RUST_TOOLCHAINS)),RUST_TOOLCHAINS=$(RUST_TOOLCHAINS)) \
 	$(if $(filter command line environment environment\ override override,$(origin RUST_DEFAULT_TOOLCHAIN)),RUST_DEFAULT_TOOLCHAIN=$(RUST_DEFAULT_TOOLCHAIN)) \
 	$(if $(filter command line environment environment\ override override,$(origin RUST_TARGETS)),RUST_TARGETS=$(RUST_TARGETS))
