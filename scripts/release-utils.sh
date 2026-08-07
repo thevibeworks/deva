@@ -183,6 +183,14 @@ _npm_registry_latest() {
         sed -n 's/.*"latest":"\([^"]*\)".*/\1/p'
 }
 
+# Kimi WebBridge has no npm package; the CDN's version-first layout
+# publishes a manifest at latest/version.json ({"version":"vX.Y.Z",...}).
+_webbridge_cdn_latest() {
+    curl -fsSL --max-time 10 \
+        "https://cdn.kimi.com/webbridge/latest/version.json" 2>/dev/null | \
+        sed -n 's/.*"version": *"\([^"]*\)".*/\1/p'
+}
+
 fetch_latest_version() {
     local tool=$1
     local type=$(get_tool_field "$tool" type)

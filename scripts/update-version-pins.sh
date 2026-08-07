@@ -88,6 +88,7 @@ pin() {
         npm)        new_val=$(fetch_npm_version "$1") || true ;;
         git-tag)    new_val=$(fetch_latest_git_tag "$1") || true ;;
         git-commit) new_val=$(fetch_latest_commit "$1" "$2") || true ;;
+        webbridge)  new_val=$(_webbridge_cdn_latest) || true ;;
     esac
 
     # Clear fetching line
@@ -238,6 +239,7 @@ main() {
 
     pin "Playwright"     PLAYWRIGHT_VERSION            npm  "playwright"
     pin "CloakBrowser"   CLOAKBROWSER_WRAPPER_VERSION  npm  "cloakbrowser"
+    pin "Kimi WebBridge" KIMI_WEBBRIDGE_VERSION        webbridge
 
     # ── Summary footer ───────────────────────────────────────────────────
     echo -e "  ${CYAN}│${RESET}"

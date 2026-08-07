@@ -23,6 +23,7 @@ _CLI_CCX="${CCX_VERSION:-}"
 _CLI_COPILOT="${COPILOT_API_VERSION:-}"
 _CLI_PLAYWRIGHT="${PLAYWRIGHT_VERSION:-}"
 _CLI_CLOAKBROWSER="${CLOAKBROWSER_WRAPPER_VERSION:-}"
+_CLI_KIMI_WEBBRIDGE="${KIMI_WEBBRIDGE_VERSION:-}"
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/version-pins.sh"
@@ -71,7 +72,8 @@ Options:
   --only LIST     Upgrade only these tools (comma-separated); the rest
                   stay pinned to versions.env. Tools: claude-code,
                   cctrace, codex, gemini-cli, grok-cli, kimi-code,
-                  opencode, ccx, copilot-api, playwright, cloakbrowser
+                  opencode, ccx, copilot-api, playwright, cloakbrowser,
+                  kimi-webbridge
   -h, --help      Show this help
 
 Environment:
@@ -92,6 +94,7 @@ Environment:
   CCX_VERSION     Override ccx version
   COPILOT_API_VERSION   Override copilot-api version
   PLAYWRIGHT_VERSION    Override playwright version (rust image only)
+  KIMI_WEBBRIDGE_VERSION Override kimi-webbridge version (pin only until #543)
 EOF
 }
 
@@ -118,7 +121,7 @@ apply_only_filter() {
     [[ -n $ONLY ]] || return 0
 
     local tool
-    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code opencode ccx copilot-api playwright cloakbrowser"
+    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code opencode ccx copilot-api playwright cloakbrowser kimi-webbridge"
     for tool in ${ONLY//,/ }; do
         case " $known " in
             *" $tool "*) ;;
@@ -139,6 +142,7 @@ apply_only_filter() {
     tool_selected copilot-api || _CLI_COPILOT="${_CLI_COPILOT:-$COPILOT_API_VERSION}"
     tool_selected playwright  || _CLI_PLAYWRIGHT="${_CLI_PLAYWRIGHT:-$PLAYWRIGHT_VERSION}"
     tool_selected cloakbrowser || _CLI_CLOAKBROWSER="${_CLI_CLOAKBROWSER:-$CLOAKBROWSER_WRAPPER_VERSION}"
+    tool_selected kimi-webbridge || _CLI_KIMI_WEBBRIDGE="${_CLI_KIMI_WEBBRIDGE:-$KIMI_WEBBRIDGE_VERSION}"
 
     echo "Selective upgrade: $ONLY (all other tools pinned to versions.env)"
     echo ""
@@ -174,12 +178,27 @@ main() {
     local _wrapper_stale=0
     [[ "$(normalize_version "$cloak_wrapper_ver")" != "$(normalize_version "$_pin_cloak_wrapper")" ]] && _wrapper_stale=1
 
+    # Kimi WebBridge is also outside the registry (no npm package; the
+    # CDN manifest is the source of truth). Same pathway as the wrapper.
+    local _pin_webbridge="$KIMI_WEBBRIDGE_VERSION"
+    local webbridge_ver="$_CLI_KIMI_WEBBRIDGE"
+    if [[ -z $webbridge_ver ]]; then
+        webbridge_ver=$(_webbridge_cdn_latest) || true
+        if [[ -z $webbridge_ver ]]; then
+            echo -e "${YELLOW}Warning: Failed to fetch latest kimi-webbridge, using pinned: ${_pin_webbridge}${RESET}" >&2
+            webbridge_ver="$_pin_webbridge"
+        fi
+    fi
+    local _webbridge_stale=0
+    [[ "$(normalize_version "$webbridge_ver")" != "$(normalize_version "$_pin_webbridge")" ]] && _webbridge_stale=1
+
     if print_version_summary; then
-        if [[ $_wrapper_stale -eq 0 ]]; then
+        if [[ $_wrapper_stale -eq 0 && $_webbridge_stale -eq 0 ]]; then
             echo -e "${GREEN}All versions up-to-date. Nothing to upgrade.${RESET}"
             exit 0
         fi
-        echo -e "${CYAN}Agent CLIs up-to-date; cloakbrowser wrapper moved ${_pin_cloak_wrapper} -> ${cloak_wrapper_ver}.${RESET}"
+        [[ $_wrapper_stale -eq 1 ]] && echo -e "${CYAN}Agent CLIs up-to-date; cloakbrowser wrapper moved ${_pin_cloak_wrapper} -> ${cloak_wrapper_ver}.${RESET}"
+        [[ $_webbridge_stale -eq 1 ]] && echo -e "${CYAN}Agent CLIs up-to-date; kimi-webbridge moved ${_pin_webbridge} -> ${webbridge_ver}.${RESET}"
     fi
 
     # --only: gate on the selected tools, not the whole manifest — a lagging
@@ -189,6 +208,10 @@ main() {
         for _t in ${ONLY//,/ }; do
             if [[ $_t == cloakbrowser ]]; then
                 [[ $_wrapper_stale -eq 1 ]] && _only_needs_update=1
+                continue
+            fi
+            if [[ $_t == kimi-webbridge ]]; then
+                [[ $_webbridge_stale -eq 1 ]] && _only_needs_update=1
                 continue
             fi
             _cur=$(normalize_version "$(get_current "$_t")")
@@ -249,6 +272,7 @@ main() {
         "Copilot API|copilot_ver|_CLI_COPILOT|copilot-api"
         "Playwright|playwright_ver|_CLI_PLAYWRIGHT|playwright"
         "CloakBrowser|cloak_wrapper_ver|_CLI_CLOAKBROWSER|cloakbrowser"
+        "Kimi WebBridge|webbridge_ver|_CLI_KIMI_WEBBRIDGE|kimi-webbridge"
     )
 
     local _lines_upgrade=() _lines_pinned=() _lines_current=() _lines_new=()
@@ -263,6 +287,9 @@ main() {
             # Not in the registry: current = the versions.env pin.
             _cur="$_pin_cloak_wrapper"
             _type="npm"
+        elif [[ $_tool == kimi-webbridge ]]; then
+            _cur="$_pin_webbridge"
+            _type="cdn"
         else
             _cur=$(get_current "$_tool")
             _type=$(get_tool_field "$_tool" type)
@@ -420,6 +447,7 @@ main() {
     COPILOT_API_VERSION="$copilot_ver"
     PLAYWRIGHT_VERSION="$playwright_ver"
     CLOAKBROWSER_WRAPPER_VERSION="$cloak_wrapper_ver"
+    KIMI_WEBBRIDGE_VERSION="$webbridge_ver"
     write_version_pins
     echo -e "${GREEN}Wrote ${VERSION_PINS_FILE##*/} from the built versions${RESET}"
 

@@ -68,6 +68,7 @@ pin_label() {
         COPILOT_API_VERSION)          echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)           echo "playwright" ;;
         CLOAKBROWSER_WRAPPER_VERSION) echo "cloakbrowser" ;;
+        KIMI_WEBBRIDGE_VERSION)       echo "kimi-webbridge" ;;
         *) echo "$1" | tr '[:upper:]_' '[:lower:]-' ;;
     esac
 }

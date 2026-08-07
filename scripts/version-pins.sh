@@ -24,6 +24,7 @@ VERSION_PIN_VARS=(
     COPILOT_API_VERSION
     PLAYWRIGHT_VERSION
     CLOAKBROWSER_WRAPPER_VERSION
+    KIMI_WEBBRIDGE_VERSION
     RUST_TOOLCHAINS
     RUST_DEFAULT_TOOLCHAIN
     RUST_TARGETS
@@ -93,6 +94,10 @@ PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION
 # the wrapper hardcodes per-arch free-binary versions (linux-x64 146.x.x.5,
 # linux-arm64 146.x.x.3), so bumping the wrapper is what moves Chromium.
 CLOAKBROWSER_WRAPPER_VERSION=$CLOAKBROWSER_WRAPPER_VERSION
+# Kimi WebBridge daemon + extension. No npm package; resolved from
+# cdn.kimi.com/webbridge/latest/version.json. Not consumed by any
+# build yet — Dockerfile.cloak starts baking it in #543.
+KIMI_WEBBRIDGE_VERSION=$KIMI_WEBBRIDGE_VERSION
 
 RUST_TOOLCHAINS=$RUST_TOOLCHAINS
 RUST_DEFAULT_TOOLCHAIN=$RUST_DEFAULT_TOOLCHAIN
