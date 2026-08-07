@@ -110,7 +110,7 @@ _step() {
 
 usage() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode)
 
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
@@ -215,6 +215,7 @@ Examples:
   deva.sh gemini                      # Launch gemini in the same default container shape
   deva.sh grok                        # Launch grok in the same default container shape
   deva.sh kimi                        # Launch kimi (oauth default; api-key via KIMI_CODE_API_KEY)
+  deva.sh opencode                    # Launch opencode (oauth default; api-key via OPENCODE_API_KEY)
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -943,7 +944,7 @@ generate_auth_tag() {
     fi
 
     case "$agent:$auth_method" in
-        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth)
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth)
             printf '%s' "auth-default"
             return
             ;;
@@ -967,6 +968,7 @@ generate_auth_tag() {
                 gemini) key_val="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}" ;;
                 grok)   key_val="${XAI_API_KEY:-}" ;;
                 kimi)   key_val="${KIMI_CODE_API_KEY:-${KIMI_API_KEY:-}}" ;;
+                opencode) key_val="${OPENCODE_API_KEY:-}" ;;
             esac
             if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
                 printf '%s' "api-key-${key_val: -4}"
@@ -1013,6 +1015,7 @@ agent_version_tag() {
         gemini) label="org.opencontainers.image.gemini_cli_version" ;;
         grok) label="org.opencontainers.image.grok_cli_version" ;;
         kimi) label="org.opencontainers.image.kimi_code_version" ;;
+        opencode) label="org.opencontainers.image.opencode_version" ;;
     esac
 
     local ver=""
@@ -1358,7 +1361,9 @@ categorize_mount() {
     elif [[ "$dest" == /deva-host-chrome-bridge* ]]; then printf 'bridge'
     elif [[ "$dest" == /home/deva/.claude* ]] || [[ "$dest" == /home/deva/.codex* ]] || \
          [[ "$dest" == /home/deva/.gemini* ]] || [[ "$dest" == /home/deva/.grok* ]] || \
-         [[ "$dest" == /home/deva/.kimi-code* ]] || [ "$dest" = "/home/deva/.agents" ]; then
+         [[ "$dest" == /home/deva/.kimi-code* ]] || [[ "$dest" == /home/deva/.config/opencode* ]] || \
+         [[ "$dest" == /home/deva/.local/share/opencode* ]] || [[ "$dest" == /home/deva/.local/state/opencode* ]] || \
+         [ "$dest" = "/home/deva/.agents" ]; then
         printf 'config'
     else printf 'user'
     fi
@@ -1741,10 +1746,29 @@ cmd_status() {
 
     if [ -d "$config_root" ]; then
         echo "Agent Homes ($(shorten_path "$config_root")):"
-        for agent_name in claude codex gemini grok kimi; do
+        for agent_name in claude codex gemini grok kimi opencode; do
             local agent_dir="$config_root/$agent_name"
             if [ -d "$agent_dir" ]; then
                 local canonical="" other_count=0 entry is_canonical
+                if [ "$agent_name" = "opencode" ]; then
+                    # XDG-native agent: canonical entries are nested, a
+                    # top-level ls only shows their .config/.local containers.
+                    while IFS= read -r entry; do
+                        [ -n "$entry" ] || continue
+                        if [ -L "$agent_dir/$entry" ]; then
+                            canonical="${canonical} ${entry}@"
+                        elif [ -e "$agent_dir/$entry" ]; then
+                            canonical="${canonical} ${entry}"
+                        fi
+                    done < <(agent_canonical_basenames "$agent_name")
+                    while IFS= read -r entry; do
+                        [ -n "$entry" ] || continue
+                        case "$entry" in
+                            .config | .local) ;;
+                            *) other_count=$((other_count + 1)) ;;
+                        esac
+                    done < <(ls -1A "$agent_dir" 2>/dev/null)
+                else
                 while IFS= read -r entry; do
                     [ -n "$entry" ] || continue
                     is_canonical=false
@@ -1765,6 +1789,7 @@ cmd_status() {
                         other_count=$((other_count + 1))
                     fi
                 done < <(ls -1A "$agent_dir" 2>/dev/null)
+                fi
                 local line="${canonical:- (no canonical entries)}"
                 [ "$other_count" -gt 0 ] && line="${line}  (+${other_count} other)"
                 printf '  %-10s%s\n' "$agent_name" "$line"
@@ -2232,6 +2257,16 @@ should_skip_env_for_auth() {
             ;;
         esac
         ;;
+    opencode)
+        # OPENCODE_API_KEY only travels when deva injects it (api-key mode).
+        # A host-set key leaking into oauth mode would enable the gateway
+        # provider beside the subscription and silently bill the key.
+        case "$name" in
+        OPENCODE_API_KEY)
+            return 0
+            ;;
+        esac
+        ;;
     esac
 
     return 1
@@ -2290,6 +2325,11 @@ agent_canonical_basenames() {
     gemini) printf '%s\n' '.gemini' ;;
     grok)   printf '%s\n' '.grok' ;;
     kimi)   printf '%s\n' '.kimi-code' ;;
+    # opencode is XDG-native: canonical entries are nested paths, not
+    # top-level dotfiles. mount_agent_canonical handles nested targets
+    # verbatim (docker creates intermediate dirs); cache is left out on
+    # purpose (disposable models.json + self-update bin).
+    opencode) printf '%s\n' '.config/opencode' '.local/share/opencode' '.local/state/opencode' ;;
     *)      return 0 ;;
     esac
 }
@@ -2309,6 +2349,13 @@ grok_api_key_no_mount() {
 # above the env-synth model, so api-key mode mounts nothing.
 kimi_api_key_no_mount() {
     [ "$ACTIVE_AGENT" = "kimi" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
+}
+
+# opencode api-key contract: OPENCODE_API_KEY travels as env only. A mounted
+# data dir carries auth.json, which outranks the env key for the gateway
+# provider and could silently bill another account, so api-key mounts nothing.
+opencode_api_key_no_mount() {
+    [ "$ACTIVE_AGENT" = "opencode" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
 }
 
 # grok's self-updater writes Linux binaries into ~/.grok/bin and
@@ -2346,6 +2393,9 @@ mount_agent_canonical() {
         return 0
     fi
     if [ "$agent" = "kimi" ] && kimi_api_key_no_mount; then
+        return 0
+    fi
+    if [ "$agent" = "opencode" ] && opencode_api_key_no_mount; then
         return 0
     fi
 
@@ -2404,7 +2454,7 @@ has_auth_override() {
     # Non-default --auth-with
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth) ;;
             *) return 0 ;;
         esac
     fi
@@ -2417,6 +2467,7 @@ has_auth_override() {
         gemini) auth_vars="GEMINI_API_KEY" ;;
         grok)   auth_vars="XAI_API_KEY" ;;
         kimi)   auth_vars="KIMI_CODE_API_KEY KIMI_API_KEY" ;;
+        opencode) auth_vars="OPENCODE_API_KEY" ;;
     esac
 
     local var
@@ -2462,6 +2513,12 @@ default_credential_target_path() {
         # explicit user -v/.deva VOLUME can still carry one in; grok prefers
         # a session token over XAI_API_KEY, so blank-overlay auth.json anyway.
         printf '%s' "/home/deva/.grok/auth.json"
+        ;;
+    opencode)
+        # api-key mode mounts no data dir (opencode_api_key_no_mount), but an
+        # explicit user -v/.deva VOLUME can still carry one in; auth.json
+        # outranks OPENCODE_API_KEY, so blank-overlay it anyway.
+        printf '%s' "/home/deva/.local/share/opencode/auth.json"
         ;;
     *)
         return 1
@@ -3802,7 +3859,7 @@ if [ "$CONFIG_HOME_AUTO" = true ]; then
 fi
 
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
-    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ]; then
+    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ] || [ -d "$CONFIG_HOME/opencode" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
         CONFIG_HOME=""
         CONFIG_HOME_AUTO=false
@@ -3875,6 +3932,22 @@ autolink_legacy_into_deva_root() {
     if [ -d "$CONFIG_ROOT" ]; then
         [ -d "$CONFIG_ROOT/kimi/.kimi-code" ] || [ -L "$CONFIG_ROOT/kimi/.kimi-code" ] || mkdir -p "$CONFIG_ROOT/kimi/.kimi-code"
     fi
+
+    # opencode: XDG-native, so the legacy homes and the links are nested.
+    local _oc_entry
+    while IFS= read -r _oc_entry; do
+        [ -n "$_oc_entry" ] || continue
+        if [ -d "$HOME/$_oc_entry" ]; then
+            mkdir -p "$CONFIG_ROOT/opencode/$(dirname "$_oc_entry")"
+            if [ ! -e "$CONFIG_ROOT/opencode/$_oc_entry" ] && [ ! -L "$CONFIG_ROOT/opencode/$_oc_entry" ]; then
+                ln -s "$HOME/$_oc_entry" "$CONFIG_ROOT/opencode/$_oc_entry"
+                echo "autolink: ~/$_oc_entry -> $CONFIG_ROOT/opencode/$_oc_entry" >&2
+            fi
+        fi
+        if [ -d "$CONFIG_ROOT" ]; then
+            [ -d "$CONFIG_ROOT/opencode/$_oc_entry" ] || [ -L "$CONFIG_ROOT/opencode/$_oc_entry" ] || mkdir -p "$CONFIG_ROOT/opencode/$_oc_entry"
+        fi
+    done < <(agent_canonical_basenames "opencode")
 }
 
 check_agent "$ACTIVE_AGENT"
@@ -3904,6 +3977,13 @@ if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
         ;;
     kimi)
         [ -d "$CONFIG_HOME/.kimi-code" ] || mkdir -p "$CONFIG_HOME/.kimi-code"
+        ;;
+    opencode)
+        while IFS= read -r _oc_entry; do
+            [ -n "$_oc_entry" ] || continue
+            [ -d "$CONFIG_HOME/$_oc_entry" ] || mkdir -p "$CONFIG_HOME/$_oc_entry"
+        done < <(agent_canonical_basenames "opencode")
+        unset _oc_entry
         ;;
     esac
 fi
@@ -3950,6 +4030,12 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ] && [ "$_config_ho
             echo "warning: $CONFIG_HOME/.kimi-code is empty; authentication will need to be set up" >&2
         fi
         ;;
+    opencode)
+        # auth.json lives in the data dir; that's the one that matters.
+        if [ ! -d "$CONFIG_HOME/.local/share/opencode" ] || [ -z "$(ls -A "$CONFIG_HOME/.local/share/opencode" 2>/dev/null)" ]; then
+            echo "warning: $CONFIG_HOME/.local/share/opencode is empty; authentication will need to be set up" >&2
+        fi
+        ;;
     esac
 fi
 
@@ -3988,7 +4074,7 @@ _step "agent_prepare"
 
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth) ;;
             *) _needs_rewrite=true ;;
         esac
 
@@ -4106,6 +4192,14 @@ else
         # kimi api-key uses KIMI_MODEL_* env (no mount); only oauth wants ~/.kimi-code.
         if [ -d "$HOME/.kimi-code" ] && ! kimi_api_key_no_mount; then
             DOCKER_ARGS+=("-v" "$HOME/.kimi-code:/home/deva/.kimi-code")
+        fi
+        # opencode api-key uses OPENCODE_API_KEY env (no mount); oauth wants the XDG trio.
+        if ! opencode_api_key_no_mount; then
+            while IFS= read -r _oc_entry; do
+                [ -n "$_oc_entry" ] || continue
+                [ -d "$HOME/$_oc_entry" ] && DOCKER_ARGS+=("-v" "$HOME/$_oc_entry:/home/deva/$_oc_entry")
+            done < <(agent_canonical_basenames "opencode")
+            unset _oc_entry
         fi
     fi
 fi

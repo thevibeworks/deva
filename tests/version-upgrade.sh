@@ -28,6 +28,7 @@ inspect)
   "org.opencontainers.image.gemini_cli_version":"0.35.0",
   "org.opencontainers.image.grok_cli_version":"0.2.90",
   "org.opencontainers.image.kimi_code_version":"0.28.0",
+  "org.opencontainers.image.opencode_version":"1.18.14",
   "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
@@ -105,6 +106,7 @@ case "$url" in
 */-/package/@google/gemini-cli/dist-tags)        echo '{"latest":"0.35.3"}' ;;
 */-/package/@xai-official/grok/dist-tags)        echo '{"latest":"0.2.93"}' ;;
 */-/package/@moonshot-ai/kimi-code/dist-tags)    echo '{"latest":"0.28.0"}' ;;
+*/-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
 *registry.npmjs.org/@anthropic-ai%2fclaude-code) echo '{"time":{"2.1.87":"2026-03-29T01:40:00Z"}}' ;;
@@ -113,6 +115,7 @@ case "$url" in
 *registry.npmjs.org/@google%2fgemini-cli)        echo '{"time":{"0.35.3":"2026-03-28T03:17:00Z"}}' ;;
 *registry.npmjs.org/@xai-official%2fgrok)        echo '{"time":{"0.2.93":"2026-07-01T00:00:00Z"}}' ;;
 *registry.npmjs.org/@moonshot-ai%2fkimi-code)    echo '{"time":{"0.28.0":"2026-07-10T00:00:00Z"}}' ;;
+*registry.npmjs.org/opencode-ai)                 echo '{"time":{"1.18.14":"2026-08-01T00:00:00Z"}}' ;;
 *registry.npmjs.org/playwright)                  echo '{"time":{"1.60.0":"2026-05-14T08:00:00Z"}}' ;;
 *)
     echo "unexpected curl url: $url" >&2
@@ -361,6 +364,7 @@ case "$url" in
 */-/package/@google/gemini-cli/dist-tags)        echo '{"latest":"0.35.3"}' ;;
 */-/package/@xai-official/grok/dist-tags)        echo '{"latest":"0.2.93"}' ;;
 */-/package/@moonshot-ai/kimi-code/dist-tags)    echo '{"latest":"0.28.0"}' ;;
+*/-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
 *registry.npmjs.org/*)                           echo '{"time":{}}' ;;

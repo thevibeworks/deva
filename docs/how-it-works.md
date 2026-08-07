@@ -63,13 +63,14 @@ Default per-agent homes live under:
 ├── codex/
 ├── gemini/
 ├── grok/
-└── kimi/
+├── kimi/
+└── opencode/
 ```
 
 `--config-home` supports two layouts:
 
-- leaf home: `DIR/.claude`, `DIR/.claude.json`, `DIR/.codex`, `DIR/.gemini`, `DIR/.grok`, `DIR/.kimi-code`
-- deva root: `DIR/claude`, `DIR/codex`, `DIR/gemini`, `DIR/grok`, `DIR/kimi`
+- leaf home: `DIR/.claude`, `DIR/.claude.json`, `DIR/.codex`, `DIR/.gemini`, `DIR/.grok`, `DIR/.kimi-code`, or opencode's nested `DIR/.config/opencode` + `DIR/.local/share/opencode` + `DIR/.local/state/opencode`
+- deva root: `DIR/claude`, `DIR/codex`, `DIR/gemini`, `DIR/grok`, `DIR/kimi`, `DIR/opencode`
 
 `-Q` disables config-home resolution, autolink, and host config mounts entirely.
 
@@ -85,6 +86,7 @@ Examples:
 - Gemini default: `.gemini`
 - Grok default: `.grok/auth.json`
 - Kimi default: `.kimi-code` (device-code OAuth); api-key maps `KIMI_CODE_API_KEY` onto `KIMI_MODEL_*`
+- opencode default: the XDG trio with `auth.json` under `.local/share/opencode` (device-code OAuth); api-key passes `OPENCODE_API_KEY`, mounts nothing
 
 When non-default auth is active, deva mounts a blank overlay over the default credential file path so the agent cannot silently fall back to some unrelated OAuth state. That is the point of the overlay fix.
 
@@ -116,7 +118,7 @@ Persistent is default:
 
 - one default container shape per project
 - reused across runs
-- same workspace can run Claude, Codex, Gemini, Grok, and Kimi in the same container when mounts, config, and auth line up
+- same workspace can run Claude, Codex, Gemini, Grok, Kimi, and opencode in the same container when mounts, config, and auth line up
 - different volumes, explicit config homes, or auth modes create separate persistent containers
 
 Ephemeral with `--rm`:
