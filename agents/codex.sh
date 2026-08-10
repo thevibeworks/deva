@@ -84,7 +84,7 @@ agent_prepare() {
         DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
         DEVA_TRACE_ACTIVE=true
         setup_trace_ui_port
-        AGENT_COMMAND=("cctrace" "codex" "--no-open" "--" "${AGENT_COMMAND[@]:1}")
+        AGENT_COMMAND=("cctrace" "codex" "--no-open" "--port" "9317" "--" "${AGENT_COMMAND[@]:1}")
     fi
 
     DOCKER_ARGS+=("-p" "127.0.0.1:1455:1455")

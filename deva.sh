@@ -4370,15 +4370,21 @@ if [ "$EPHEMERAL_MODE" = false ]; then
 
     # Trace UI reachability is fixed at container create (port publish);
     # attaching to a container created without it cannot gain the mapping.
+    # announce_trace_ui refreshes DEVA_TRACE_UI_URL from the live mapping,
+    # so it must run before the exec env is assembled.
     announce_trace_ui existing
     announce_cloak_browser existing
     announce_cloak_vnc existing
 
+    _trace_exec_env=(-e "$_trace_env")
+    [ "${DEVA_TRACE_ACTIVE:-false}" = true ] && [ -n "${DEVA_TRACE_UI_URL:-}" ] && \
+        _trace_exec_env+=(-e "DEVA_TRACE_UI_URL=${DEVA_TRACE_UI_URL}")
+
     if [ "$AUTH_PROVISION_MODE" = true ]; then
-        docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
+        docker exec "${_trace_exec_env[@]}" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}" || true
         finish_auth_provision
     else
-        exec docker exec -e "$_trace_env" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
+        exec docker exec "${_trace_exec_env[@]}" "${DOCKER_TERMINAL_ARGS[@]}" "$CONTAINER_NAME" /usr/local/bin/docker-entrypoint.sh "${AGENT_COMMAND[@]}"
     fi
 else
     echo "Launching ${ACTIVE_AGENT} (ephemeral mode) via $(docker_image_ref)"
