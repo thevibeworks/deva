@@ -1882,21 +1882,70 @@ ${docker_line}"
 ${persist_line}
 - Container details are in DEVA_* environment variables."
 
-    local target
-    mkdir -p "$ws/.claude" 2>/dev/null || true
-    for target in "$ws/.claude/CLAUDE.md" "$ws/AGENTS.md"; do
-        if [ -f "$target" ] && grep -qF "$marker" "$target"; then
-            awk -v m="$marker" -v e="$end_marker" \
-                '$0==m{skip=1;next} $0==e{skip=0;next} !skip' \
-                "$target" > "${target}.deva.tmp" && mv "${target}.deva.tmp" "$target"
-        fi
+    # Heal legacy injections: deva used to append this block to AGENTS.md
+    # and .claude/CLAUDE.md — tracked team files — dirtying the repo on
+    # every launch and lying to host-side agents once committed. Strip the
+    # block; remove the file only when nothing else is left (deva made it).
+    local legacy
+    for legacy in "$ws/AGENTS.md" "$ws/.claude/CLAUDE.md"; do
+        [ -f "$legacy" ] && grep -qF "$marker" "$legacy" || continue
+        awk -v m="$marker" -v e="$end_marker" \
+            '$0==m{skip=1;next} $0==e{skip=0;next} !skip' \
+            "$legacy" > "${legacy}.deva.tmp" && mv "${legacy}.deva.tmp" "$legacy"
+        grep -q '[^[:space:]]' "$legacy" || rm -f "$legacy"
+    done
+    rmdir "$ws/.claude" 2>/dev/null || true
+
+    # Environment facts are per-launch state, not project knowledge: they
+    # belong in the personal, untracked memory layer. CLAUDE.local.md is
+    # Claude Code's native local memory file (loads alongside CLAUDE.md,
+    # meant to be gitignored) — the .env.local of memory files.
+    local target="$ws/CLAUDE.local.md"
+    if [ -f "$target" ] && grep -qF "$marker" "$target"; then
+        awk -v m="$marker" -v e="$end_marker" \
+            '$0==m{skip=1;next} $0==e{skip=0;next} !skip' \
+            "$target" > "${target}.deva.tmp" && mv "${target}.deva.tmp" "$target"
+    fi
+    {
+        [ -s "$target" ] && printf '\n'
+        printf '%s\n' "$marker"
+        printf '%s\n' "$context"
+        printf '%s\n' "$end_marker"
+    } >> "$target"
+
+    # Cross-agent fallback: codex, grok, kimi and opencode read plain
+    # AGENTS.md (none of them read CLAUDE.local.md, and their override
+    # files SHADOW a team AGENTS.md rather than stack). Own one — marker
+    # block only, clone-local — but never when the workspace has a real
+    # team AGENTS.md: those agents then simply run without the container
+    # note. The healing pass above already deleted a deva-owned file, so
+    # a plain existence check is enough.
+    if [ ! -f "$ws/AGENTS.md" ]; then
         {
-            [ -s "$target" ] && printf '\n'
             printf '%s\n' "$marker"
             printf '%s\n' "$context"
             printf '%s\n' "$end_marker"
-        } >> "$target"
-    done
+        } > "$ws/AGENTS.md"
+        _exclude_from_git "$ws" "AGENTS.md"
+    fi
+
+    _exclude_from_git "$ws" "CLAUDE.local.md"
+}
+
+# Keep a deva-owned file out of version control without touching the
+# tracked .gitignore: append to the clone-local exclude file. --git-path
+# resolves correctly for worktrees and submodules; no-op outside a repo
+# or when the path is already ignored.
+_exclude_from_git() {
+    local ws="$1" name="$2"
+    command -v git >/dev/null 2>&1 || return 0
+    local exclude
+    exclude=$(git -C "$ws" rev-parse --git-path info/exclude 2>/dev/null || true)
+    [ -n "$exclude" ] || return 0
+    case "$exclude" in /*) ;; *) exclude="$ws/$exclude" ;; esac
+    git -C "$ws" check-ignore -q "$name" 2>/dev/null && return 0
+    mkdir -p "$(dirname "$exclude")" 2>/dev/null || true
+    printf '%s\n' "$name" >> "$exclude" 2>/dev/null || true
 }
 
 parse_ccx_args() {

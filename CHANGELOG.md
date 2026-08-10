@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identity as a launch flag, official CLIs stock, zero workflow tax
   (#536)
 
+## [0.18.2] - 2026-08-04
+
+### Changed
+- README restyled around the core value — the container is the sandbox,
+  mounts are the contract; 190 -> ~80 lines, bilingual
+  (README.zh-CN.md), animated terminal hero SVG echoing deva.sh (#533)
+- Agent CLI pins refreshed: cctrace 0.25.1, codex 0.146.0, gemini-cli
+  0.53.0, grok 0.2.114, kimi-code 0.30.0 (#517)
+
 ### Fixed
 - `--trace` UI dead on arrival with cctrace >= 0.36: its default port
   moved 9317 -> 8722, so the container bound 8722 while deva published
@@ -61,15 +70,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `http://127.0.0.1:9317` directly, checks `NetworkMode` on reattach);
   the real-mismatch warning now names the container and the exact
   `deva rm` command (#547)
-
-## [0.18.2] - 2026-08-04
-
-### Changed
-- README restyled around the core value — the container is the sandbox,
-  mounts are the contract; 190 -> ~80 lines, bilingual
-  (README.zh-CN.md), animated terminal hero SVG echoing deva.sh (#533)
-- Agent CLI pins refreshed: cctrace 0.25.1, codex 0.146.0, gemini-cli
-  0.53.0, grok 0.2.114, kimi-code 0.30.0 (#517)
+- Workspace context injection no longer dirties tracked memory files:
+  the container block used to be appended to `AGENTS.md` and
+  `.claude/CLAUDE.md` on every launch — phantom git diffs, committed
+  container context lying to host-side agents, and a circular-import
+  double-load. It now lands in `CLAUDE.local.md` (Claude Code's
+  native local memory file) plus a deva-owned `AGENTS.md` only when
+  the workspace has none (codex/grok/kimi/opencode read plain
+  AGENTS.md; their override variants shadow team files). Both are
+  auto-added to `.git/info/exclude`; legacy injected blocks are
+  stripped on next launch and marker-only files removed (#548)
 
 ## [0.18.1] - 2026-07-28
 

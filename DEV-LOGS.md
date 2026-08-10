@@ -13,6 +13,11 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-08-09] Dev Log: context injection moves to local files #548
+- Why: every launch appended the container block to tracked AGENTS.md/.claude/CLAUDE.md — phantom diffs, committed container-context lying to host agents, circular @imports triple-loading the block with contradictory persist lines.
+- What: inject_workspace_context now writes CLAUDE.local.md (Claude Code's sanctioned local memory, per official docs) + a deva-owned AGENTS.md only when the workspace has none (survey of codex/grok/kimi/opencode sources: all read plain AGENTS.md; AGENTS.override.md SHADOWS team files so it's unsafe to auto-write; kimi's .kimi-code/AGENTS.md is the only additive slot). Both excluded via .git/info/exclude (worktree-safe via rev-parse --git-path); legacy blocks healed on next launch, marker-only files removed. Repo's own polluted AGENTS.md rewritten (imports + block removed), untracked .claude/CLAUDE.md residue deleted.
+- Result: `git status` stays clean in every workspace. Open: gemini gets no context file (never did — reads only GEMINI.md).
+
 # [2026-08-09] Dev Log: --trace port pin, HOST_NET awareness, portless URL #547
 - Why: `--trace` was broken two ways — cctrace >= 0.36 binds 8722 while deva publishes 9317 (browser poll never connects), and HOST_NET=true makes `docker port` permanently empty (false "created without the trace port" warning on every reattach).
 - What: `cctrace --port 9317` pinned in all four traced agents; setup_trace_ui_port/announce_trace_ui detect host networking (skip -p, loopback URL, NetworkMode check on reattach); host PORT env honored (portless-style); portless `cctrace` alias registered per traced launch so the UI/dashboard live at a stable https://cctrace.localhost route (DEVA_TRACE_PORTLESS=0 opts out, DEVA_TRACE_URL overrides); DEVA_TRACE_UI_URL exported into the container on create AND reattach for the statusline trace chip.
