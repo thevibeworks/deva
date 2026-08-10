@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Stable trace URL via portless (vercel-labs): when the `portless` CLI
+  is on the host, `--trace` registers/refreshes the `cctrace` alias
+  for the published UI port and announces the routed URL — the live
+  UI and `/dashboard` are always at `https://cctrace.localhost`
+  regardless of which port the run landed on. Best-effort no-op
+  without portless; `DEVA_TRACE_PORTLESS=0` disables. A host `PORT`
+  env is also honored as the publish port (portless-wrapped runs),
+  and `DEVA_TRACE_URL` still overrides the announced URL outright.
+  `DEVA_TRACE_UI_URL` (the host-reachable UI URL) is now exported
+  into every traced container on create and reattach — contract for
+  the claude-code-statusline trace chip, which can't derive the host
+  port from container-side env (#547)
 - KIMI_WEBBRIDGE_VERSION as a managed pin: `make versions-up` and
   `make versions-pin` resolve Kimi WebBridge from
   cdn.kimi.com/webbridge/latest/version.json (no npm package; same
@@ -35,6 +47,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full-speed YOLO, host out of vendor code's reach, explicit boundary,
   identity as a launch flag, official CLIs stock, zero workflow tax
   (#536)
+
+### Fixed
+- `--trace` UI dead on arrival with cctrace >= 0.36: its default port
+  moved 9317 -> 8722, so the container bound 8722 while deva published
+  9317 and the poll-then-open never connected. All four traced agent
+  commands now pin `cctrace --port 9317`, which also keeps existing
+  containers' 9317 mappings valid (#547)
+- False "created without the trace port" warning on every traced
+  reattach under `HOST_NET=true`: host networking makes `-p` a docker
+  no-op and `docker port` permanently empty. Trace plumbing now
+  detects host networking (skips the publish, announces
+  `http://127.0.0.1:9317` directly, checks `NetworkMode` on reattach);
+  the real-mismatch warning now names the container and the exact
+  `deva rm` command (#547)
 
 ## [0.18.2] - 2026-08-04
 

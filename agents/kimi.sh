@@ -34,7 +34,7 @@ agent_prepare() {
         DOCKER_ARGS+=("-e" "DEVA_TRACE=1")
         DEVA_TRACE_ACTIVE=true
         setup_trace_ui_port
-        AGENT_COMMAND=("cctrace" "kimi" "--no-open" "--" "${AGENT_COMMAND[@]:1}")
+        AGENT_COMMAND=("cctrace" "kimi" "--no-open" "--port" "9317" "--" "${AGENT_COMMAND[@]:1}")
     fi
 
     setup_kimi_auth "$AUTH_METHOD"

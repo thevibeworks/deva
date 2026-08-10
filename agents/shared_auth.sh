@@ -249,22 +249,74 @@ filter_trace_flag() {
     done
 }
 
-# Publish the cctrace live UI (container port 9317, binds 0.0.0.0) to the
-# host loopback so the browser can reach it. Probe host ports from 9317 so
+# Publish the cctrace live UI to the host loopback so the browser can reach
+# it. cctrace is pinned to container port 9317 via --port (its 0.36+ default
+# moved to 8722; 9317 keeps existing containers' mappings valid). Host side:
+# honor $PORT when a portless-style router set it (portless assigns the port
+# and routes https://<name>.localhost to it), else probe from 9317 so
 # concurrent traced containers land on predictable neighbors (#425).
+# DEVA_TRACE_URL overrides the announced URL (e.g. the portless route name).
 DEVA_TRACE_UI_URL=""
+
+# Host networking makes -p a docker no-op and `docker port` permanently
+# empty — the container binds the host loopback directly, so the UI lives
+# at cctrace's pinned port with no publish at all.
+_trace_host_network_args() {
+    local joined=" ${DOCKER_ARGS[*]+"${DOCKER_ARGS[*]}"} ${EXTRA_DOCKER_ARGS[*]+"${EXTRA_DOCKER_ARGS[*]}"} "
+    case "$joined" in
+        *" --net host "* | *" --network host "* | *" --net=host "* | *" --network=host "*) return 0 ;;
+    esac
+    return 1
+}
+
+# Stable trace URL via portless (vercel-labs): register/refresh the
+# `cctrace` alias for the host-reachable UI port so the dashboard is
+# always at the same named URL (e.g. https://cctrace.localhost) no
+# matter which port this run landed on. Best-effort: silent no-op when
+# the portless CLI is absent or the proxy is down. Prints the routed
+# URL on success. DEVA_TRACE_PORTLESS=0 disables.
+_trace_portless_url() {
+    local port="$1"
+    [ "${DEVA_TRACE_PORTLESS:-1}" = "1" ] || return 1
+    command -v portless >/dev/null 2>&1 || return 1
+    portless alias cctrace "$port" >/dev/null 2>&1 || return 1
+    local url
+    url=$(portless get cctrace 2>/dev/null | head -1)
+    [ -n "$url" ] || return 1
+    printf '%s' "$url"
+}
+
+# Resolve the announced/exported UI URL for a host-reachable port.
+# Precedence: explicit DEVA_TRACE_URL > portless route > raw loopback.
+_trace_resolve_ui_url() {
+    local port="$1"
+    local routed=""
+    routed=$(_trace_portless_url "$port") || routed=""
+    printf '%s' "${DEVA_TRACE_URL:-${routed:-http://127.0.0.1:${port}}}"
+}
+
 setup_trace_ui_port() {
-    local port=9317
-    local tries=0
+    if _trace_host_network_args; then
+        DEVA_TRACE_UI_URL="$(_trace_resolve_ui_url 9317)"
+        DOCKER_ARGS+=("-e" "DEVA_TRACE_UI_URL=${DEVA_TRACE_UI_URL}")
+        return 0
+    fi
+
     local free_port=""
-    while [ "$tries" -lt 12 ]; do
-        if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-            free_port="$port"
-            break
-        fi
-        port=$((port + 1))
-        tries=$((tries + 1))
-    done
+    if [ -n "${PORT:-}" ] && [[ "${PORT}" =~ ^[0-9]{2,5}$ ]]; then
+        free_port="$PORT"
+    else
+        local port=9317
+        local tries=0
+        while [ "$tries" -lt 12 ]; do
+            if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+                free_port="$port"
+                break
+            fi
+            port=$((port + 1))
+            tries=$((tries + 1))
+        done
+    fi
 
     if [ -z "$free_port" ]; then
         echo "warning: no free host port in 9317-9328; trace UI will not be reachable from the host" >&2
@@ -272,7 +324,11 @@ setup_trace_ui_port() {
     fi
 
     DOCKER_ARGS+=("-p" "127.0.0.1:${free_port}:9317")
-    DEVA_TRACE_UI_URL="http://127.0.0.1:${free_port}"
+    DEVA_TRACE_UI_URL="$(_trace_resolve_ui_url "$free_port")"
+    # Host-reachable URL for in-container tooling (statusline trace chip):
+    # the container-side CCTRACE_SERVER_PORT is not the port the host
+    # browser can reach, this is.
+    DOCKER_ARGS+=("-e" "DEVA_TRACE_UI_URL=${DEVA_TRACE_UI_URL}")
 }
 
 # Print the trace UI URL before the TUI takes the screen, and open the host
@@ -284,15 +340,27 @@ announce_trace_ui() {
 
     local url="$DEVA_TRACE_UI_URL"
     if [ "${1:-new}" = "existing" ]; then
-        # docker port exits non-zero for unpublished mappings; under
-        # set -euo pipefail that must not kill the launch.
-        local mapping
-        mapping=$(docker port "$CONTAINER_NAME" 9317/tcp 2>/dev/null | head -1 || true)
-        if [ -z "$mapping" ]; then
-            echo "warning: trace UI not reachable — container was created without the trace port; recreate it (deva rm) or use --rm" >&2
-            return 0
+        # Host-network containers never have port mappings — the UI binds
+        # the host loopback directly at the pinned cctrace port.
+        local netmode
+        netmode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$CONTAINER_NAME" 2>/dev/null || true)
+        if [ "$netmode" = "host" ]; then
+            url="$(_trace_resolve_ui_url 9317)"
+        else
+            # docker port exits non-zero for unpublished mappings; under
+            # set -euo pipefail that must not kill the launch.
+            local mapping
+            mapping=$(docker port "$CONTAINER_NAME" 9317/tcp 2>/dev/null | head -1 || true)
+            if [ -z "$mapping" ]; then
+                echo "warning: trace UI not reachable — $CONTAINER_NAME was created without the trace port; recreate it (deva rm $CONTAINER_NAME) or use --rm" >&2
+                DEVA_TRACE_UI_URL=""  # don't hand a dead URL to in-container tooling
+                return 0
+            fi
+            url="$(_trace_resolve_ui_url "${mapping##*:}")"
         fi
-        url="http://127.0.0.1:${mapping##*:}"
+        # Live value wins over the create-time guess; the exec env carries
+        # it to in-container tooling (statusline trace chip).
+        DEVA_TRACE_UI_URL="$url"
     fi
     [ -n "$url" ] || return 0
 
@@ -317,7 +385,9 @@ maybe_open_trace_ui() {
     (
         local i=0
         while [ "$i" -lt 60 ]; do
-            if curl -sf -o /dev/null --max-time 1 "$url/" 2>/dev/null; then
+            # -k: portless https routes use a local CA curl may not trust;
+            # this is a loopback readiness probe, not a trust decision.
+            if curl -skf -o /dev/null --max-time 1 "$url/" 2>/dev/null; then
                 "$opener" "$url" >/dev/null 2>&1 || true
                 exit 0
             fi
