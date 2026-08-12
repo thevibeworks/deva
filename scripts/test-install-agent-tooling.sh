@@ -34,7 +34,7 @@ config)
     ;;
 install)
     mkdir -p "$DEVA_HOME/.npm-global/bin"
-    for bin in claude codex gemini grok kimi opencode; do
+    for bin in claude codex gemini grok kimi opencode pi; do
         cat >"$DEVA_HOME/.npm-global/bin/$bin" <<'BIN'
 #!/usr/bin/env bash
 case "$(basename "$0")" in
@@ -44,6 +44,7 @@ case "$(basename "$0")" in
   grok) echo "grok __GROK_CLI_VERSION__" ;;
   kimi) echo "__KIMI_CODE_VERSION__" ;;
   opencode) echo "__OPENCODE_VERSION__" ;;
+  pi) echo "__PI_CODING_AGENT_VERSION__" ;;
 esac
 BIN
         chmod +x "$DEVA_HOME/.npm-global/bin/$bin"
@@ -88,6 +89,7 @@ sed -i \
     -e "s#__GROK_CLI_VERSION__#$GROK_CLI_VERSION#g" \
     -e "s#__KIMI_CODE_VERSION__#$KIMI_CODE_VERSION#g" \
     -e "s#__OPENCODE_VERSION__#$OPENCODE_VERSION#g" \
+    -e "s#__PI_CODING_AGENT_VERSION__#$PI_CODING_AGENT_VERSION#g" \
     "$fake_bin/npm"
 
 cat >"$fake_bin/curl" <<'EOF'

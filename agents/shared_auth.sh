@@ -538,6 +538,9 @@ parse_auth_args() {
         opencode)
             supported_methods=(oauth api-key)
             ;;
+        pi)
+            supported_methods=(oauth api-key)
+            ;;
         *)
             auth_error "Unknown agent: $agent_name"
             ;;
@@ -606,6 +609,7 @@ parse_auth_args() {
             grok) auth_method="oauth" ;;
             kimi) auth_method="oauth" ;;
             opencode) auth_method="oauth" ;;
+            pi) auth_method="oauth" ;;
         esac
     fi
 

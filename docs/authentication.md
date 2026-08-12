@@ -23,6 +23,7 @@ This guide documents what `deva.sh` actually supports, what env vars it reads, a
 | Grok | `oauth` | `api-key` | `.grok/auth.json`, `XAI_API_KEY` |
 | Kimi | `oauth` | `api-key` | `.kimi-code` (device-code), `KIMI_CODE_API_KEY` -> `KIMI_MODEL_*` |
 | opencode | `oauth` | `api-key` | `.local/share/opencode/auth.json` (device-code), `OPENCODE_API_KEY` |
+| pi | `oauth` | `api-key` | `.pi/agent/auth.json` (in-app `/login`), provider env keys (`ANTHROPIC_API_KEY`, ...) |
 
 ## Claude
 
@@ -456,6 +457,47 @@ deva.sh opencode --auth-with api-key
 BYO provider keys (Anthropic, OpenAI, OpenRouter, ...) are opencode config,
 not deva auth methods — wire them with `-e` / `.deva` `ENV=` entries and
 opencode's own `opencode.jsonc`.
+
+## pi
+
+### Default: `--auth-with oauth`
+
+Mounts `~/.pi` — everything pi persists lives under `.pi/agent/`
+(auth.json, sessions, settings, trust.json; no XDG dirs). The mount stays
+writable on purpose: pi's OAuth tokens auto-refresh and it rewrites
+`auth.json` in place.
+
+First login has no browser: run `/login` inside the TUI. Claude Pro/Max
+and ChatGPT logins print a URL you open on any device and paste the
+redirect back; GitHub Copilot and xAI use device-code flows. Or log in on
+the host once; autolink carries `~/.pi` in.
+
+pi has no permission system at all — its own security doc says to run it
+in a contained environment, which is exactly what deva does. The only
+interactive gate is project trust (loading workspace `.pi/` settings and
+extensions); deva passes `--approve` so unattended runs never stall.
+`PI_SKIP_VERSION_CHECK=1` is set because the image pins the CLI
+(`PI_CODING_AGENT_VERSION`).
+
+### `--auth-with api-key`
+
+Inputs (at least one; all set keys travel — pi is multi-provider):
+
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`
+
+The keys travel as env only. This mode mounts nothing: pi's `auth.json`
+OUTRANKS env keys, so a mounted `~/.pi` could silently bill another
+account (same no-mount contract as grok/kimi/opencode api-key). A blank
+overlay hides `auth.json` even if a user `-v` carries a dir in. The
+container name is tagged from the first set key in the order above.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+deva.sh pi --auth-with api-key -- --provider anthropic
+```
+
+Provider/model selection (`--provider`, `--model`) is pi's own CLI
+surface — pass it after `--`.
 
 ## Config Homes And Auth Isolation
 

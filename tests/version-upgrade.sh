@@ -29,6 +29,7 @@ inspect)
   "org.opencontainers.image.grok_cli_version":"0.2.90",
   "org.opencontainers.image.kimi_code_version":"0.28.0",
   "org.opencontainers.image.opencode_version":"1.18.14",
+  "org.opencontainers.image.pi_coding_agent_version":"0.84.0",
   "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
@@ -107,6 +108,7 @@ case "$url" in
 */-/package/@xai-official/grok/dist-tags)        echo '{"latest":"0.2.93"}' ;;
 */-/package/@moonshot-ai/kimi-code/dist-tags)    echo '{"latest":"0.28.0"}' ;;
 */-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
+*/-/package/@earendil-works/pi-coding-agent/dist-tags) echo '{"latest":"0.84.1"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
 *cdn.kimi.com/webbridge/latest/version.json)     echo '{"version":"v1.12.0","binaries":{}}' ;;
@@ -117,6 +119,7 @@ case "$url" in
 *registry.npmjs.org/@xai-official%2fgrok)        echo '{"time":{"0.2.93":"2026-07-01T00:00:00Z"}}' ;;
 *registry.npmjs.org/@moonshot-ai%2fkimi-code)    echo '{"time":{"0.28.0":"2026-07-10T00:00:00Z"}}' ;;
 *registry.npmjs.org/opencode-ai)                 echo '{"time":{"1.18.14":"2026-08-01T00:00:00Z"}}' ;;
+*registry.npmjs.org/@earendil-works%2fpi-coding-agent) echo '{"time":{"0.84.1":"2026-08-07T00:00:00Z"}}' ;;
 *registry.npmjs.org/playwright)                  echo '{"time":{"1.60.0":"2026-05-14T08:00:00Z"}}' ;;
 *)
     echo "unexpected curl url: $url" >&2
@@ -178,6 +181,7 @@ for expected in \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg GROK_CLI_VERSION=0.2.93" \
     "--build-arg KIMI_CODE_VERSION=0.28.0" \
+    "--build-arg PI_CODING_AGENT_VERSION=0.84.1" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "--build-arg GO_VERSION=1.26.2"
@@ -196,6 +200,7 @@ for expected in \
     "--build-arg GEMINI_CLI_VERSION=0.35.3" \
     "--build-arg GROK_CLI_VERSION=0.2.93" \
     "--build-arg KIMI_CODE_VERSION=0.28.0" \
+    "--build-arg PI_CODING_AGENT_VERSION=0.84.1" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do
@@ -224,6 +229,7 @@ for expected in \
     "GEMINI_CLI_VERSION=0.35.3" \
     "GROK_CLI_VERSION=0.2.93" \
     "KIMI_CODE_VERSION=0.28.0" \
+    "PI_CODING_AGENT_VERSION=0.84.1" \
     "CCX_VERSION=v0.7.0" \
     "COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "PLAYWRIGHT_VERSION=1.60.0" \
@@ -367,6 +373,7 @@ case "$url" in
 */-/package/@xai-official/grok/dist-tags)        echo '{"latest":"0.2.93"}' ;;
 */-/package/@moonshot-ai/kimi-code/dist-tags)    echo '{"latest":"0.28.0"}' ;;
 */-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
+*/-/package/@earendil-works/pi-coding-agent/dist-tags) echo '{"latest":"0.84.1"}' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
 *cdn.kimi.com/webbridge/latest/version.json)     echo '{"version":"v1.12.0","binaries":{}}' ;;

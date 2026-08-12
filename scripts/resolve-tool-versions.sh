@@ -33,6 +33,7 @@ main() {
     resolve_tool "grok_cli_version" "grok-cli"
     resolve_tool "kimi_code_version" "kimi-code"
     resolve_tool "opencode_version" "opencode"
+    resolve_tool "pi_coding_agent_version" "pi"
     resolve_tool "ccx_version" "ccx"
     resolve_tool "copilot_api_version" "copilot-api"
 }

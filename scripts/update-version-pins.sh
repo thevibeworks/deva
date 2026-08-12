@@ -134,6 +134,7 @@ registry_tool() {
         GROK_CLI_VERSION)    echo "grok-cli" ;;
         KIMI_CODE_VERSION)   echo "kimi-code" ;;
         OPENCODE_VERSION)    echo "opencode" ;;
+        PI_CODING_AGENT_VERSION) echo "pi" ;;
         CCX_VERSION)         echo "ccx" ;;
         COPILOT_API_VERSION) echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)  echo "playwright" ;;
@@ -230,6 +231,7 @@ main() {
     pin "Grok CLI"       GROK_CLI_VERSION      npm  "@xai-official/grok"
     pin "Kimi Code"      KIMI_CODE_VERSION     npm  "@moonshot-ai/kimi-code"
     pin "opencode"       OPENCODE_VERSION      npm  "opencode-ai"
+    pin "pi"             PI_CODING_AGENT_VERSION npm "@earendil-works/pi-coding-agent"
     pin "CCX"            CCX_VERSION           git-tag  "https://github.com/thevibeworks/ccx.git"
     pin "Copilot API"    COPILOT_API_VERSION   git-commit  "https://github.com/ericc-ch/copilot-api.git" "refs/heads/master"
 
