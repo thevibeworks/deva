@@ -13,6 +13,11 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-08-12] Dev Log: pi as the 7th agent #552
+- Why: pi (earendil-works/pi, ex badlogic/pi-mono) is the cleanest container-fit yet — no permission system at all, its own security doc says "run it in a contained environment". Multi-provider harness rounds out the herd.
+- What: agents/pi.sh (oauth mounts ~/.pi rw — tokens auto-refresh; api-key passes provider env keys, mounts nothing, blank-overlays .pi/agent/auth.json which outranks env), deva.sh registration (auth tag, version label, mounts, autolink, status, env scrub of the 5 provider keys), image pin PI_CODING_AGENT_VERSION=0.84.1 (@earendil-works/pi-coding-agent, needs node >= 22.19 — NODE_MAJOR=22 covers it) through versions.env/Makefile/scripts/CI, scripts/test-pi-auth.sh (16 asserts). Trap dodged: @mariozechner scope is dead (moved to @earendil-works), and @mariozechner/pi is an unrelated vLLM tool.
+- Result: 7 agents. test-pi-auth 16/16, release-utils 67/67, tooling test green. --trace deferred (no cctrace pi profile).
+
 # [2026-08-09] Dev Log: context injection moves to local files #548
 - Why: every launch appended the container block to tracked AGENTS.md/.claude/CLAUDE.md — phantom diffs, committed container-context lying to host agents, circular @imports triple-loading the block with contradictory persist lines.
 - What: inject_workspace_context now writes CLAUDE.local.md (Claude Code's sanctioned local memory, per official docs) + a deva-owned AGENTS.md only when the workspace has none (survey of codex/grok/kimi/opencode sources: all read plain AGENTS.md; AGENTS.override.md SHADOWS team files so it's unsafe to auto-write; kimi's .kimi-code/AGENTS.md is the only additive slot). Both excluded via .git/info/exclude (worktree-safe via rev-parse --git-path); legacy blocks healed on next launch, marker-only files removed. Repo's own polluted AGENTS.md rewritten (imports + block removed), untracked .claude/CLAUDE.md residue deleted.

@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- pi (earendil-works/pi, the minimal multi-provider agent harness by
+  badlogic) as the 7th agent: `deva.sh pi` (#552). One dot-dir —
+  everything persists under `~/.pi/agent/` (auth.json, sessions,
+  settings, trust.json); default `oauth` mounts `~/.pi` writable
+  (tokens auto-refresh in place, first login via in-app `/login`);
+  `--auth-with api-key` passes the set provider env keys
+  (ANTHROPIC/OPENAI/GEMINI/XAI/OPENROUTER) and mounts nothing —
+  pi's auth.json outranks env keys, so the blank overlay guards the
+  default path. pi has no permission system by design (its security
+  doc: run it in a container); deva passes `--approve` for the one
+  interactive gate (project trust) and sets PI_SKIP_VERSION_CHECK=1
+  since the image pins `@earendil-works/pi-coding-agent`
+  (PI_CODING_AGENT_VERSION). `--trace` rejected until cctrace ships
+  a pi profile
 - Stable trace URL via portless (vercel-labs): when the `portless` CLI
   is on the host, `--trace` registers/refreshes the `cctrace` alias
   for the published UI port and announces the routed URL — the live

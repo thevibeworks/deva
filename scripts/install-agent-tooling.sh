@@ -10,6 +10,7 @@ set -euo pipefail
 : "${GROK_CLI_VERSION:?GROK_CLI_VERSION is required}"
 : "${KIMI_CODE_VERSION:?KIMI_CODE_VERSION is required}"
 : "${OPENCODE_VERSION:?OPENCODE_VERSION is required}"
+: "${PI_CODING_AGENT_VERSION:?PI_CODING_AGENT_VERSION is required}"
 
 CCTRACE_VERSION="${CCTRACE_VERSION:-0.4.0}"
 CCX_VERSION="${CCX_VERSION:-v0.7.0}"
@@ -139,7 +140,7 @@ install_npm_agent_tooling() {
     log "Installing npm agent tooling"
     log "Proxy config:"
     log_proxy_config
-    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION} kimi=${KIMI_CODE_VERSION} opencode=${OPENCODE_VERSION}"
+    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION} kimi=${KIMI_CODE_VERSION} opencode=${OPENCODE_VERSION} pi=${PI_CODING_AGENT_VERSION}"
 
     mkdir -p "$DEVA_HOME/.npm-global" "$DEVA_HOME/.local/bin"
     # opencode is XDG-native; pre-create its dirs as the deva user so docker
@@ -147,6 +148,9 @@ install_npm_agent_tooling() {
     mkdir -p "$DEVA_HOME/.config/opencode" \
         "$DEVA_HOME/.local/share/opencode" \
         "$DEVA_HOME/.local/state/opencode"
+    # pi keeps everything under ~/.pi/agent; pre-create it as the deva
+    # user for the same bind-mount-parent reason.
+    mkdir -p "$DEVA_HOME/.pi/agent"
     npm config set prefix "$DEVA_HOME/.npm-global"
     check_npm_registry_dns
 
@@ -158,6 +162,7 @@ install_npm_agent_tooling() {
         "@xai-official/grok@${GROK_CLI_VERSION}" \
         "@moonshot-ai/kimi-code@${KIMI_CODE_VERSION}" \
         "opencode-ai@${OPENCODE_VERSION}" \
+        "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
         || die "npm install failed"
 
     npm cache clean --force
@@ -173,7 +178,10 @@ install_npm_agent_tooling() {
     # opencode's npm bin is a node shim that execs the platform package
     # binary from node_modules (no self-update dir shadowing) — just verify.
     "$DEVA_HOME/.npm-global/bin/opencode" --version
-    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli @xai-official/grok @moonshot-ai/kimi-code opencode-ai || true)
+    # pi phones pi.dev for an update check on startup; skip it so the
+    # verify works in network-restricted builds.
+    PI_SKIP_VERSION_CHECK=1 "$DEVA_HOME/.npm-global/bin/pi" --version
+    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli @xai-official/grok @moonshot-ai/kimi-code opencode-ai @earendil-works/pi-coding-agent || true)
 }
 
 # grok's npm postinstall puts the real binary in ~/.grok/bin (the CLI's
