@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Layered help (#554): `--help` is now a one-screen summary (agents,
+  commands, common flags, examples) instead of the 130-line wall;
+  the full reference moved to `deva.sh help all`, and every
+  management command answers `deva.sh <cmd> --help` (also
+  `deva.sh help <cmd>`) with its own usage. Launch-path help
+  (`deva.sh claude --help`) still shows the global summary and
+  `-- --help` passthrough to the agent is untouched.
+  scripts/test-help-surface.sh pins the routing (24 asserts)
+
 ### Added
 - pi (earendil-works/pi, the minimal multi-provider agent harness by
   badlogic) as the 7th agent: `deva.sh pi` (#552). One dot-dir —

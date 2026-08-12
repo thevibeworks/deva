@@ -34,6 +34,9 @@ jobs:
           ./deva.sh --help
           ./claude-yolo --help
 
+      - name: Test help surface routing
+        run: ./scripts/test-help-surface.sh
+
       - name: Test version output
         run: |
           ./deva.sh --version
