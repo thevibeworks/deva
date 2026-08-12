@@ -113,6 +113,165 @@ usage() {
 deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi)
 
 Usage:
+  deva.sh [flags] [agent] [-- agent-flags]
+  deva.sh <command> [flags]
+
+Agents:
+  claude (default), codex, gemini, grok, kimi, opencode, pi
+
+Commands:
+  ps            List containers (current project; -g for all projects)
+  status        Inspect workspace: containers, mounts, agent homes
+  shell         Open a zsh shell in a container
+  stop          Stop container
+  rm            Remove container
+  clean         Remove all stopped containers
+  sessions      Browse agent sessions (ccx passthrough)
+  insight       Generate data report (ccx passthrough)
+  ccx           Run any ccx command inside a container
+  tmux          Host-side tmux bridge lifecycle
+
+Common flags:
+  --rm                    Ephemeral: remove container after exit
+  -g, --global            Management commands act across all projects
+  -v SRC:DEST[:OPT]       Mount an extra volume
+  -e VAR[=VALUE]          Pass env var into the container
+  -c, --config-home DIR   Alternate auth/config home
+  -p, --profile NAME      Image profile: base (default), rust, cloak
+  -Q, --quick             Bare mode: no config, no auth mounts, implies --rm
+  --auth-with METHOD      Non-default auth for the agent (docs/authentication.md)
+  --trace                 Wrap the agent with cctrace request tracing
+  --dry-run               Print the docker command without executing
+  --                      Everything after this goes to the agent unchanged
+
+Examples:
+  deva.sh                             # claude in a persistent container
+  deva.sh codex -- exec 'fix CI'      # one-shot codex task
+  deva.sh pi -Q -- --version          # clean ephemeral smoke check
+  deva.sh status                      # what's running, what's mounted
+
+Help:
+  deva.sh help all                    # full reference (every flag and mode)
+  deva.sh <command> --help            # command-specific help
+USAGE
+}
+
+usage_command() {
+    local mode="$1"
+    case "$mode" in
+    ps)
+        cat <<'USAGE'
+Usage: deva.sh ps [-g]
+
+List deva containers for this workspace.
+
+  -g, --global    List containers from all projects
+
+Example: deva.sh ps -g
+USAGE
+        ;;
+    status)
+        cat <<'USAGE'
+Usage: deva.sh status [-g] [--verbose]
+
+Inspect the workspace: containers, mounts, agent homes, health.
+
+  -g, --global    Include containers from all projects
+  --verbose       More detail per container
+
+Example: deva.sh status --verbose
+USAGE
+        ;;
+    shell)
+        cat <<'USAGE'
+Usage: deva.sh shell [-g]
+
+Open a zsh shell in a running container for inspection
+(picker when several match).
+
+  -g, --global    Choose among containers from all projects
+
+Example: deva.sh shell
+USAGE
+        ;;
+    stop)
+        cat <<'USAGE'
+Usage: deva.sh stop [-g]
+
+Stop a running container (picker when several match).
+
+  -g, --global    Choose among containers from all projects
+
+Example: deva.sh stop
+USAGE
+        ;;
+    rm)
+        cat <<'USAGE'
+Usage: deva.sh rm [-g] [--all]
+
+Remove a container (picker when several match).
+
+  -g, --global    Choose among containers from all projects
+  --all           Remove every container for this workspace
+
+Example: deva.sh rm --all
+USAGE
+        ;;
+    clean)
+        cat <<'USAGE'
+Usage: deva.sh clean [-g]
+
+Remove all stopped deva containers.
+
+  -g, --global    Clean across all projects
+
+Example: deva.sh clean -g
+USAGE
+        ;;
+    sessions)
+        cat <<'USAGE'
+Usage: deva.sh sessions [-g] [args...]
+
+Browse agent sessions. Passthrough: extra args go to `ccx sessions`
+inside the container.
+
+  -g, --global    Pick the container from all projects
+
+Example: deva.sh sessions --limit 10
+USAGE
+        ;;
+    insight)
+        cat <<'USAGE'
+Usage: deva.sh insight [args...]
+
+Generate a data report. Passthrough: extra args go to `ccx insight`
+inside the container.
+
+Example: deva.sh insight
+USAGE
+        ;;
+    ccx)
+        cat <<'USAGE'
+Usage: deva.sh ccx [-g] [cmd] [args...]
+
+Run any ccx command inside a container (raw passthrough).
+
+  -g, --global    Pick the container from all projects
+
+Example: deva.sh ccx sessions --limit 5
+USAGE
+        ;;
+    *)
+        usage
+        ;;
+    esac
+}
+
+usage_full() {
+    cat <<'USAGE'
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi)
+
+Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
   deva.sh [agent] [deva flags] [-- agent-flags]
   deva.sh <command>
@@ -237,6 +396,10 @@ Advanced:
   deva.sh kimi --trace                   # Trace kimi requests with cctrace
   deva.sh --show-config                  # Debug configuration
   deva.sh --no-docker claude             # Disable Docker-in-Docker auto-mount
+
+Help:
+  deva.sh --help                      # one-screen summary
+  deva.sh <command> --help            # command-specific help
 USAGE
 }
 
@@ -3634,12 +3797,20 @@ if [ "${PRE_ARGS[0]:-}" = "tmux" ]; then
     MANAGEMENT_MODE="tmux"
 fi
 
+# Help is routed AFTER this scan so `deva.sh ps --help` (and `help ps`)
+# can show the command's own usage — the same pass that sees the help
+# token also sets MANAGEMENT_MODE. `all` counts only after a help token,
+# so `deva.sh help all` works without stealing `all` as a bare word.
+HELP_REQUESTED=false
+HELP_ALL=false
 if [ ${#PRE_ARGS[@]} -gt 0 ] && [ "$MANAGEMENT_MODE" != "tmux" ]; then
     for tok in "${PRE_ARGS[@]}"; do
         case "$tok" in
         help | --help | -h)
-            usage
-            exit 0
+            HELP_REQUESTED=true
+            ;;
+        all)
+            [ "$HELP_REQUESTED" = true ] && HELP_ALL=true
             ;;
         --version)
             echo "deva.sh v${VERSION}"
@@ -3678,6 +3849,17 @@ if [ ${#PRE_ARGS[@]} -gt 0 ] && [ "$MANAGEMENT_MODE" != "tmux" ]; then
             ;;
         esac
     done
+fi
+
+if [ "$HELP_REQUESTED" = true ]; then
+    if [ "$HELP_ALL" = true ]; then
+        usage_full
+    elif [ "$MANAGEMENT_MODE" != "launch" ] && [ "$MANAGEMENT_MODE" != "show-config" ]; then
+        usage_command "$MANAGEMENT_MODE"
+    else
+        usage
+    fi
+    exit 0
 fi
 
 if [ "$MANAGEMENT_MODE" != "launch" ]; then

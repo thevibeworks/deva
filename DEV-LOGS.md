@@ -13,6 +13,11 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-08-12] Dev Log: layered help #554
+- Why: the help surface was one 130-line wall; `ps --help` printed the same wall; cloak VNC passwords sat next to -v. First shot of the framework-vnext wrapper-UX track (W1).
+- What: usage() split into a 43-line summary + usage_full() (`help all`) + usage_command() per management command. Routing rides the existing PRE_ARGS scan: help tokens set HELP_REQUESTED instead of exiting, so the same pass that sees --help already knows MANAGEMENT_MODE — `help ps`, `--help ps`, `ps --help` all converge; `all` only counts after a help token so it stays a free word otherwise. tmux untouched (dispatches before the scan); launch help stays global; sentinel passthrough proven untouched by dry-run assert.
+- Result: scripts/test-help-surface.sh 24/24, wired into CI Basic Tests. Port follows with a fixture re-pin (its serve.ts even has per-command help sitting dead behind the old interception).
+
 # [2026-08-12] Dev Log: pi as the 7th agent #552
 - Why: pi (earendil-works/pi, ex badlogic/pi-mono) is the cleanest container-fit yet — no permission system at all, its own security doc says "run it in a contained environment". Multi-provider harness rounds out the herd.
 - What: agents/pi.sh (oauth mounts ~/.pi rw — tokens auto-refresh; api-key passes provider env keys, mounts nothing, blank-overlays .pi/agent/auth.json which outranks env), deva.sh registration (auth tag, version label, mounts, autolink, status, env scrub of the 5 provider keys), image pin PI_CODING_AGENT_VERSION=0.84.1 (@earendil-works/pi-coding-agent, needs node >= 22.19 — NODE_MAJOR=22 covers it) through versions.env/Makefile/scripts/CI, scripts/test-pi-auth.sh (16 asserts). Trap dodged: @mariozechner scope is dead (moved to @earendil-works), and @mariozechner/pi is an unrelated vLLM tool.
