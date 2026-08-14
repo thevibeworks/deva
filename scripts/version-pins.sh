@@ -22,6 +22,7 @@ VERSION_PIN_VARS=(
     OPENCODE_VERSION
     PI_CODING_AGENT_VERSION
     DSH_VERSION
+    CURSOR_CLI_VERSION
     CCX_VERSION
     COPILOT_API_VERSION
     PLAYWRIGHT_VERSION
@@ -91,6 +92,11 @@ KIMI_CODE_VERSION=$KIMI_CODE_VERSION
 OPENCODE_VERSION=$OPENCODE_VERSION
 PI_CODING_AGENT_VERSION=$PI_CODING_AGENT_VERSION
 DSH_VERSION=$DSH_VERSION
+# Cursor CLI. Not on npm; cursor.com/install hardcodes the version and
+# offers no pin hook, but the download URL is deterministic:
+# downloads.cursor.com/lab/<version>/linux/<arch>/agent-cli-package.tar.gz
+# so the image fetches the tarball directly. Version format YYYY.MM.DD-hash.
+CURSOR_CLI_VERSION=$CURSOR_CLI_VERSION
 CCX_VERSION=$CCX_VERSION
 COPILOT_API_VERSION=$COPILOT_API_VERSION
 PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION

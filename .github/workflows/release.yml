@@ -55,6 +55,7 @@ jobs:
       opencode_version: ${{ steps.pins.outputs.opencode_version }}
       pi_coding_agent_version: ${{ steps.pins.outputs.pi_coding_agent_version }}
       dsh_version: ${{ steps.pins.outputs.dsh_version }}
+      cursor_cli_version: ${{ steps.pins.outputs.cursor_cli_version }}
       ccx_version: ${{ steps.pins.outputs.ccx_version }}
       copilot_api_version: ${{ steps.pins.outputs.copilot_api_version }}
       playwright_version: ${{ steps.pins.outputs.playwright_version }}
@@ -95,6 +96,7 @@ jobs:
           - opencode: \`${{ steps.pins.outputs.opencode_version }}\`
           - pi: \`${{ steps.pins.outputs.pi_coding_agent_version }}\`
           - dsh: \`${{ steps.pins.outputs.dsh_version }}\`
+          - cursor: \`${{ steps.pins.outputs.cursor_cli_version }}\`
           - ccx: \`${{ steps.pins.outputs.ccx_version }}\`
           - Copilot API: \`${{ steps.pins.outputs.copilot_api_version }}\`
           - Playwright: \`${{ steps.pins.outputs.playwright_version }}\`
@@ -163,6 +165,7 @@ jobs:
             OPENCODE_VERSION=${{ needs.load-version-pins.outputs.opencode_version }}
             PI_CODING_AGENT_VERSION=${{ needs.load-version-pins.outputs.pi_coding_agent_version }}
             DSH_VERSION=${{ needs.load-version-pins.outputs.dsh_version }}
+            CURSOR_CLI_VERSION=${{ needs.load-version-pins.outputs.cursor_cli_version }}
             CCX_VERSION=${{ needs.load-version-pins.outputs.ccx_version }}
             COPILOT_API_VERSION=${{ needs.load-version-pins.outputs.copilot_api_version }}
 
@@ -223,6 +226,7 @@ jobs:
             OPENCODE_VERSION=${{ needs.load-version-pins.outputs.opencode_version }}
             PI_CODING_AGENT_VERSION=${{ needs.load-version-pins.outputs.pi_coding_agent_version }}
             DSH_VERSION=${{ needs.load-version-pins.outputs.dsh_version }}
+            CURSOR_CLI_VERSION=${{ needs.load-version-pins.outputs.cursor_cli_version }}
             CCX_VERSION=${{ needs.load-version-pins.outputs.ccx_version }}
             PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
             RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}

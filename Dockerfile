@@ -216,6 +216,7 @@ ARG KIMI_CODE_VERSION=0.28.0
 ARG OPENCODE_VERSION=1.18.14
 ARG PI_CODING_AGENT_VERSION=0.84.1
 ARG DSH_VERSION=0.1.0-rc.6
+ARG CURSOR_CLI_VERSION=2026.08.11-e8db854
 
 # Record key tool versions as labels for quick inspection
 LABEL org.opencontainers.image.claude_code_version=${CLAUDE_CODE_VERSION}
@@ -226,6 +227,7 @@ LABEL org.opencontainers.image.kimi_code_version=${KIMI_CODE_VERSION}
 LABEL org.opencontainers.image.opencode_version=${OPENCODE_VERSION}
 LABEL org.opencontainers.image.pi_coding_agent_version=${PI_CODING_AGENT_VERSION}
 LABEL org.opencontainers.image.dsh_version=${DSH_VERSION}
+LABEL org.opencontainers.image.cursor_cli_version=${CURSOR_CLI_VERSION}
 
 ARG CCX_VERSION=v0.7.0
 

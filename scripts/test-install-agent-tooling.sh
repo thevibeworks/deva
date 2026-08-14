@@ -10,6 +10,8 @@ load_version_pins
 tmp_root="$(mktemp -d)"
 cleanup() {
     chmod 700 "$tmp_root/deny" 2>/dev/null || true
+    # install_cursor_agent strips the write bit from its versions dir
+    chmod -R u+w "$tmp_root" 2>/dev/null || true
     rm -rf "$tmp_root"
 }
 trap cleanup EXIT
@@ -120,6 +122,15 @@ case "$url" in
     *"/releases/download/"*)
         exit 22
         ;;
+    *"downloads.cursor.com/lab/"*)
+        tarball_dir="$(mktemp -d)"
+        mkdir -p "$tarball_dir/dist-package"
+        printf '#!/usr/bin/env bash\necho "__CURSOR_CLI_VERSION__"\n' \
+            >"$tarball_dir/dist-package/cursor-agent"
+        chmod +x "$tarball_dir/dist-package/cursor-agent"
+        tar -czf "$out" -C "$tarball_dir" dist-package
+        rm -rf "$tarball_dir"
+        ;;
     *"/skills/atl-cli/SKILL.md")
         printf '%s\n' '# fake atlas skill' >"$out"
         ;;
@@ -176,6 +187,7 @@ BIN
 chmod +x "$out"
 EOF
 
+sed -i -e "s#__CURSOR_CLI_VERSION__#$CURSOR_CLI_VERSION#g" "$fake_bin/curl"
 chmod +x "$fake_bin/npm" "$fake_bin/curl" "$fake_bin/go" "$fake_bin/bun"
 
 mkdir -p "$tmp_root/deny"
@@ -205,6 +217,12 @@ mkdir -p "$tmp_root/deny"
     test -L "$fake_home/.npm-global/bin/grok"
     [ "$(readlink "$fake_home/.npm-global/bin/grok")" = "$fake_home/.local/bin/grok" ]
     test ! -e "$fake_home/.grok/bin"
+    grep -F "Installing Cursor CLI pinned to $CURSOR_CLI_VERSION" <<<"$output" >/dev/null
+    grep -F "cursor-agent installed" <<<"$output" >/dev/null
+    test -x "$fake_home/.local/bin/cursor-agent"
+    [ "$("$fake_home/.local/bin/cursor-agent")" = "$CURSOR_CLI_VERSION" ]
+    # updater-starving write-bit strip
+    test ! -w "$fake_home/.local/share/cursor-agent/versions"
     grep -F "Installing ccx pinned to $CCX_VERSION" <<<"$output" >/dev/null
     grep -F "falling back to go install" <<<"$output" >/dev/null
     grep -F "ccx installed" <<<"$output" >/dev/null

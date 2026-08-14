@@ -25,6 +25,7 @@ This guide documents what `deva.sh` actually supports, what env vars it reads, a
 | opencode | `oauth` | `api-key` | `.local/share/opencode/auth.json` (device-code), `OPENCODE_API_KEY` |
 | pi | `oauth` | `api-key` | `.pi/agent/auth.json` (in-app `/login`), provider env keys (`ANTHROPIC_API_KEY`, ...) |
 | dsh | `credentials` | `api-key` | `.dsh/.credentials.yaml`, `DEEPSEEK_API_KEY` |
+| cursor | `oauth` | `api-key` | `.config/cursor/auth.json` (in-container login), `CURSOR_API_KEY` |
 
 ## Claude
 
@@ -542,6 +543,46 @@ deva.sh dsh --auth-with api-key
 Held back on purpose: dsh's plugin/marketplace surface is in flux
 (developer preview; the manifest format already broke pre-launch), so
 deva wires the TUI + skills dirs only.
+
+## Cursor
+
+### Default: `--auth-with oauth`
+
+Cursor state lives in the per-agent config home only
+(`~/.config/deva/cursor`): two canonical entries, `.cursor` (cli-config,
+per-project chats) and `.config/cursor` (auth.json — the CLI's Linux
+file store keeps auth there even when config lands in `.cursor`).
+
+Unlike every other agent there is NO host-dir autolink and no legacy
+`~/.cursor` fallback mount: host `~/.cursor` is the Cursor IDE's state
+dir (worktrees, per-project chats), not a CLI-only home, and macOS keeps
+CLI auth in the keychain — there is nothing portable to carry in.
+
+First login happens in the container: run `cursor-agent login` — deva
+sets `NO_OPEN_BROWSER=1` so the URL prints instead of trying to open a
+browser; open it anywhere, and auth.json persists in the mounted config
+home.
+
+YOLO is `--force` ("Run Everything"; `--yolo` is Cursor's own alias).
+The image pins the CLI (`CURSOR_CLI_VERSION`, fetched straight from the
+deterministic tarball URL — the installer script has no pin hook) and
+strips the write bit from the CLI's versions dir, which starves the
+silent startup self-update.
+
+### `--auth-with api-key`
+
+Input (required): `CURSOR_API_KEY`
+
+The key travels as env only; this mode mounts nothing, and a blank
+overlay hides `auth.json` even if a user `-v` carries a config dir in.
+
+```bash
+export CURSOR_API_KEY=key_...
+deva.sh cursor --auth-with api-key -- -p "fix CI"
+```
+
+Headless mode (`-p/--print`, `--output-format json|stream-json`) is
+Cursor's own CLI surface — pass it after `--`.
 
 ## Config Homes And Auth Isolation
 

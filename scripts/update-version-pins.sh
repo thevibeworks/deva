@@ -89,6 +89,7 @@ pin() {
         git-tag)    new_val=$(fetch_latest_git_tag "$1") || true ;;
         git-commit) new_val=$(fetch_latest_commit "$1" "$2") || true ;;
         webbridge)  new_val=$(_webbridge_cdn_latest) || true ;;
+        cursor)     new_val=$(_cursor_installer_latest) || true ;;
     esac
 
     # Clear fetching line
@@ -136,6 +137,7 @@ registry_tool() {
         OPENCODE_VERSION)    echo "opencode" ;;
         PI_CODING_AGENT_VERSION) echo "pi" ;;
         DSH_VERSION)         echo "dsh" ;;
+        CURSOR_CLI_VERSION)  echo "cursor" ;;
         CCX_VERSION)         echo "ccx" ;;
         COPILOT_API_VERSION) echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)  echo "playwright" ;;
@@ -234,6 +236,7 @@ main() {
     pin "opencode"       OPENCODE_VERSION      npm  "opencode-ai"
     pin "pi"             PI_CODING_AGENT_VERSION npm "@earendil-works/pi-coding-agent"
     pin "dsh"            DSH_VERSION           npm  "@deepseek-ai/dsh"
+    pin "cursor"         CURSOR_CLI_VERSION    cursor
     pin "CCX"            CCX_VERSION           git-tag  "https://github.com/thevibeworks/ccx.git"
     pin "Copilot API"    COPILOT_API_VERSION   git-commit  "https://github.com/ericc-ch/copilot-api.git" "refs/heads/master"
 
