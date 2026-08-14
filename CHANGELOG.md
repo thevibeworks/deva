@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-14
+
 ### Changed
 - Layered help (#554): `--help` is now a one-screen summary (agents,
   commands, common flags, examples) instead of the 130-line wall;
