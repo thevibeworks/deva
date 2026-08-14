@@ -30,6 +30,7 @@ That installs:
 - `agents/kimi.sh`
 - `agents/opencode.sh`
 - `agents/pi.sh`
+- `agents/dsh.sh`
 - `agents/shared_auth.sh`
 
 It also pulls `ghcr.io/thevibeworks/deva:latest`, with Docker Hub as fallback.
@@ -81,6 +82,7 @@ deva.sh grok
 deva.sh kimi
 deva.sh opencode
 deva.sh pi
+deva.sh dsh
 ```
 
 That is one of the main reasons this wrapper exists. You do not need a separate pet workflow for every vendor.
@@ -146,6 +148,14 @@ so api-key mode mounts nothing):
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 deva.sh pi --auth-with api-key
+```
+
+dsh with a DeepSeek API key (env outranks stored credentials, so
+api-key mode mounts nothing):
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
+deva.sh dsh --auth-with api-key
 ```
 
 More auth details live in [Authentication Guide](authentication.md).

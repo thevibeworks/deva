@@ -11,6 +11,7 @@ set -euo pipefail
 : "${KIMI_CODE_VERSION:?KIMI_CODE_VERSION is required}"
 : "${OPENCODE_VERSION:?OPENCODE_VERSION is required}"
 : "${PI_CODING_AGENT_VERSION:?PI_CODING_AGENT_VERSION is required}"
+: "${DSH_VERSION:?DSH_VERSION is required}"
 
 CCTRACE_VERSION="${CCTRACE_VERSION:-0.4.0}"
 CCX_VERSION="${CCX_VERSION:-v0.7.0}"
@@ -140,7 +141,7 @@ install_npm_agent_tooling() {
     log "Installing npm agent tooling"
     log "Proxy config:"
     log_proxy_config
-    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION} kimi=${KIMI_CODE_VERSION} opencode=${OPENCODE_VERSION} pi=${PI_CODING_AGENT_VERSION}"
+    log "Requested versions: claude=${CLAUDE_CODE_VERSION} codex=${CODEX_VERSION} gemini=${GEMINI_CLI_VERSION} grok=${GROK_CLI_VERSION} kimi=${KIMI_CODE_VERSION} opencode=${OPENCODE_VERSION} pi=${PI_CODING_AGENT_VERSION} dsh=${DSH_VERSION}"
 
     mkdir -p "$DEVA_HOME/.npm-global" "$DEVA_HOME/.local/bin"
     # opencode is XDG-native; pre-create its dirs as the deva user so docker
@@ -151,6 +152,8 @@ install_npm_agent_tooling() {
     # pi keeps everything under ~/.pi/agent; pre-create it as the deva
     # user for the same bind-mount-parent reason.
     mkdir -p "$DEVA_HOME/.pi/agent"
+    # dsh keeps everything under ~/.dsh ($DSH_HOME); same reason.
+    mkdir -p "$DEVA_HOME/.dsh"
     npm config set prefix "$DEVA_HOME/.npm-global"
     check_npm_registry_dns
 
@@ -163,6 +166,7 @@ install_npm_agent_tooling() {
         "@moonshot-ai/kimi-code@${KIMI_CODE_VERSION}" \
         "opencode-ai@${OPENCODE_VERSION}" \
         "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
+        "@deepseek-ai/dsh@${DSH_VERSION}" \
         || die "npm install failed"
 
     npm cache clean --force
@@ -181,7 +185,9 @@ install_npm_agent_tooling() {
     # pi phones pi.dev for an update check on startup; skip it so the
     # verify works in network-restricted builds.
     PI_SKIP_VERSION_CHECK=1 "$DEVA_HOME/.npm-global/bin/pi" --version
-    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli @xai-official/grok @moonshot-ai/kimi-code opencode-ai @earendil-works/pi-coding-agent || true)
+    # dsh has no updater and no phone-home; plain verify.
+    "$DEVA_HOME/.npm-global/bin/dsh" --version
+    (npm list -g --depth=0 @anthropic-ai/claude-code @openai/codex @google/gemini-cli @xai-official/grok @moonshot-ai/kimi-code opencode-ai @earendil-works/pi-coding-agent @deepseek-ai/dsh || true)
 }
 
 # grok's npm postinstall puts the real binary in ~/.grok/bin (the CLI's

@@ -135,6 +135,7 @@ registry_tool() {
         KIMI_CODE_VERSION)   echo "kimi-code" ;;
         OPENCODE_VERSION)    echo "opencode" ;;
         PI_CODING_AGENT_VERSION) echo "pi" ;;
+        DSH_VERSION)         echo "dsh" ;;
         CCX_VERSION)         echo "ccx" ;;
         COPILOT_API_VERSION) echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)  echo "playwright" ;;
@@ -232,6 +233,7 @@ main() {
     pin "Kimi Code"      KIMI_CODE_VERSION     npm  "@moonshot-ai/kimi-code"
     pin "opencode"       OPENCODE_VERSION      npm  "opencode-ai"
     pin "pi"             PI_CODING_AGENT_VERSION npm "@earendil-works/pi-coding-agent"
+    pin "dsh"            DSH_VERSION           npm  "@deepseek-ai/dsh"
     pin "CCX"            CCX_VERSION           git-tag  "https://github.com/thevibeworks/ccx.git"
     pin "Copilot API"    COPILOT_API_VERSION   git-commit  "https://github.com/ericc-ch/copilot-api.git" "refs/heads/master"
 

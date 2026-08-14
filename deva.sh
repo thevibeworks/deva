@@ -110,14 +110,14 @@ _step() {
 
 usage() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi, dsh)
 
 Usage:
   deva.sh [flags] [agent] [-- agent-flags]
   deva.sh <command> [flags]
 
 Agents:
-  claude (default), codex, gemini, grok, kimi, opencode, pi
+  claude (default), codex, gemini, grok, kimi, opencode, pi, dsh
 
 Commands:
   ps            List containers (current project; -g for all projects)
@@ -269,7 +269,7 @@ USAGE
 
 usage_full() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi, dsh)
 
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
@@ -376,6 +376,7 @@ Examples:
   deva.sh kimi                        # Launch kimi (oauth default; api-key via KIMI_CODE_API_KEY)
   deva.sh opencode                    # Launch opencode (oauth default; api-key via OPENCODE_API_KEY)
   deva.sh pi                          # Launch pi (oauth default; api-key via provider env keys)
+  deva.sh dsh                         # Launch dsh (credentials default; api-key via DEEPSEEK_API_KEY)
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -1108,7 +1109,7 @@ generate_auth_tag() {
     fi
 
     case "$agent:$auth_method" in
-        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth)
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials)
             printf '%s' "auth-default"
             return
             ;;
@@ -1135,6 +1136,7 @@ generate_auth_tag() {
                 opencode) key_val="${OPENCODE_API_KEY:-}" ;;
                 # first set key in pi.sh's PI_API_KEY_VARS order
                 pi)     key_val="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${GEMINI_API_KEY:-${XAI_API_KEY:-${OPENROUTER_API_KEY:-}}}}}" ;;
+                dsh)    key_val="${DEEPSEEK_API_KEY:-}" ;;
             esac
             if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
                 printf '%s' "api-key-${key_val: -4}"
@@ -1183,6 +1185,7 @@ agent_version_tag() {
         kimi) label="org.opencontainers.image.kimi_code_version" ;;
         opencode) label="org.opencontainers.image.opencode_version" ;;
         pi) label="org.opencontainers.image.pi_coding_agent_version" ;;
+        dsh) label="org.opencontainers.image.dsh_version" ;;
     esac
 
     local ver=""
@@ -1529,6 +1532,7 @@ categorize_mount() {
     elif [[ "$dest" == /home/deva/.claude* ]] || [[ "$dest" == /home/deva/.codex* ]] || \
          [[ "$dest" == /home/deva/.gemini* ]] || [[ "$dest" == /home/deva/.grok* ]] || \
          [[ "$dest" == /home/deva/.kimi-code* ]] || [[ "$dest" == /home/deva/.pi* ]] || \
+         [[ "$dest" == /home/deva/.dsh* ]] || \
          [[ "$dest" == /home/deva/.config/opencode* ]] || \
          [[ "$dest" == /home/deva/.local/share/opencode* ]] || [[ "$dest" == /home/deva/.local/state/opencode* ]] || \
          [ "$dest" = "/home/deva/.agents" ]; then
@@ -1914,7 +1918,7 @@ cmd_status() {
 
     if [ -d "$config_root" ]; then
         echo "Agent Homes ($(shorten_path "$config_root")):"
-        for agent_name in claude codex gemini grok kimi opencode pi; do
+        for agent_name in claude codex gemini grok kimi opencode pi dsh; do
             local agent_dir="$config_root/$agent_name"
             if [ -d "$agent_dir" ]; then
                 local canonical="" other_count=0 entry is_canonical
@@ -2494,6 +2498,17 @@ should_skip_env_for_auth() {
             ;;
         esac
         ;;
+    dsh)
+        # The key only travels when deva injects it (api-key mode). dsh
+        # resolves inherited env BEFORE ~/.dsh/.credentials.yaml, so a
+        # host key leaking into credentials mode would silently override
+        # the mounted credentials and bill the wrong account.
+        case "$name" in
+        DEEPSEEK_API_KEY)
+            return 0
+            ;;
+        esac
+        ;;
     esac
 
     return 1
@@ -2558,6 +2573,7 @@ agent_canonical_basenames() {
     # purpose (disposable models.json + self-update bin).
     opencode) printf '%s\n' '.config/opencode' '.local/share/opencode' '.local/state/opencode' ;;
     pi)     printf '%s\n' '.pi' ;;
+    dsh)    printf '%s\n' '.dsh' ;;
     *)      return 0 ;;
     esac
 }
@@ -2591,6 +2607,14 @@ opencode_api_key_no_mount() {
 # silently bill another account, so api-key mounts nothing.
 pi_api_key_no_mount() {
     [ "$ACTIVE_AGENT" = "pi" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
+}
+
+# dsh api-key contract: DEEPSEEK_API_KEY travels as env only. dsh reads
+# env before ~/.dsh/.credentials.yaml (no overlay needed -- the injected
+# key always wins); the mount stays out so host-arch pnpm trees under
+# profiles/ never cross the boundary.
+dsh_api_key_no_mount() {
+    [ "$ACTIVE_AGENT" = "dsh" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
 }
 
 # grok's self-updater writes Linux binaries into ~/.grok/bin and
@@ -2634,6 +2658,9 @@ mount_agent_canonical() {
         return 0
     fi
     if [ "$agent" = "pi" ] && pi_api_key_no_mount; then
+        return 0
+    fi
+    if [ "$agent" = "dsh" ] && dsh_api_key_no_mount; then
         return 0
     fi
 
@@ -2692,7 +2719,7 @@ has_auth_override() {
     # Non-default --auth-with
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials) ;;
             *) return 0 ;;
         esac
     fi
@@ -2707,6 +2734,7 @@ has_auth_override() {
         kimi)   auth_vars="KIMI_CODE_API_KEY KIMI_API_KEY" ;;
         opencode) auth_vars="OPENCODE_API_KEY" ;;
         pi)     auth_vars="ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY OPENROUTER_API_KEY" ;;
+        dsh)    auth_vars="DEEPSEEK_API_KEY" ;;
     esac
 
     local var
@@ -4123,7 +4151,7 @@ if [ "$CONFIG_HOME_AUTO" = true ]; then
 fi
 
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
-    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ] || [ -d "$CONFIG_HOME/opencode" ] || [ -d "$CONFIG_HOME/pi" ]; then
+    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ] || [ -d "$CONFIG_HOME/opencode" ] || [ -d "$CONFIG_HOME/pi" ] || [ -d "$CONFIG_HOME/dsh" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
         CONFIG_HOME=""
         CONFIG_HOME_AUTO=false
@@ -4208,6 +4236,17 @@ autolink_legacy_into_deva_root() {
         [ -d "$CONFIG_ROOT/pi/.pi" ] || [ -L "$CONFIG_ROOT/pi/.pi" ] || mkdir -p "$CONFIG_ROOT/pi/.pi"
     fi
 
+    if [ -d "$HOME/.dsh" ]; then
+        [ -d "$CONFIG_ROOT/dsh" ] || mkdir -p "$CONFIG_ROOT/dsh"
+        if [ ! -e "$CONFIG_ROOT/dsh/.dsh" ] && [ ! -L "$CONFIG_ROOT/dsh/.dsh" ]; then
+            ln -s "$HOME/.dsh" "$CONFIG_ROOT/dsh/.dsh"
+            echo "autolink: ~/.dsh -> $CONFIG_ROOT/dsh/.dsh" >&2
+        fi
+    fi
+    if [ -d "$CONFIG_ROOT" ]; then
+        [ -d "$CONFIG_ROOT/dsh/.dsh" ] || [ -L "$CONFIG_ROOT/dsh/.dsh" ] || mkdir -p "$CONFIG_ROOT/dsh/.dsh"
+    fi
+
     # opencode: XDG-native, so the legacy homes and the links are nested.
     local _oc_entry
     while IFS= read -r _oc_entry; do
@@ -4262,6 +4301,9 @@ if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
         ;;
     pi)
         [ -d "$CONFIG_HOME/.pi" ] || mkdir -p "$CONFIG_HOME/.pi"
+        ;;
+    dsh)
+        [ -d "$CONFIG_HOME/.dsh" ] || mkdir -p "$CONFIG_HOME/.dsh"
         ;;
     esac
 fi
@@ -4320,6 +4362,12 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ] && [ "$_config_ho
             echo "warning: $CONFIG_HOME/.pi/agent is empty; authentication will need to be set up" >&2
         fi
         ;;
+    dsh)
+        # .credentials.yaml at the top of .dsh is the one that matters.
+        if [ ! -f "$CONFIG_HOME/.dsh/.credentials.yaml" ]; then
+            echo "warning: $CONFIG_HOME/.dsh has no .credentials.yaml; authentication will need to be set up" >&2
+        fi
+        ;;
     esac
 fi
 
@@ -4358,7 +4406,7 @@ _step "agent_prepare"
 
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials) ;;
             *) _needs_rewrite=true ;;
         esac
 
@@ -4488,6 +4536,10 @@ else
         # pi api-key uses provider env keys (no mount); oauth wants ~/.pi rw.
         if [ -d "$HOME/.pi" ] && ! pi_api_key_no_mount; then
             DOCKER_ARGS+=("-v" "$HOME/.pi:/home/deva/.pi")
+        fi
+        # dsh api-key is env-only (no mount); credentials wants ~/.dsh rw.
+        if [ -d "$HOME/.dsh" ] && ! dsh_api_key_no_mount; then
+            DOCKER_ARGS+=("-v" "$HOME/.dsh:/home/deva/.dsh")
         fi
     fi
 fi

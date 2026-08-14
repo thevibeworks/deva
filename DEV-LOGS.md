@@ -13,6 +13,11 @@
 - Minimal markdown markers, no unnecessary formatting, minimal emojis.
 - Reference issue numbers in the format `#<issue-number>` for easy linking.
 
+# [2026-08-13] Dev Log: dsh as the 8th agent #556
+- Why: DeepSeek shipped its official harness (deepseek-ai/deepseek-harness) on launch day; developer preview with promised breaking changes is exactly what a container posture is for.
+- What: agents/dsh.sh (default `credentials` mounts ~/.dsh rw; api-key passes DEEPSEEK_API_KEY, mounts nothing — dsh resolves env BEFORE .credentials.yaml, reverse of pi, so no blank overlay and host-key scrub matters in credentials mode), deva.sh registration (auth tag, dsh_version label, mounts, autolink ~/.dsh, status, env scrub), DSH_PERMISSION_MODE=danger-full-access + DSH_HOME pinned at launch, image pin DSH_VERSION=0.1.0-rc.6 through versions.env/Makefile/scripts/CI, scripts/test-dsh-auth.sh (13 asserts). Traps dodged: DSH_HOME default is ~/.dsh not `~/n` (issue text was a docs misread); DSH_* is scrubbed from project-discovered env by dsh itself, so the permission mode must ride the invoking env — which deva's -e injection is; no updater exists, nothing to neutralize.
+- Result: 8 agents. test-dsh-auth 13/13, existing auth suites green. Skills interop (~/.agents/skills) works with the wiring claude already has. --trace deferred (no cctrace dsh profile); plugins surface held back on purpose.
+
 # [2026-08-12] Dev Log: layered help #554
 - Why: the help surface was one 130-line wall; `ps --help` printed the same wall; cloak VNC passwords sat next to -v. First shot of the framework-vnext wrapper-UX track (W1).
 - What: usage() split into a 43-line summary + usage_full() (`help all`) + usage_command() per management command. Routing rides the existing PRE_ARGS scan: help tokens set HELP_REQUESTED instead of exiting, so the same pass that sees --help already knows MANAGEMENT_MODE — `help ps`, `--help ps`, `ps --help` all converge; `all` only counts after a help token so it stays a free word otherwise. tmux untouched (dispatches before the scan); launch help stays global; sentinel passthrough proven untouched by dry-run assert.
