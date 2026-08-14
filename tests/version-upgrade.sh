@@ -31,6 +31,7 @@ inspect)
   "org.opencontainers.image.opencode_version":"1.18.14",
   "org.opencontainers.image.pi_coding_agent_version":"0.84.0",
   "org.opencontainers.image.dsh_version":"0.1.0-rc.5",
+  "org.opencontainers.image.cursor_cli_version":"2026.08.10-0000000",
   "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
@@ -111,6 +112,7 @@ case "$url" in
 */-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
 */-/package/@earendil-works/pi-coding-agent/dist-tags) echo '{"latest":"0.84.1"}' ;;
 */-/package/@deepseek-ai/dsh/dist-tags)          echo '{"latest":"0.1.0-rc.6"}' ;;
+*cursor.com/install)                             echo 'DOWNLOAD_URL="https://downloads.cursor.com/lab/2026.08.11-e8db854/linux/x64/agent-cli-package.tar.gz"' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
 *cdn.kimi.com/webbridge/latest/version.json)     echo '{"version":"v1.12.0","binaries":{}}' ;;
@@ -234,6 +236,7 @@ for expected in \
     "KIMI_CODE_VERSION=0.28.0" \
     "PI_CODING_AGENT_VERSION=0.84.1" \
     "DSH_VERSION=0.1.0-rc.6" \
+    "CURSOR_CLI_VERSION=2026.08.11-e8db854" \
     "CCX_VERSION=v0.7.0" \
     "COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "PLAYWRIGHT_VERSION=1.60.0" \
@@ -379,6 +382,7 @@ case "$url" in
 */-/package/opencode-ai/dist-tags)               echo '{"latest":"1.18.14"}' ;;
 */-/package/@earendil-works/pi-coding-agent/dist-tags) echo '{"latest":"0.84.1"}' ;;
 */-/package/@deepseek-ai/dsh/dist-tags)          echo '{"latest":"0.1.0-rc.6"}' ;;
+*cursor.com/install)                             echo 'DOWNLOAD_URL="https://downloads.cursor.com/lab/2026.08.11-e8db854/linux/x64/agent-cli-package.tar.gz"' ;;
 */-/package/playwright/dist-tags)                echo '{"latest":"1.60.0"}' ;;
 */-/package/cloakbrowser/dist-tags)              echo '{"latest":"0.6.0"}' ;;
 *cdn.kimi.com/webbridge/latest/version.json)     echo '{"version":"v1.12.0","binaries":{}}' ;;
