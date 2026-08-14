@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # update-version-pins.sh - Refresh shared version pins from upstream sources
 #
-# Verbose TUI with real-time fetch progress, grouped version comparison,
-# and optional changelog display for updated tools.
+# Concurrent fetches (capped background jobs) with a live TUI: each tool
+# goes pending -> checking -> done/failed in place. Non-TTY (CI) falls back
+# to plain ordered line output. Optional changelog display for updates.
 
 set -euo pipefail
 
@@ -16,6 +17,15 @@ DRY_RUN=0
 SHOW_CHANGELOG=0
 IS_TTY=0
 [[ -t 1 ]] && IS_TTY=1
+
+# Honor NO_COLOR; keep non-TTY output free of escapes entirely.
+if [[ -n ${NO_COLOR:-} || $IS_TTY -eq 0 ]]; then
+    RESET='' BOLD='' DIM='' RED='' GREEN='' YELLOW='' CYAN='' WHITE=''
+fi
+
+MAX_JOBS=8
+SPIN_FRAMES="|/-\\"
+DASH_RULE='──────────────────────────────────────────────────'
 
 N_UPDATED=0
 N_UNCHANGED=0
@@ -62,65 +72,250 @@ fetch_latest_commit() {
     git ls-remote "$1" "$2" 2>/dev/null | awk 'NR == 1 { print $1 }'
 }
 
-# ── Pin: fetch one version and display result ────────────────────────────
-# Usage: pin NAME VAR_NAME FETCH_TYPE [FETCH_ARGS...]
+# ── Pin table ────────────────────────────────────────────────────────────
+# GROUP|NAME|VAR|FETCH_TYPE[|FETCH_ARGS...]
+# Order here is the display and merge order; keep it stable.
 
-pin() {
-    local name=$1 var=$2 fetch_type=$3
-    shift 3
-    local old_val=${!var:-}
+PIN_TABLE=(
+    "Toolchains|Go|GO_VERSION|go"
+    "Toolchains|delta|DELTA_VERSION|git-tag|https://github.com/dandavison/delta.git"
+    "Agent CLIs|Claude Code|CLAUDE_CODE_VERSION|npm|@anthropic-ai/claude-code"
+    "Agent CLIs|cctrace|CCTRACE_VERSION|npm|@thevibeworks/cctrace"
+    "Agent CLIs|Codex|CODEX_VERSION|npm|@openai/codex"
+    "Agent CLIs|Gemini CLI|GEMINI_CLI_VERSION|npm|@google/gemini-cli"
+    "Agent CLIs|Grok CLI|GROK_CLI_VERSION|npm|@xai-official/grok"
+    "Agent CLIs|Kimi Code|KIMI_CODE_VERSION|npm|@moonshot-ai/kimi-code"
+    "Agent CLIs|opencode|OPENCODE_VERSION|npm|opencode-ai"
+    "Agent CLIs|pi|PI_CODING_AGENT_VERSION|npm|@earendil-works/pi-coding-agent"
+    "Agent CLIs|dsh|DSH_VERSION|npm|@deepseek-ai/dsh"
+    "Agent CLIs|cursor|CURSOR_CLI_VERSION|cursor"
+    "Agent CLIs|CCX|CCX_VERSION|git-tag|https://github.com/thevibeworks/ccx.git"
+    "Agent CLIs|Copilot API|COPILOT_API_VERSION|git-commit|https://github.com/ericc-ch/copilot-api.git|refs/heads/master"
+    "Browser Tools|Playwright|PLAYWRIGHT_VERSION|npm|playwright"
+    "Browser Tools|CloakBrowser|CLOAKBROWSER_WRAPPER_VERSION|npm|cloakbrowser"
+    "Browser Tools|Kimi WebBridge|KIMI_WEBBRIDGE_VERSION|webbridge"
+)
+
+# Parallel per-tool arrays, filled by init_table.
+T_NAME=() T_VAR=() T_TYPE=() T_ARG1=() T_ARG2=()
+T_OLD=() T_NEW=() T_STATE=()   # STATE: pending|running|fail|same|bump
+LAYOUT=()                      # render items: head1:G, head2:G, gap, tool:i
+TOTAL=0
+WORK_DIR=""
+RENDERED_LINES=0
+LAYOUT_POS=0
+FRAME=0
+
+init_table() {
+    local entry group name var ftype a1 a2 i=0 prev_group=""
+    for entry in "${PIN_TABLE[@]}"; do
+        IFS='|' read -r group name var ftype a1 a2 <<< "$entry"
+        T_NAME[i]=$name
+        T_VAR[i]=$var
+        T_TYPE[i]=$ftype
+        T_ARG1[i]=${a1:-}
+        T_ARG2[i]=${a2:-}
+        T_OLD[i]=${!var:-}
+        T_NEW[i]=""
+        T_STATE[i]=pending
+        if [[ $group != "$prev_group" ]]; then
+            if [[ -n $prev_group ]]; then
+                LAYOUT+=("gap" "head2:$group")
+            else
+                LAYOUT+=("head1:$group")
+            fi
+            prev_group=$group
+        fi
+        LAYOUT+=("tool:$i")
+        i=$((i + 1))
+    done
+    TOTAL=$i
+}
+
+# ── Background fetch job (always exits 0; empty value = failure) ─────────
+
+fetch_one() {
+    local idx=$1 ftype=$2 a1=$3 a2=$4
+    local val=""
+    case $ftype in
+        go)         val=$(fetch_go_version) || true ;;
+        npm)        val=$(fetch_npm_version "$a1") || true ;;
+        git-tag)    val=$(fetch_latest_git_tag "$a1") || true ;;
+        git-commit) val=$(fetch_latest_commit "$a1" "$a2") || true ;;
+        webbridge)  val=$(_webbridge_cdn_latest) || true ;;
+        cursor)     val=$(_cursor_installer_latest) || true ;;
+    esac
+    printf '%s' "$val" > "$WORK_DIR/$idx.val"
+    : > "$WORK_DIR/$idx.done"   # marker last: .val is complete once this exists
+}
+
+classify() {
+    local i=$1 val
+    val=$(<"$WORK_DIR/$i.val")
+    T_NEW[i]=$val
+    if [[ -z $val ]]; then
+        T_STATE[i]=fail
+    elif [[ $val == "${T_OLD[$i]}" ]]; then
+        T_STATE[i]=same
+    else
+        T_STATE[i]=bump
+    fi
+}
+
+# ── Display ──────────────────────────────────────────────────────────────
+
+tool_line() {
+    local i=$1 eol=${2:-}
+    local name=${T_NAME[$i]} old=${T_OLD[$i]} new=${T_NEW[$i]}
     local pad
     pad=$(printf '%-16s' "$name")
 
-    # Live progress (tty only -- overwritten when done)
-    if [[ $IS_TTY -eq 1 ]]; then
-        echo -en "  ${CYAN}│${RESET}  ${DIM}⟳  ${pad}  fetching...${RESET}"
+    local old_disp=$old new_disp=$new
+    if [[ ${T_TYPE[$i]} == "git-commit" ]]; then
+        old_disp="${old:0:7}"
+        new_disp="${new:0:7}"
     fi
 
-    # Fetch upstream. `|| true` is load-bearing: a failing command
-    # substitution in a plain assignment takes its exit status, and under
-    # `set -e` that aborts the whole run -- which would make the fetch-failed
-    # branch below unreachable and kill the soft-fail contract. One dead
-    # registry must degrade to a warning, not end the sweep.
-    local new_val=""
-    case $fetch_type in
-        go)         new_val=$(fetch_go_version) || true ;;
-        npm)        new_val=$(fetch_npm_version "$1") || true ;;
-        git-tag)    new_val=$(fetch_latest_git_tag "$1") || true ;;
-        git-commit) new_val=$(fetch_latest_commit "$1" "$2") || true ;;
-        webbridge)  new_val=$(_webbridge_cdn_latest) || true ;;
-        cursor)     new_val=$(_cursor_installer_latest) || true ;;
+    case ${T_STATE[$i]} in
+        pending)
+            echo -e "  ${CYAN}│${RESET}  ${DIM}.  ${pad}  waiting${RESET}${eol}"
+            ;;
+        running)
+            local spin=${SPIN_FRAMES:FRAME % 4:1}
+            echo -e "  ${CYAN}│${RESET}  ${DIM}${spin}  ${pad}  checking...${RESET}${eol}"
+            ;;
+        fail)
+            echo -e "  ${CYAN}│${RESET}  ${YELLOW}!${RESET}  ${WHITE}${pad}${RESET}  ${DIM}${old_disp:-?}${RESET}  ${YELLOW}(check failed)${RESET}${eol}"
+            ;;
+        same)
+            echo -e "  ${CYAN}│${RESET}  ${DIM}·  ${pad}  ${new_disp}  (up-to-date)${RESET}${eol}"
+            ;;
+        bump)
+            echo -e "  ${CYAN}│${RESET}  ${GREEN}▲${RESET}  ${WHITE}${pad}${RESET}  ${RED}${old_disp:-new}${RESET} ${DIM}->${RESET} ${GREEN}${new_disp}${RESET}${eol}"
+            ;;
     esac
+}
 
-    # Clear fetching line
+emit_layout_line() {
+    local item=$1 eol=${2:-}
+    case $item in
+        gap)
+            echo -e "  ${CYAN}│${RESET}${eol}"
+            ;;
+        head1:*|head2:*)
+            local corner="├─" group=${item#head?:} dashes
+            [[ $item == head1:* ]] && corner="┌─"
+            dashes=${DASH_RULE:0:48 - ${#group}}
+            echo -e "  ${CYAN}${corner}${BOLD} ${group} ${RESET}${CYAN}${dashes}${RESET}${eol}"
+            ;;
+        tool:*)
+            tool_line "${item#tool:}" "$eol"
+            ;;
+    esac
+}
+
+# TTY: redraw the whole block in place (\033[K clears line residue).
+render() {
+    local item
+    if [[ $RENDERED_LINES -gt 0 ]]; then
+        printf '\033[%dA' "$RENDERED_LINES"
+    fi
+    for item in "${LAYOUT[@]}"; do
+        emit_layout_line "$item" $'\033[K'
+    done
+    RENDERED_LINES=${#LAYOUT[@]}
+}
+
+# Non-TTY: print finished lines in table order as they become available.
+plain_flush() {
+    while [[ $LAYOUT_POS -lt ${#LAYOUT[@]} ]]; do
+        # Find the tool item this position leads up to; print the run of
+        # header/gap/tool items only once that tool has a final state.
+        local j=$LAYOUT_POS ti=""
+        while [[ $j -lt ${#LAYOUT[@]} ]]; do
+            if [[ ${LAYOUT[$j]} == tool:* ]]; then
+                ti=${LAYOUT[$j]#tool:}
+                break
+            fi
+            j=$((j + 1))
+        done
+        [[ -z $ti ]] && break
+        case ${T_STATE[$ti]} in
+            pending|running) return 0 ;;
+        esac
+        while [[ $LAYOUT_POS -le $j ]]; do
+            emit_layout_line "${LAYOUT[$LAYOUT_POS]}"
+            LAYOUT_POS=$((LAYOUT_POS + 1))
+        done
+    done
+}
+
+# ── Concurrent dispatcher ────────────────────────────────────────────────
+# Jobs only write per-tool files under WORK_DIR; versions.env is written
+# once, from the main shell, after a deterministic ordered merge.
+
+run_fetches() {
+    local next=0 running=0 finished=0 i
+    while [[ $finished -lt $TOTAL ]]; do
+        while [[ $next -lt $TOTAL && $running -lt $MAX_JOBS ]]; do
+            T_STATE[next]=running
+            fetch_one "$next" "${T_TYPE[$next]}" "${T_ARG1[$next]}" "${T_ARG2[$next]}" &
+            next=$((next + 1))
+            running=$((running + 1))
+        done
+        for (( i = 0; i < next; i++ )); do
+            if [[ ${T_STATE[$i]} == running && -f "$WORK_DIR/$i.done" ]]; then
+                classify "$i"
+                running=$((running - 1))
+                finished=$((finished + 1))
+            fi
+        done
+        if [[ $IS_TTY -eq 1 ]]; then
+            render
+            FRAME=$((FRAME + 1))
+        else
+            plain_flush
+        fi
+        if [[ $finished -lt $TOTAL ]]; then
+            sleep 0.12
+        fi
+    done
+    wait || true
+}
+
+# Deterministic ordered merge: counters, UPDATED_VARS, and pin variables
+# are applied in table order regardless of job completion order.
+tally_results() {
+    local i
+    for (( i = 0; i < TOTAL; i++ )); do
+        case ${T_STATE[$i]} in
+            fail)
+                N_FAILED=$((N_FAILED + 1))
+                ;;
+            same)
+                N_UNCHANGED=$((N_UNCHANGED + 1))
+                ;;
+            bump)
+                N_UPDATED=$((N_UPDATED + 1))
+                printf -v "${T_VAR[$i]}" '%s' "${T_NEW[$i]}"
+                UPDATED_VARS+=("${T_VAR[$i]}|${T_OLD[$i]}|${T_NEW[$i]}")
+                ;;
+        esac
+    done
+}
+
+cleanup() {
+    local pids
+    pids=$(jobs -p) || true
+    if [[ -n $pids ]]; then
+        # shellcheck disable=SC2086
+        kill $pids 2>/dev/null || true
+    fi
+    if [[ -n $WORK_DIR ]]; then
+        rm -rf "$WORK_DIR"
+    fi
     if [[ $IS_TTY -eq 1 ]]; then
-        echo -en "\r\033[K"
-    fi
-
-    # Fetch failed -- keep old value, warn
-    if [[ -z "$new_val" ]]; then
-        echo -e "  ${CYAN}│${RESET}  ${YELLOW}!${RESET}  ${WHITE}${pad}${RESET}  ${DIM}${old_val:-?}${RESET}  ${YELLOW}(fetch failed)${RESET}"
-        N_FAILED=$((N_FAILED + 1))
-        return
-    fi
-
-    # Update variable in caller's scope
-    printf -v "$var" '%s' "$new_val"
-
-    # Short hash for commits, semver for everything else
-    local old_disp=$old_val new_disp=$new_val
-    if [[ $fetch_type == "git-commit" ]]; then
-        old_disp="${old_val:0:7}"
-        new_disp="${new_val:0:7}"
-    fi
-
-    if [[ "$old_val" == "$new_val" ]]; then
-        echo -e "  ${CYAN}│${RESET}  ${DIM}·  ${pad}  ${new_disp}  (up-to-date)${RESET}"
-        N_UNCHANGED=$((N_UNCHANGED + 1))
-    else
-        echo -e "  ${CYAN}│${RESET}  ${GREEN}▲${RESET}  ${WHITE}${pad}${RESET}  ${RED}${old_disp:-new}${RESET} ${DIM}->${RESET} ${GREEN}${new_disp}${RESET}"
-        N_UPDATED=$((N_UPDATED + 1))
-        UPDATED_VARS+=("${var}|${old_val}|${new_val}")
+        printf '\033[?25h'
     fi
 }
 
@@ -209,6 +404,9 @@ done
 
 main() {
     load_version_pins
+    init_table
+    WORK_DIR=$(mktemp -d)
+    trap cleanup EXIT
 
     echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
     echo -e "${CYAN}${BOLD}║  Refreshing Version Pins                         ║${RESET}"
@@ -217,36 +415,14 @@ main() {
     [[ $DRY_RUN -eq 1 ]] && echo -e "${YELLOW}(dry run)${RESET}"
     echo ""
 
-    # ── Toolchains ───────────────────────────────────────────────────────
-    echo -e "  ${CYAN}┌─${BOLD} Toolchains ${RESET}${CYAN}──────────────────────────────────────${RESET}"
-
-    pin "Go"             GO_VERSION       go
-    pin "delta"          DELTA_VERSION    git-tag  "https://github.com/dandavison/delta.git"
-
-    # ── Agent CLIs ───────────────────────────────────────────────────────
-    echo -e "  ${CYAN}│${RESET}"
-    echo -e "  ${CYAN}├─${BOLD} Agent CLIs ${RESET}${CYAN}──────────────────────────────────────${RESET}"
-
-    pin "Claude Code"    CLAUDE_CODE_VERSION   npm  "@anthropic-ai/claude-code"
-    pin "cctrace"        CCTRACE_VERSION       npm  "@thevibeworks/cctrace"
-    pin "Codex"          CODEX_VERSION         npm  "@openai/codex"
-    pin "Gemini CLI"     GEMINI_CLI_VERSION    npm  "@google/gemini-cli"
-    pin "Grok CLI"       GROK_CLI_VERSION      npm  "@xai-official/grok"
-    pin "Kimi Code"      KIMI_CODE_VERSION     npm  "@moonshot-ai/kimi-code"
-    pin "opencode"       OPENCODE_VERSION      npm  "opencode-ai"
-    pin "pi"             PI_CODING_AGENT_VERSION npm "@earendil-works/pi-coding-agent"
-    pin "dsh"            DSH_VERSION           npm  "@deepseek-ai/dsh"
-    pin "cursor"         CURSOR_CLI_VERSION    cursor
-    pin "CCX"            CCX_VERSION           git-tag  "https://github.com/thevibeworks/ccx.git"
-    pin "Copilot API"    COPILOT_API_VERSION   git-commit  "https://github.com/ericc-ch/copilot-api.git" "refs/heads/master"
-
-    # ── Browser Tools ────────────────────────────────────────────────────
-    echo -e "  ${CYAN}│${RESET}"
-    echo -e "  ${CYAN}├─${BOLD} Browser Tools ${RESET}${CYAN}───────────────────────────────────${RESET}"
-
-    pin "Playwright"     PLAYWRIGHT_VERSION            npm  "playwright"
-    pin "CloakBrowser"   CLOAKBROWSER_WRAPPER_VERSION  npm  "cloakbrowser"
-    pin "Kimi WebBridge" KIMI_WEBBRIDGE_VERSION        webbridge
+    if [[ $IS_TTY -eq 1 ]]; then
+        printf '\033[?25l'
+    fi
+    run_fetches
+    if [[ $IS_TTY -eq 1 ]]; then
+        printf '\033[?25h'
+    fi
+    tally_results
 
     # ── Summary footer ───────────────────────────────────────────────────
     echo -e "  ${CYAN}│${RESET}"
