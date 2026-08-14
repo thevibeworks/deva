@@ -1,6 +1,6 @@
 # deva.sh
 
-> Docker-first launcher for AI coding agents — Claude Code, Codex, Gemini, Grok, Kimi, opencode, pi, and dsh.
+> Docker-first launcher for AI coding agents — Claude Code, Codex, Gemini, Grok, Kimi, opencode, pi, dsh, and Cursor.
 > The container is the sandbox, mounts are the explicit contract, and one warm
 > project container serves all six agents. A bash script, not a framework. MIT.
 
@@ -11,8 +11,9 @@ are disabled by design — isolation comes from Docker, not permission theater:
 `claude --dangerously-skip-permissions`,
 `codex --dangerously-bypass-approvals-and-sandbox`,
 `gemini --yolo`, `grok --always-approve`, `kimi --yolo`, opencode via
-`OPENCODE_PERMISSION` allow-all, pi (no permission system by design), and
-dsh via `DSH_PERMISSION_MODE=danger-full-access`. Auth
+`OPENCODE_PERMISSION` allow-all, pi (no permission system by design),
+dsh via `DSH_PERMISSION_MODE=danger-full-access`, and cursor via
+`--force`. Auth
 lives in per-agent config homes under `~/.config/deva/` with OAuth (default) or
 API-key modes per agent, switchable per run (`--auth-with`, `--config-home`) so
 accounts and billing modes swap without touching project or session state;
@@ -35,6 +36,7 @@ deva.sh kimi
 deva.sh opencode
 deva.sh pi
 deva.sh dsh
+deva.sh cursor
 deva.sh claude -p cloak # stealth-browser image (CloakBrowser, headed Xvfb)
 deva.sh claude --debug --dry-run   # inspect the docker run before trusting it
 ```

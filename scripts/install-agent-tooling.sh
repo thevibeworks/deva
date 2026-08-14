@@ -12,6 +12,7 @@ set -euo pipefail
 : "${OPENCODE_VERSION:?OPENCODE_VERSION is required}"
 : "${PI_CODING_AGENT_VERSION:?PI_CODING_AGENT_VERSION is required}"
 : "${DSH_VERSION:?DSH_VERSION is required}"
+: "${CURSOR_CLI_VERSION:?CURSOR_CLI_VERSION is required}"
 
 CCTRACE_VERSION="${CCTRACE_VERSION:-0.4.0}"
 CCX_VERSION="${CCX_VERSION:-v0.7.0}"
@@ -317,6 +318,46 @@ install_ccx() {
     log "ccx installed"
 }
 
+# Cursor CLI is not on npm and its installer script offers no pin hook,
+# but the download URL is deterministic. Fetch the tarball directly and
+# lay it out the way the official installer does
+# (~/.local/share/cursor-agent/versions/<version>/), then strip the write
+# bit from the tree: the CLI schedules a silent self-update on startup
+# that writes new versions and tmp dirs there -- updaters fight pins.
+# Only the `cursor-agent` bin name is linked; the official installer also
+# squats `agent`, which is too generic for a container with nine CLIs.
+install_cursor_agent() {
+    ensure_safe_cwd
+    mkdir -p "$DEVA_HOME/.local/bin"
+
+    log "Installing Cursor CLI pinned to ${CURSOR_CLI_VERSION}"
+    local arch
+    case "$(uname -m)" in
+    x86_64) arch="x64" ;;
+    aarch64 | arm64) arch="arm64" ;;
+    *) die "Unsupported architecture for cursor: $(uname -m)" ;;
+    esac
+
+    local tmp_dir versions_dir target url
+    tmp_dir="$(mktemp -d)"
+    versions_dir="$DEVA_HOME/.local/share/cursor-agent/versions"
+    target="$versions_dir/${CURSOR_CLI_VERSION}"
+    url="https://downloads.cursor.com/lab/${CURSOR_CLI_VERSION}/linux/${arch}/agent-cli-package.tar.gz"
+
+    retry_cmd 3 "download cursor tarball" download_to "$url" "$tmp_dir/cursor.tar.gz" \
+        || die "cursor download failed: $url"
+    mkdir -p "$target"
+    tar -xzf "$tmp_dir/cursor.tar.gz" -C "$target" --strip-components=1
+    rm -rf "$tmp_dir"
+    [ -x "$target/cursor-agent" ] || die "cursor tarball missing cursor-agent"
+
+    ln -sf "$target/cursor-agent" "$DEVA_HOME/.local/bin/cursor-agent"
+    chmod a-w "$versions_dir" "$DEVA_HOME/.local/share/cursor-agent"
+
+    "$DEVA_HOME/.local/bin/cursor-agent" --version || die "cursor verification failed"
+    log "cursor-agent installed"
+}
+
 # cctrace ships no prebuilt binaries; compile the standalone binary with bun.
 # The compiled binary receives argv directly, so `cctrace -- <claude args>`
 # works (bun's CLI would eat the leading "--").
@@ -353,6 +394,7 @@ main() {
     case "$stage" in
         agents)
             install_npm_agent_tooling
+            install_cursor_agent
             install_ccx
             ;;
         cctrace)
@@ -360,6 +402,7 @@ main() {
             ;;
         all)
             install_npm_agent_tooling
+            install_cursor_agent
             install_ccx
             install_cctrace
             ;;

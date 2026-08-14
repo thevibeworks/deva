@@ -59,6 +59,7 @@ jobs:
       opencode_version: ${{ steps.versions.outputs.opencode_version }}
       pi_coding_agent_version: ${{ steps.versions.outputs.pi_coding_agent_version }}
       dsh_version: ${{ steps.versions.outputs.dsh_version }}
+      cursor_cli_version: ${{ steps.versions.outputs.cursor_cli_version }}
       ccx_version: ${{ steps.versions.outputs.ccx_version }}
       copilot_api_version: ${{ steps.versions.outputs.copilot_api_version }}
     steps:
@@ -90,6 +91,7 @@ jobs:
           - opencode: \`${{ steps.versions.outputs.opencode_version }}\`
           - pi: \`${{ steps.versions.outputs.pi_coding_agent_version }}\`
           - dsh: \`${{ steps.versions.outputs.dsh_version }}\`
+          - cursor: \`${{ steps.versions.outputs.cursor_cli_version }}\`
           - ccx: \`${{ steps.versions.outputs.ccx_version }}\`
           - Copilot API: \`${{ steps.versions.outputs.copilot_api_version }}\`
           - Stamp: \`${{ steps.versions.outputs.stamp }}\`
@@ -155,6 +157,7 @@ jobs:
             OPENCODE_VERSION=${{ needs.resolve-versions.outputs.opencode_version }}
             PI_CODING_AGENT_VERSION=${{ needs.resolve-versions.outputs.pi_coding_agent_version }}
             DSH_VERSION=${{ needs.resolve-versions.outputs.dsh_version }}
+            CURSOR_CLI_VERSION=${{ needs.resolve-versions.outputs.cursor_cli_version }}
             CCX_VERSION=${{ needs.resolve-versions.outputs.ccx_version }}
             COPILOT_API_VERSION=${{ needs.resolve-versions.outputs.copilot_api_version }}
 
@@ -213,6 +216,7 @@ jobs:
             OPENCODE_VERSION=${{ needs.resolve-versions.outputs.opencode_version }}
             PI_CODING_AGENT_VERSION=${{ needs.resolve-versions.outputs.pi_coding_agent_version }}
             DSH_VERSION=${{ needs.resolve-versions.outputs.dsh_version }}
+            CURSOR_CLI_VERSION=${{ needs.resolve-versions.outputs.cursor_cli_version }}
             CCX_VERSION=${{ needs.resolve-versions.outputs.ccx_version }}
             PLAYWRIGHT_VERSION=${{ needs.load-version-pins.outputs.playwright_version }}
             RUST_TOOLCHAINS=${{ needs.load-version-pins.outputs.rust_toolchains }}

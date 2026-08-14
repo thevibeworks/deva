@@ -42,6 +42,7 @@ KIMI_CODE_VERSION ?= 0.28.0
 OPENCODE_VERSION ?= 1.18.14
 PI_CODING_AGENT_VERSION ?= 0.84.1
 DSH_VERSION ?= 0.1.0-rc.6
+CURSOR_CLI_VERSION ?= 2026.08.11-e8db854
 CCX_VERSION ?= v0.1.4
 COPILOT_API_VERSION ?= 0ea08febdd7e3e055b03dd298bf57e669500b5c1
 PLAYWRIGHT_VERSION ?= 1.60.0
@@ -96,6 +97,7 @@ AGENT_BUILD_ARGS := \
 	--build-arg OPENCODE_VERSION=$(OPENCODE_VERSION) \
 	--build-arg PI_CODING_AGENT_VERSION=$(PI_CODING_AGENT_VERSION) \
 	--build-arg DSH_VERSION=$(DSH_VERSION) \
+	--build-arg CURSOR_CLI_VERSION=$(CURSOR_CLI_VERSION) \
 	--build-arg CCX_VERSION=$(CCX_VERSION)
 
 MAIN_BUILD_ARGS := $(TOOLCHAIN_BUILD_ARGS) $(AGENT_BUILD_ARGS) \
@@ -126,6 +128,7 @@ VERSION_QUERY_OVERRIDES := \
 	$(if $(filter command line environment environment\ override override,$(origin OPENCODE_VERSION)),OPENCODE_VERSION=$(OPENCODE_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin PI_CODING_AGENT_VERSION)),PI_CODING_AGENT_VERSION=$(PI_CODING_AGENT_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin DSH_VERSION)),DSH_VERSION=$(DSH_VERSION)) \
+	$(if $(filter command line environment environment\ override override,$(origin CURSOR_CLI_VERSION)),CURSOR_CLI_VERSION=$(CURSOR_CLI_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin CCX_VERSION)),CCX_VERSION=$(CCX_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin COPILOT_API_VERSION)),COPILOT_API_VERSION=$(COPILOT_API_VERSION)) \
 	$(if $(filter command line environment environment\ override override,$(origin PLAYWRIGHT_VERSION)),PLAYWRIGHT_VERSION=$(PLAYWRIGHT_VERSION)) \
@@ -175,10 +178,11 @@ build-main: build-network-check
 	 prev_opencode=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.opencode_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 prev_pi=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.pi_coding_agent_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 prev_dsh=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.dsh_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
+	 prev_cursor=$$(docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.cursor_cli_version" }}' $(MAIN_IMAGE) 2>/dev/null || true); \
 	 fmt() { v="$$1"; if [ -z "$$v" ] || [ "$$v" = "<no value>" ]; then echo "-"; else case "$$v" in v*) echo "$$v";; *) echo "v$$v";; esac; fi; }; \
-	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); curG=$$(fmt "$$prev_gemini"); curK=$$(fmt "$$prev_grok"); curKi=$$(fmt "$$prev_kimi"); curO=$$(fmt "$$prev_opencode"); curP=$$(fmt "$$prev_pi"); curD=$$(fmt "$$prev_dsh"); \
-	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); tgtG=$$(fmt "$(GEMINI_CLI_VERSION)"); tgtK=$$(fmt "$(GROK_CLI_VERSION)"); tgtKi=$$(fmt "$(KIMI_CODE_VERSION)"); tgtO=$$(fmt "$(OPENCODE_VERSION)"); tgtP=$$(fmt "$(PI_CODING_AGENT_VERSION)"); tgtD=$$(fmt "$(DSH_VERSION)"); \
-		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ] && [ "$$curG" = "$$tgtG" ] && [ "$$curK" = "$$tgtK" ] && [ "$$curKi" = "$$tgtKi" ] && [ "$$curO" = "$$tgtO" ] && [ "$$curP" = "$$tgtP" ] && [ "$$curD" = "$$tgtD" ]; then \
+	 curC=$$(fmt "$$prev_claude"); curX=$$(fmt "$$prev_codex"); curG=$$(fmt "$$prev_gemini"); curK=$$(fmt "$$prev_grok"); curKi=$$(fmt "$$prev_kimi"); curO=$$(fmt "$$prev_opencode"); curP=$$(fmt "$$prev_pi"); curD=$$(fmt "$$prev_dsh"); curCu=$$(fmt "$$prev_cursor"); \
+	 tgtC=$$(fmt "$(CLAUDE_CODE_VERSION)"); tgtX=$$(fmt "$(CODEX_VERSION)"); tgtG=$$(fmt "$(GEMINI_CLI_VERSION)"); tgtK=$$(fmt "$(GROK_CLI_VERSION)"); tgtKi=$$(fmt "$(KIMI_CODE_VERSION)"); tgtO=$$(fmt "$(OPENCODE_VERSION)"); tgtP=$$(fmt "$(PI_CODING_AGENT_VERSION)"); tgtD=$$(fmt "$(DSH_VERSION)"); tgtCu=$$(fmt "$(CURSOR_CLI_VERSION)"); \
+		 if [ "$$curC" = "$$tgtC" ] && [ "$$curX" = "$$tgtX" ] && [ "$$curG" = "$$tgtG" ] && [ "$$curK" = "$$tgtK" ] && [ "$$curKi" = "$$tgtKi" ] && [ "$$curO" = "$$tgtO" ] && [ "$$curP" = "$$tgtP" ] && [ "$$curD" = "$$tgtD" ] && [ "$$curCu" = "$$tgtCu" ]; then \
 		   echo "Claude: $$tgtC (no change)"; \
 		   echo "Codex:  $$tgtX (no change)"; \
 		   echo "Gemini: $$tgtG (no change)"; \
@@ -187,6 +191,7 @@ build-main: build-network-check
 		   echo "opencode: $$tgtO (no change)"; \
 		   echo "pi:     $$tgtP (no change)"; \
 		   echo "dsh:    $$tgtD (no change)"; \
+		   echo "cursor: $$tgtCu (no change)"; \
 		   echo "Already up-to-date"; \
 		 else \
 		   if [ "$$curC" = "$$tgtC" ]; then \
@@ -228,6 +233,11 @@ build-main: build-network-check
 		     echo "dsh:    $$tgtD (no change)"; \
 		   else \
 		     echo "dsh:    $$curD -> $$tgtD"; \
+		   fi; \
+		   if [ "$$curCu" = "$$tgtCu" ]; then \
+		     echo "cursor: $$tgtCu (no change)"; \
+		   else \
+		     echo "cursor: $$curCu -> $$tgtCu"; \
 		   fi; \
 		 fi
 	@echo "Hint: override via GO_VERSION=... CLAUDE_CODE_VERSION=... or run 'make versions-pin'"
@@ -530,6 +540,7 @@ help:
 	@echo "  OPENCODE_VERSION     opencode CLI version (default: $(OPENCODE_VERSION))"
 	@echo "  PI_CODING_AGENT_VERSION pi CLI version (default: $(PI_CODING_AGENT_VERSION))"
 	@echo "  DSH_VERSION          dsh CLI version (default: $(DSH_VERSION))"
+	@echo "  CURSOR_CLI_VERSION   Cursor CLI version (default: $(CURSOR_CLI_VERSION))"
 	@echo "  CCX_VERSION    Atlas CLI version (default: $(CCX_VERSION))"
 	@echo "  PLAYWRIGHT_VERSION   Playwright version (default: $(PLAYWRIGHT_VERSION))"
 	@echo "  CLOAKBROWSER_WRAPPER_VERSION CloakBrowser npm wrapper version (default: $(CLOAKBROWSER_WRAPPER_VERSION))"

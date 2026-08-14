@@ -31,6 +31,7 @@ That installs:
 - `agents/opencode.sh`
 - `agents/pi.sh`
 - `agents/dsh.sh`
+- `agents/cursor.sh`
 - `agents/shared_auth.sh`
 
 It also pulls `ghcr.io/thevibeworks/deva:latest`, with Docker Hub as fallback.
@@ -83,6 +84,7 @@ deva.sh kimi
 deva.sh opencode
 deva.sh pi
 deva.sh dsh
+deva.sh cursor
 ```
 
 That is one of the main reasons this wrapper exists. You do not need a separate pet workflow for every vendor.
@@ -156,6 +158,14 @@ api-key mode mounts nothing):
 ```bash
 export DEEPSEEK_API_KEY=sk-...
 deva.sh dsh --auth-with api-key
+```
+
+cursor with an API key (oauth default logs in inside the container —
+`cursor-agent login` prints the URL):
+
+```bash
+export CURSOR_API_KEY=key_...
+deva.sh cursor --auth-with api-key
 ```
 
 More auth details live in [Authentication Guide](authentication.md).

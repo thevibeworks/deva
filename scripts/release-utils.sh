@@ -34,6 +34,7 @@ TOOL_REGISTRY=(
     "opencode|npm|opencode-ai|org.opencontainers.image.opencode_version|https://www.npmjs.com/package/opencode-ai|github:anomalyco/opencode|agent|main"
     "pi|npm|@earendil-works/pi-coding-agent|org.opencontainers.image.pi_coding_agent_version|https://www.npmjs.com/package/@earendil-works/pi-coding-agent|github:earendil-works/pi|agent|main"
     "dsh|npm|@deepseek-ai/dsh|org.opencontainers.image.dsh_version|https://www.npmjs.com/package/@deepseek-ai/dsh|github:deepseek-ai/deepseek-harness|agent|main"
+    "cursor|cursor-installer|cursor.com/install|org.opencontainers.image.cursor_cli_version|https://cursor.com/docs/cli||agent|main"
     "ccx|github-release|thevibeworks/ccx|org.opencontainers.image.ccx_version|https://github.com/thevibeworks/ccx|github:thevibeworks/ccx|agent|main"
     "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
     "cctrace|npm|@thevibeworks/cctrace|org.opencontainers.image.cctrace_version|https://www.npmjs.com/package/@thevibeworks/cctrace|github:thevibeworks/cctrace|agent|main"
@@ -187,6 +188,13 @@ _npm_registry_latest() {
 
 # Kimi WebBridge has no npm package; the CDN's version-first layout
 # publishes a manifest at latest/version.json ({"version":"vX.Y.Z",...}).
+# Cursor's installer script hardcodes the current version (no API, no
+# npm). Parse it out of the deterministic download URL it embeds.
+_cursor_installer_latest() {
+    curl -fsSL --max-time 10 "https://cursor.com/install" 2>/dev/null | \
+        sed -n 's|.*downloads\.cursor\.com/lab/\([^/]*\)/.*|\1|p' | head -1
+}
+
 _webbridge_cdn_latest() {
     curl -fsSL --max-time 10 \
         "https://cdn.kimi.com/webbridge/latest/version.json" 2>/dev/null | \
@@ -207,6 +215,9 @@ fetch_latest_version() {
             ;;
         github-release)
             gh api "repos/$source/releases/latest" --jq '.tag_name' 2>/dev/null || echo ""
+            ;;
+        cursor-installer)
+            _cursor_installer_latest || echo ""
             ;;
         github-commit)
             local branch="master"
@@ -230,6 +241,10 @@ fetch_version_date() {
             ;;
         github-release)
             gh api "repos/$source/releases/tags/$version" --jq '.published_at' 2>/dev/null || echo ""
+            ;;
+        cursor-installer)
+            # The version encodes its own date: YYYY.MM.DD-hash.
+            printf '%sT00:00:00Z\n' "$(printf '%s' "${version%%-*}" | tr . -)"
             ;;
         github-commit)
             gh api "repos/$source/commits/$version" --jq '.commit.committer.date' 2>/dev/null || echo ""

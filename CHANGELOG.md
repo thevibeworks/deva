@@ -18,6 +18,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts/test-help-surface.sh pins the routing (24 asserts)
 
 ### Added
+- Cursor CLI (cursor-agent) as the 9th agent: `deva.sh cursor` (#557).
+  Pin story solved without the installer: cursor.com/install hardcodes
+  the version and has no pin hook, but the download URL is
+  deterministic, so the image fetches
+  downloads.cursor.com/lab/<CURSOR_CLI_VERSION>/linux/<arch>/… directly
+  and lays it out installer-style under
+  ~/.local/share/cursor-agent/versions/; the write bit is then stripped
+  from that tree, which starves the CLI's silent startup self-update
+  (updaters fight pins). Version format is YYYY.MM.DD-hash; `make
+  versions-up`/`versions-pin` resolve latest by parsing the installer
+  script (new cursor-installer registry type). Default `oauth` keeps
+  state in the per-agent config home only — deliberately NO host
+  ~/.cursor autolink or fallback mount: that dir is the Cursor IDE's
+  state (worktrees, per-project chats), and macOS keeps CLI auth in
+  the keychain, so there is nothing portable to carry in; first login
+  runs in-container (`cursor-agent login`, NO_OPEN_BROWSER=1 prints
+  the URL). Two canonical entries on Linux: `.cursor` (cli-config,
+  projects) + `.config/cursor` (auth.json — the file store keeps auth
+  there even when config lands in `.cursor`). `--auth-with api-key`
+  passes CURSOR_API_KEY env-only, mounts nothing, blank-overlays
+  auth.json. YOLO via `--force`; only the `cursor-agent` bin is linked
+  (the official installer also squats `agent` — too generic for a
+  container with nine CLIs). scripts/test-cursor-auth.sh (16 asserts).
+  `--trace` rejected until cctrace ships a cursor profile
 - dsh (deepseek-ai/deepseek-harness, DeepSeek's official agent harness,
   launched 2026-08-13) as the 8th agent: `deva.sh dsh` (#556). One
   dot-dir — everything persists under `~/.dsh` (`$DSH_HOME`, pinned by

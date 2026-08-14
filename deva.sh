@@ -110,14 +110,14 @@ _step() {
 
 usage() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi, dsh)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi, dsh, cursor)
 
 Usage:
   deva.sh [flags] [agent] [-- agent-flags]
   deva.sh <command> [flags]
 
 Agents:
-  claude (default), codex, gemini, grok, kimi, opencode, pi, dsh
+  claude (default), codex, gemini, grok, kimi, opencode, pi, dsh, cursor
 
 Commands:
   ps            List containers (current project; -g for all projects)
@@ -269,7 +269,7 @@ USAGE
 
 usage_full() {
     cat <<'USAGE'
-deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi, dsh)
+deva.sh - Docker-based multi-agent launcher (Claude, Codex, Gemini, Grok, Kimi, opencode, pi, dsh, cursor)
 
 Usage:
   deva.sh [deva flags] [agent] [-- agent-flags]
@@ -377,6 +377,7 @@ Examples:
   deva.sh opencode                    # Launch opencode (oauth default; api-key via OPENCODE_API_KEY)
   deva.sh pi                          # Launch pi (oauth default; api-key via provider env keys)
   deva.sh dsh                         # Launch dsh (credentials default; api-key via DEEPSEEK_API_KEY)
+  deva.sh cursor                      # Launch cursor (oauth default; api-key via CURSOR_API_KEY)
   deva.sh claude --rm                 # Ephemeral: deva-work-myapp-claude-12345
 
   # Container management (current project)
@@ -1109,7 +1110,7 @@ generate_auth_tag() {
     fi
 
     case "$agent:$auth_method" in
-        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials)
+        claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials|cursor:oauth)
             printf '%s' "auth-default"
             return
             ;;
@@ -1137,6 +1138,7 @@ generate_auth_tag() {
                 # first set key in pi.sh's PI_API_KEY_VARS order
                 pi)     key_val="${ANTHROPIC_API_KEY:-${OPENAI_API_KEY:-${GEMINI_API_KEY:-${XAI_API_KEY:-${OPENROUTER_API_KEY:-}}}}}" ;;
                 dsh)    key_val="${DEEPSEEK_API_KEY:-}" ;;
+                cursor) key_val="${CURSOR_API_KEY:-}" ;;
             esac
             if [ -n "$key_val" ] && [ ${#key_val} -ge 4 ]; then
                 printf '%s' "api-key-${key_val: -4}"
@@ -1186,6 +1188,7 @@ agent_version_tag() {
         opencode) label="org.opencontainers.image.opencode_version" ;;
         pi) label="org.opencontainers.image.pi_coding_agent_version" ;;
         dsh) label="org.opencontainers.image.dsh_version" ;;
+        cursor) label="org.opencontainers.image.cursor_cli_version" ;;
     esac
 
     local ver=""
@@ -1533,6 +1536,7 @@ categorize_mount() {
          [[ "$dest" == /home/deva/.gemini* ]] || [[ "$dest" == /home/deva/.grok* ]] || \
          [[ "$dest" == /home/deva/.kimi-code* ]] || [[ "$dest" == /home/deva/.pi* ]] || \
          [[ "$dest" == /home/deva/.dsh* ]] || \
+         [[ "$dest" == /home/deva/.cursor* ]] || [[ "$dest" == /home/deva/.config/cursor* ]] || \
          [[ "$dest" == /home/deva/.config/opencode* ]] || \
          [[ "$dest" == /home/deva/.local/share/opencode* ]] || [[ "$dest" == /home/deva/.local/state/opencode* ]] || \
          [ "$dest" = "/home/deva/.agents" ]; then
@@ -1918,7 +1922,7 @@ cmd_status() {
 
     if [ -d "$config_root" ]; then
         echo "Agent Homes ($(shorten_path "$config_root")):"
-        for agent_name in claude codex gemini grok kimi opencode pi dsh; do
+        for agent_name in claude codex gemini grok kimi opencode pi dsh cursor; do
             local agent_dir="$config_root/$agent_name"
             if [ -d "$agent_dir" ]; then
                 local canonical="" other_count=0 entry is_canonical
@@ -2509,6 +2513,16 @@ should_skip_env_for_auth() {
             ;;
         esac
         ;;
+    cursor)
+        # The key only travels when deva injects it (api-key mode); a
+        # host key or token leaking into oauth mode would enable API
+        # billing beside the subscription.
+        case "$name" in
+        CURSOR_API_KEY | CURSOR_AUTH_TOKEN)
+            return 0
+            ;;
+        esac
+        ;;
     esac
 
     return 1
@@ -2574,6 +2588,10 @@ agent_canonical_basenames() {
     opencode) printf '%s\n' '.config/opencode' '.local/share/opencode' '.local/state/opencode' ;;
     pi)     printf '%s\n' '.pi' ;;
     dsh)    printf '%s\n' '.dsh' ;;
+    # Two homes on Linux: cli-config/data in .cursor, auth.json in
+    # .config/cursor (the CLI's file store ignores CURSOR_CONFIG_DIR
+    # for auth). Both mount rw.
+    cursor) printf '%s\n' '.cursor' '.config/cursor' ;;
     *)      return 0 ;;
     esac
 }
@@ -2615,6 +2633,13 @@ pi_api_key_no_mount() {
 # profiles/ never cross the boundary.
 dsh_api_key_no_mount() {
     [ "$ACTIVE_AGENT" = "dsh" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
+}
+
+# cursor api-key contract: CURSOR_API_KEY travels as env only. A mounted
+# config home carries auth.json, which could silently bill another
+# account, so api-key mounts nothing and blank-overlays auth.json.
+cursor_api_key_no_mount() {
+    [ "$ACTIVE_AGENT" = "cursor" ] && [ "${AUTH_METHOD:-}" = "api-key" ]
 }
 
 # grok's self-updater writes Linux binaries into ~/.grok/bin and
@@ -2661,6 +2686,9 @@ mount_agent_canonical() {
         return 0
     fi
     if [ "$agent" = "dsh" ] && dsh_api_key_no_mount; then
+        return 0
+    fi
+    if [ "$agent" = "cursor" ] && cursor_api_key_no_mount; then
         return 0
     fi
 
@@ -2719,7 +2747,7 @@ has_auth_override() {
     # Non-default --auth-with
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials|cursor:oauth) ;;
             *) return 0 ;;
         esac
     fi
@@ -2735,6 +2763,7 @@ has_auth_override() {
         opencode) auth_vars="OPENCODE_API_KEY" ;;
         pi)     auth_vars="ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY OPENROUTER_API_KEY" ;;
         dsh)    auth_vars="DEEPSEEK_API_KEY" ;;
+        cursor) auth_vars="CURSOR_API_KEY" ;;
     esac
 
     local var
@@ -2792,6 +2821,11 @@ default_credential_target_path() {
         # explicit user -v/.deva VOLUME can still carry one in; auth.json
         # outranks env provider keys, so blank-overlay it anyway.
         printf '%s' "/home/deva/.pi/agent/auth.json"
+        ;;
+    cursor)
+        # Linux file store: auth.json under .config/cursor. api-key
+        # mounts nothing, but a user -v could carry a dir in.
+        printf '%s' "/home/deva/.config/cursor/auth.json"
         ;;
     *)
         return 1
@@ -4151,7 +4185,7 @@ if [ "$CONFIG_HOME_AUTO" = true ]; then
 fi
 
 if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ]; then
-    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ] || [ -d "$CONFIG_HOME/opencode" ] || [ -d "$CONFIG_HOME/pi" ] || [ -d "$CONFIG_HOME/dsh" ]; then
+    if [ -d "$CONFIG_HOME/claude" ] || [ -d "$CONFIG_HOME/codex" ] || [ -d "$CONFIG_HOME/gemini" ] || [ -d "$CONFIG_HOME/grok" ] || [ -d "$CONFIG_HOME/kimi" ] || [ -d "$CONFIG_HOME/opencode" ] || [ -d "$CONFIG_HOME/pi" ] || [ -d "$CONFIG_HOME/dsh" ] || [ -d "$CONFIG_HOME/cursor" ]; then
         CONFIG_ROOT="$CONFIG_HOME"
         CONFIG_HOME=""
         CONFIG_HOME_AUTO=false
@@ -4247,6 +4281,15 @@ autolink_legacy_into_deva_root() {
         [ -d "$CONFIG_ROOT/dsh/.dsh" ] || [ -L "$CONFIG_ROOT/dsh/.dsh" ] || mkdir -p "$CONFIG_ROOT/dsh/.dsh"
     fi
 
+    # cursor: no autolink on purpose. Host ~/.cursor is the Cursor IDE's
+    # state dir (worktrees, per-project chats), not a CLI-only home, and
+    # macOS keeps CLI auth in the keychain -- there is nothing portable
+    # to carry in. Scaffold empty homes; first login happens in-container.
+    if [ -d "$CONFIG_ROOT" ]; then
+        [ -d "$CONFIG_ROOT/cursor/.cursor" ] || [ -L "$CONFIG_ROOT/cursor/.cursor" ] || mkdir -p "$CONFIG_ROOT/cursor/.cursor"
+        [ -d "$CONFIG_ROOT/cursor/.config/cursor" ] || [ -L "$CONFIG_ROOT/cursor/.config/cursor" ] || mkdir -p "$CONFIG_ROOT/cursor/.config/cursor"
+    fi
+
     # opencode: XDG-native, so the legacy homes and the links are nested.
     local _oc_entry
     while IFS= read -r _oc_entry; do
@@ -4304,6 +4347,10 @@ if [ -n "$CONFIG_HOME" ] && [ "$DRY_RUN" != true ]; then
         ;;
     dsh)
         [ -d "$CONFIG_HOME/.dsh" ] || mkdir -p "$CONFIG_HOME/.dsh"
+        ;;
+    cursor)
+        [ -d "$CONFIG_HOME/.cursor" ] || mkdir -p "$CONFIG_HOME/.cursor"
+        [ -d "$CONFIG_HOME/.config/cursor" ] || mkdir -p "$CONFIG_HOME/.config/cursor"
         ;;
     esac
 fi
@@ -4368,6 +4415,12 @@ if [ "$CONFIG_HOME_FROM_CLI" = true ] && [ -n "$CONFIG_HOME" ] && [ "$_config_ho
             echo "warning: $CONFIG_HOME/.dsh has no .credentials.yaml; authentication will need to be set up" >&2
         fi
         ;;
+    cursor)
+        # auth.json under .config/cursor is the one that matters.
+        if [ ! -f "$CONFIG_HOME/.config/cursor/auth.json" ]; then
+            echo "warning: $CONFIG_HOME/.config/cursor has no auth.json; run 'cursor-agent login' inside the container" >&2
+        fi
+        ;;
     esac
 fi
 
@@ -4406,7 +4459,7 @@ _step "agent_prepare"
 
     if [ -n "${AUTH_METHOD:-}" ]; then
         case "${ACTIVE_AGENT}:${AUTH_METHOD}" in
-            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials) ;;
+            claude:claude|codex:chatgpt|gemini:oauth|gemini:gemini-app-oauth|grok:oauth|kimi:oauth|opencode:oauth|pi:oauth|dsh:credentials|cursor:oauth) ;;
             *) _needs_rewrite=true ;;
         esac
 
@@ -4541,6 +4594,8 @@ else
         if [ -d "$HOME/.dsh" ] && ! dsh_api_key_no_mount; then
             DOCKER_ARGS+=("-v" "$HOME/.dsh:/home/deva/.dsh")
         fi
+        # cursor: deliberately NO legacy ~/.cursor fallback -- that dir
+        # is the Cursor IDE's state, not a CLI home (see autolink note).
     fi
 fi
 _step "mount dispatch: done"
