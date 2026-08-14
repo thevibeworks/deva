@@ -15,6 +15,7 @@ ARG GROK_CLI_VERSION=0.2.93
 ARG KIMI_CODE_VERSION=0.28.0
 ARG OPENCODE_VERSION=1.18.14
 ARG PI_CODING_AGENT_VERSION=0.84.1
+ARG DSH_VERSION=0.1.0-rc.6
 ARG CCX_VERSION=v0.7.0
 ARG PLAYWRIGHT_VERSION=1.60.0
 ARG RUST_TOOLCHAINS="stable"
@@ -28,6 +29,7 @@ LABEL org.opencontainers.image.grok_cli_version=${GROK_CLI_VERSION}
 LABEL org.opencontainers.image.kimi_code_version=${KIMI_CODE_VERSION}
 LABEL org.opencontainers.image.opencode_version=${OPENCODE_VERSION}
 LABEL org.opencontainers.image.pi_coding_agent_version=${PI_CODING_AGENT_VERSION}
+LABEL org.opencontainers.image.dsh_version=${DSH_VERSION}
 LABEL org.opencontainers.image.ccx_version=${CCX_VERSION}
 LABEL org.opencontainers.image.playwright_version=${PLAYWRIGHT_VERSION}
 

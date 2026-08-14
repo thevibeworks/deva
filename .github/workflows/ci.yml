@@ -86,6 +86,7 @@ jobs:
             --build-arg KIMI_CODE_VERSION="${{ steps.pins.outputs.kimi_code_version }}" \
             --build-arg OPENCODE_VERSION="${{ steps.pins.outputs.opencode_version }}" \
             --build-arg PI_CODING_AGENT_VERSION="${{ steps.pins.outputs.pi_coding_agent_version }}" \
+            --build-arg DSH_VERSION="${{ steps.pins.outputs.dsh_version }}" \
             --build-arg CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             --build-arg COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             .
@@ -111,6 +112,7 @@ jobs:
             KIMI_CODE_VERSION="${{ steps.pins.outputs.kimi_code_version }}" \
             OPENCODE_VERSION="${{ steps.pins.outputs.opencode_version }}" \
             PI_CODING_AGENT_VERSION="${{ steps.pins.outputs.pi_coding_agent_version }}" \
+            DSH_VERSION="${{ steps.pins.outputs.dsh_version }}" \
             CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             PLAYWRIGHT_VERSION="${{ steps.pins.outputs.playwright_version }}" \
@@ -139,6 +141,7 @@ jobs:
           deva.sh kimi -Q -- --version
           deva.sh opencode -Q -- --version
           deva.sh pi -Q -- --version
+          deva.sh dsh -Q -- --version
 
       - name: Smoke Claude --chrome mount assembly
         shell: bash
@@ -207,6 +210,14 @@ jobs:
           DEVA_DOCKER_IMAGE=deva-smoke \
           DEVA_DOCKER_TAG=ci \
           ./scripts/test-pi-auth.sh
+
+      - name: Smoke dsh auth wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVA_DOCKER_IMAGE=deva-smoke \
+          DEVA_DOCKER_TAG=ci \
+          ./scripts/test-dsh-auth.sh
 
       - name: Smoke version targets
         shell: bash

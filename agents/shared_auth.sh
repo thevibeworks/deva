@@ -541,6 +541,9 @@ parse_auth_args() {
         pi)
             supported_methods=(oauth api-key)
             ;;
+        dsh)
+            supported_methods=(credentials api-key)
+            ;;
         *)
             auth_error "Unknown agent: $agent_name"
             ;;
@@ -610,6 +613,7 @@ parse_auth_args() {
             kimi) auth_method="oauth" ;;
             opencode) auth_method="oauth" ;;
             pi) auth_method="oauth" ;;
+            dsh) auth_method="credentials" ;;
         esac
     fi
 

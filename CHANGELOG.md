@@ -18,6 +18,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts/test-help-surface.sh pins the routing (24 asserts)
 
 ### Added
+- dsh (deepseek-ai/deepseek-harness, DeepSeek's official agent harness,
+  launched 2026-08-13) as the 8th agent: `deva.sh dsh` (#556). One
+  dot-dir — everything persists under `~/.dsh` (`$DSH_HOME`, pinned by
+  deva; the issue's `~/n` worry was a docs misread): .credentials.yaml,
+  settings.yaml, profiles/, skills/. Default `credentials` mounts
+  `~/.dsh` writable; `--auth-with api-key` passes DEEPSEEK_API_KEY as
+  env and mounts nothing — dsh reads env BEFORE .credentials.yaml
+  (reverse of pi), so the injected key always decides billing and no
+  blank overlay is needed; for the same reason a host key is scrubbed
+  from credentials-mode runs. Unattended posture via
+  DSH_PERMISSION_MODE=danger-full-access (env is the only switch; dsh
+  scrubs DSH_* from project env, so only deva's injection counts).
+  No updater to neutralize (plain npm distribution, no phone-home).
+  Skills interop free of charge: dsh reads ~/.agents/skills +
+  <project>/.agents/skills, the dirs deva already wires for claude.
+  Plugin/marketplace surface deliberately not wired (manifest format
+  in flux pre-launch). Pinned hard: @deepseek-ai/dsh@0.1.0-rc.6
+  (DSH_VERSION) — developer preview, every bump is a potential break;
+  nightly-images tracks drift. scripts/test-dsh-auth.sh (13 asserts).
+  `--trace` rejected until cctrace ships a dsh profile
 - pi (earendil-works/pi, the minimal multi-provider agent harness by
   badlogic) as the 7th agent: `deva.sh pi` (#552). One dot-dir —
   everything persists under `~/.pi/agent/` (auth.json, sessions,

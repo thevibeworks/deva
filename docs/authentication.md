@@ -24,6 +24,7 @@ This guide documents what `deva.sh` actually supports, what env vars it reads, a
 | Kimi | `oauth` | `api-key` | `.kimi-code` (device-code), `KIMI_CODE_API_KEY` -> `KIMI_MODEL_*` |
 | opencode | `oauth` | `api-key` | `.local/share/opencode/auth.json` (device-code), `OPENCODE_API_KEY` |
 | pi | `oauth` | `api-key` | `.pi/agent/auth.json` (in-app `/login`), provider env keys (`ANTHROPIC_API_KEY`, ...) |
+| dsh | `credentials` | `api-key` | `.dsh/.credentials.yaml`, `DEEPSEEK_API_KEY` |
 
 ## Claude
 
@@ -498,6 +499,49 @@ deva.sh pi --auth-with api-key -- --provider anthropic
 
 Provider/model selection (`--provider`, `--model`) is pi's own CLI
 surface — pass it after `--`.
+
+## dsh
+
+### Default: `--auth-with credentials`
+
+Mounts `~/.dsh` (`$DSH_HOME`; deva pins it to `/home/deva/.dsh` because
+dsh is a developer preview and defaults can move). Everything dsh
+persists lives there: `.credentials.yaml`, `settings.yaml`, `profiles/`
+(including container-built pnpm trees — the mount stays writable),
+`skills/`, `attachments/`.
+
+There is no login flow — either let dsh prompt for and store the key on
+first run, or drop it into `.credentials.yaml` yourself.
+
+dsh's own sandbox/approval subsystem defaults to workspace-write + ask;
+deva sets `DSH_PERMISSION_MODE=danger-full-access` so unattended runs
+never stall — the container is the sandbox. That env is the only switch
+(no CLI flag), and dsh scrubs `DSH_*` from project-discovered env
+(`.env`, `BASH_ENV`), so only the injected process env counts.
+
+Skills interop: dsh reads Anthropic SKILL.md-compatible skills from
+`~/.agents/skills` and `<project>/.agents/skills` — the same dirs deva
+already wires for claude. One skills dir serves both agents in the same
+container.
+
+### `--auth-with api-key`
+
+Input (required): `DEEPSEEK_API_KEY`
+
+The key travels as env only; this mode mounts nothing. dsh resolves
+inherited env BEFORE `.credentials.yaml`, so the injected key always
+decides billing — and for the same reason a host `DEEPSEEK_API_KEY` is
+scrubbed from credentials-mode runs, where it would silently outrank the
+mounted credentials. No blank overlay is needed (reverse of pi).
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
+deva.sh dsh --auth-with api-key
+```
+
+Held back on purpose: dsh's plugin/marketplace surface is in flux
+(developer preview; the manifest format already broke pre-launch), so
+deva wires the TUI + skills dirs only.
 
 ## Config Homes And Auth Isolation
 
