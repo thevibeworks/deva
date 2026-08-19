@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **portless trace route.** cctrace 0.41 dropped portless support, so deva
+  no longer registers the `cctrace` alias or announces
+  `https://cctrace.localhost`; the trace UI URL (announced, opened, and
+  exported into the container as `DEVA_TRACE_UI_URL` for the statusline
+  chip) is now plain `http://127.0.0.1:<port>`, matching the loopback-only
+  publish (`DEVA_TRACE_URL` still overrides). `DEVA_TRACE_PORTLESS` is
+  gone, and so is the host-side env `PORT` honoring that existed for the
+  portless router: a stray `PORT` in the shell no longer hijacks which
+  host port the trace UI publishes on; deva always probes from 9317.
+
 ## [0.19.0] - 2026-08-14
 
 ### Changed

@@ -252,10 +252,8 @@ filter_trace_flag() {
 # Publish the cctrace live UI to the host loopback so the browser can reach
 # it. cctrace is pinned to container port 9317 via --port (its 0.36+ default
 # moved to 8722; 9317 keeps existing containers' mappings valid). Host side:
-# honor $PORT when a portless-style router set it (portless assigns the port
-# and routes https://<name>.localhost to it), else probe from 9317 so
-# concurrent traced containers land on predictable neighbors (#425).
-# DEVA_TRACE_URL overrides the announced URL (e.g. the portless route name).
+# probe a free port from 9317 so concurrent traced containers land on
+# predictable neighbors (#425). DEVA_TRACE_URL overrides the announced URL.
 DEVA_TRACE_UI_URL=""
 
 # Host networking makes -p a docker no-op and `docker port` permanently
@@ -269,30 +267,15 @@ _trace_host_network_args() {
     return 1
 }
 
-# Stable trace URL via portless (vercel-labs): register/refresh the
-# `cctrace` alias for the host-reachable UI port so the dashboard is
-# always at the same named URL (e.g. https://cctrace.localhost) no
-# matter which port this run landed on. Best-effort: silent no-op when
-# the portless CLI is absent or the proxy is down. Prints the routed
-# URL on success. DEVA_TRACE_PORTLESS=0 disables.
-_trace_portless_url() {
-    local port="$1"
-    [ "${DEVA_TRACE_PORTLESS:-1}" = "1" ] || return 1
-    command -v portless >/dev/null 2>&1 || return 1
-    portless alias cctrace "$port" >/dev/null 2>&1 || return 1
-    local url
-    url=$(portless get cctrace 2>/dev/null | head -1)
-    [ -n "$url" ] || return 1
-    printf '%s' "$url"
-}
-
-# Resolve the announced/exported UI URL for a host-reachable port.
-# Precedence: explicit DEVA_TRACE_URL > portless route > raw loopback.
+# Resolve the announced/exported UI URL for a host-reachable port:
+# explicit DEVA_TRACE_URL, else http://127.0.0.1:<port>. (cctrace dropped
+# its portless route in 0.41; the named https://cctrace.localhost URL is
+# gone, and a loopback URL with the port is what every consumer — the
+# browser opener, the in-container statusline chip — can reach and read.
+# 127.0.0.1, not localhost: the publish below binds IPv4 loopback only.)
 _trace_resolve_ui_url() {
     local port="$1"
-    local routed=""
-    routed=$(_trace_portless_url "$port") || routed=""
-    printf '%s' "${DEVA_TRACE_URL:-${routed:-http://127.0.0.1:${port}}}"
+    printf '%s' "${DEVA_TRACE_URL:-http://127.0.0.1:${port}}"
 }
 
 setup_trace_ui_port() {
@@ -302,21 +285,19 @@ setup_trace_ui_port() {
         return 0
     fi
 
+    # No env PORT honoring: that was the portless-style hook (cctrace
+    # dropped it too), and a stray PORT in the shell would hijack the publish.
     local free_port=""
-    if [ -n "${PORT:-}" ] && [[ "${PORT}" =~ ^[0-9]{2,5}$ ]]; then
-        free_port="$PORT"
-    else
-        local port=9317
-        local tries=0
-        while [ "$tries" -lt 12 ]; do
-            if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-                free_port="$port"
-                break
-            fi
-            port=$((port + 1))
-            tries=$((tries + 1))
-        done
-    fi
+    local port=9317
+    local tries=0
+    while [ "$tries" -lt 12 ]; do
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            free_port="$port"
+            break
+        fi
+        port=$((port + 1))
+        tries=$((tries + 1))
+    done
 
     if [ -z "$free_port" ]; then
         echo "warning: no free host port in 9317-9328; trace UI will not be reachable from the host" >&2
@@ -385,7 +366,7 @@ maybe_open_trace_ui() {
     (
         local i=0
         while [ "$i" -lt 60 ]; do
-            # -k: portless https routes use a local CA curl may not trust;
+            # -k: a DEVA_TRACE_URL override may be https with a local CA;
             # this is a loopback readiness probe, not a trust decision.
             if curl -skf -o /dev/null --max-time 1 "$url/" 2>/dev/null; then
                 "$opener" "$url" >/dev/null 2>&1 || true
