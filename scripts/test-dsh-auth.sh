@@ -48,6 +48,27 @@ want "auth method is credentials"    "DEVA_AUTH_METHOD=credentials"   "$cred_out
 want "permission bypass wired"       "DSH_PERMISSION_MODE=danger-full-access" "$cred_out"
 want "home pinned"                   "DSH_HOME=/home/deva/.dsh"       "$cred_out"
 
+echo "=== dsh default: managed web boot (publish + sidecar + workspace seed) ==="
+web_out="$(DEVA_DSH_WEB_PORT=39080 run_dry dsh --debug --dry-run || true)"
+want "web port published to host loopback" "-p 127.0.0.1:39080:3081" "$web_out"
+want "sidecar proxy port wired"            "DEVA_DSH_PROXY_PORT=3081" "$web_out"
+want "web service daemonized in wrapper"   "setsid nohup dsh web --port" "$web_out"
+want "workspace auto-add in boot wrapper"  "DEVA_DSH_WORKSPACE_AUTO"  "$web_out"
+
+echo "=== dsh --host-net: web boots on host loopback, no publish, no sidecar ==="
+hostnet_out="$(run_dry dsh --host-net --debug --dry-run || true)"
+# the wrapper body mentions DEVA_DSH_PROXY_PORT as its runtime guard;
+# only the -e wiring form proves a publish
+want_absent "no port publish under host net" "DEVA_DSH_PROXY_PORT=3081" "$hostnet_out"
+want "web still ensured under host net"      "setsid nohup dsh web --port" "$hostnet_out"
+want "per-container port under host net"     "DEVA_DSH_WEB_PORT_CONTAINER=" "$hostnet_out"
+
+echo "=== dsh user args: foreground passthrough, web service still ensured ==="
+pass_out="$(DEVA_DSH_WEB_PORT=39080 run_dry dsh --debug --dry-run -- --profile tui || true)"
+want "user profile appended after wrapper" "dsh-web --profile tui" "$pass_out"
+want "web published on passthrough too"    "-p 127.0.0.1:39080:3081" "$pass_out"
+want "web ensured on passthrough too"      "setsid nohup dsh web --port" "$pass_out"
+
 echo "=== dsh credentials: hybrid config-root mounts ~/.dsh ==="
 # Seed the config-root layout an autolinked run leaves behind and assert
 # the centralized walk (mount_agent_canonical) emits the mount.
@@ -59,7 +80,7 @@ echo "=== dsh api-key: DEEPSEEK_API_KEY as env, no mount ==="
 apikey_out="$(DEEPSEEK_API_KEY=sk-ds-test-1234 run_dry dsh --auth-with api-key --dry-run -- --profile headless hi || true)"
 want "key wired + redacted"          "DEEPSEEK_API_KEY=<redacted>"    "$apikey_out"
 want "key last-4 tags container"     "--api-key-1234--"               "$apikey_out"
-want "passes agent args after --"    "dsh --profile headless hi"      "$apikey_out"
+want "passes agent args after --"    "dsh-web --profile headless hi"  "$apikey_out"
 want_absent "no ~/.dsh mount in api-key mode" ":/home/deva/.dsh\"" "$apikey_out"
 
 echo "=== dsh api-key: no mount on the hybrid config-root path either ==="
@@ -80,7 +101,7 @@ want "trace rejected" "--trace is not supported for dsh" "$trace_out"
 echo "=== dsh --trace after -- is passthrough ==="
 trace_pass_out="$(run_dry dsh --dry-run -- --trace || true)"
 want_absent "--trace after -- not absorbed" "--trace is not supported" "$trace_pass_out"
-want "--trace passed to agent" "dsh --trace" "$trace_pass_out"
+want "--trace passed to agent" "dsh-web --trace" "$trace_pass_out"
 
 echo "=== dsh api-key: missing key errors ==="
 missing_out="$(DEEPSEEK_API_KEY= run_dry dsh --auth-with api-key --dry-run || true)"
