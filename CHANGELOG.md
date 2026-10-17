@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-17
+
+### Changed
+- **Agent CLI pins refreshed (#569).** `deva:latest` had shipped Claude
+  Code 2.1.232 since 2026-08-14, which predates the releases that added
+  Fable 5.1 (2.1.257), Opus 5.5 (2.1.280), Sonnet 5.5 (2.1.284) and
+  Haiku 5.5 (2.1.293). Now 2.1.302. Majors in the same refresh: Kimi
+  Code 0.36.0 -> 2.2.0, pi 0.84.1 -> 1.3.0, Kimi WebBridge v1.11.5 ->
+  v2.0.24; also Codex 0.163.0, Gemini CLI 0.64.0, Grok CLI 1.0.62,
+  opencode 1.19.3, dsh 0.2.0-rc.2, cctrace 0.53.0, ccx v0.18.0, cursor
+  2026.10.16-e3cb207, Go 1.27.2, Playwright 1.64.1. The installer smoke
+  test launched every agent and checked its auth wiring on these pins.
+
+### Fixed
+- **An empty Cursor pin skips Cursor instead of failing the build
+  (#567).** `install-agent-tooling.sh` guarded the pin with `:?`, which
+  rejects empty as well as unset, so a host that could not reach
+  cursor.com failed the whole image build. Empty now logs the skip.
+
 ### Removed
 - **portless trace route.** cctrace 0.41 dropped portless support, so deva
   no longer registers the `cctrace` alias or announces
