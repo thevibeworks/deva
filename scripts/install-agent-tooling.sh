@@ -12,7 +12,13 @@ set -euo pipefail
 : "${OPENCODE_VERSION:?OPENCODE_VERSION is required}"
 : "${PI_CODING_AGENT_VERSION:?PI_CODING_AGENT_VERSION is required}"
 : "${DSH_VERSION:?DSH_VERSION is required}"
-: "${CURSOR_CLI_VERSION:?CURSOR_CLI_VERSION is required}"
+# `?` and not `:?`: Cursor is the one CLI here with no npm package and no pin
+# hook in its own installer, so an image that does not want it says so by
+# leaving the pin empty. `:?` rejects empty as well as unset, which turned
+# "disabled" into a build failure -- #551 has been red for a month on this one
+# character. Unset is still an error, because that means versions.env is
+# incomplete rather than deliberate.
+: "${CURSOR_CLI_VERSION?CURSOR_CLI_VERSION is required (set it empty to build without the Cursor CLI)}"
 
 CCTRACE_VERSION="${CCTRACE_VERSION:-0.4.0}"
 CCX_VERSION="${CCX_VERSION:-v0.7.0}"
@@ -327,6 +333,11 @@ install_ccx() {
 # Only the `cursor-agent` bin name is linked; the official installer also
 # squats `agent`, which is too generic for a container with nine CLIs.
 install_cursor_agent() {
+    if [ -z "$CURSOR_CLI_VERSION" ]; then
+        log "CURSOR_CLI_VERSION is empty; skipping the Cursor CLI"
+        return 0
+    fi
+
     ensure_safe_cwd
     mkdir -p "$DEVA_HOME/.local/bin"
 
