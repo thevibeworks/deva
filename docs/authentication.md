@@ -503,6 +503,58 @@ surface — pass it after `--`.
 
 ## dsh
 
+Every `deva.sh dsh` run ensures the web service in its container
+(`dsh web`, the official recommendation; bare `dsh` refuses to start
+without a profile): if nothing listens on the container's 3080, the
+web profile is daemonized (log: `$DSH_HOME/web.log`) and survives the
+launch session ending — re-entering a running container never
+double-binds. Bare `deva.sh dsh` then follows the service log; args
+after `--` run that dsh invocation in the foreground with the service
+ensured behind it:
+
+```bash
+deva.sh dsh                                  # ensure web UI, follow its log
+deva.sh dsh -- --profile headless "run the tests"
+deva.sh dsh -- --profile tui
+```
+
+dsh serves loopback only and hard-rejects `0.0.0.0`, which docker `-p`
+cannot reach — so deva daemonizes a socat sidecar in the container
+bridging a publishable port to the loopback bind, published to the
+host loopback. Each container gets the first free host port from 3080
+(`DEVA_DSH_WEB_PORT` overrides the probe start), so concurrent dsh
+containers land on 3080, 3081, ... The mapping is fixed at container
+create and travels as container env, so a reused container announces
+the port it actually published, not a fresh probe (containers created
+before this feature have no publish — recreate them for host access).
+Under `--host-net` there is no sidecar and no publish — the container
+loopback is the host loopback — but every host-net dsh container
+shares that one loopback, so deva probes a free port per container
+(first free from 3080) and pins it into the container env. The ensure
+check verifies the server is OUR container's process, not just an open
+port: another container's server answering our port is reported, never
+adopted (its UI serves that container's mounts, not ours). The `/api`
+trust fence accepts loopback Hosts, so no `--trusted-host` wiring is
+needed. `DEVA_DSH_WEB=0` skips the service entirely.
+
+Caveat: dsh containers sharing one auth home share one
+`storages/` (registry, session index). dsh tolerates but does not
+coordinate concurrent writers — a live server in another container may
+overwrite registry entries seeded after it booted; relaunching re-adds
+them. Use `--config-home` for fully isolated dsh state.
+
+Every run (web, tui, headless) also registers the workspace dir in
+dsh's workspace registry (`$DSH_HOME/storages/workspace.json`) — the
+dir you pointed deva at is the workspace by definition (git repo or
+not); other cwds qualify only with a `.git` entry. Sessions from any
+profile land pre-grouped in the web UI, and skips log their reason to
+the launch output. The seed follows the durable
+domain schema exactly, is idempotent per canonical path, and backs off
+from state it does not own (foreign schema version, pending mutation,
+an uninitialized registry with session history — dsh's own bootstrap
+runs first, the seed retries next launch). `DEVA_DSH_WORKSPACE_AUTO=0`
+disables it.
+
 ### Default: `--auth-with credentials`
 
 Mounts `~/.dsh` (`$DSH_HOME`; deva pins it to `/home/deva/.dsh` because
@@ -595,6 +647,9 @@ Default homes live under:
 ~/.config/deva/grok
 ~/.config/deva/kimi
 ~/.config/deva/opencode
+~/.config/deva/pi
+~/.config/deva/dsh
+~/.config/deva/cursor
 ```
 
 Use `--config-home` when you want a separate identity:
@@ -610,6 +665,72 @@ Good reasons to split auth homes:
 - OAuth vs API-key experiments
 - different org endpoints
 - reproducing auth bugs without contaminating your default state
+
+## Testing Auth
+
+Three layers, cheapest first. Run them in order — most auth bugs die
+before a container ever starts.
+
+### 1. Wiring tests (no Docker, no credentials)
+
+Hermetic per-agent tests run `deva.sh` with a scratch `HOME` and
+`DEVA_NO_DOCKER=1`, then assert the planned mounts and env for each
+`--auth-with` mode:
+
+```bash
+bash scripts/test-kimi-auth.sh
+bash scripts/test-opencode-auth.sh
+bash scripts/test-pi-auth.sh
+bash scripts/test-dsh-auth.sh
+bash scripts/test-cursor-auth.sh
+```
+
+They prove deva wires the right thing (mount present in credentials
+mode, key redacted and no mount in api-key mode, blank overlay when
+non-default auth is active). They never touch your real
+`~/.config/deva` or credentials.
+
+### 2. Dry-run against your real auth (no container)
+
+```bash
+deva.sh dsh --debug --dry-run
+deva.sh dsh --auth-with api-key --debug --dry-run
+```
+
+Same checklist as Debugging Auth below: auth label, env vars, mounts,
+overlay. Still proves nothing about whether the token works.
+
+### 3. Live smoke (spends tokens)
+
+Launch the agent and run one trivial prompt. What "authed" requires
+per agent, default mode:
+
+| Agent | Auth lives in | First-run step |
+|-------|---------------|----------------|
+| Claude | `~/.claude` + `~/.claude.json` | `/login` in TUI |
+| Codex | `~/.codex/auth.json` | `codex login` device flow |
+| Gemini | `~/.gemini` | browser OAuth |
+| Grok | `~/.grok/auth.json` | in-app login |
+| Kimi | `~/.kimi-code` | device-code flow |
+| opencode | `~/.local/share/opencode/auth.json` | device-code flow |
+| pi | `~/.pi/agent/auth.json` | `/login` in TUI |
+| dsh | `~/.dsh/.credentials.yaml` | no login flow — dsh prompts for the key on first run, or write the file yourself |
+| cursor | config home `.config/cursor/auth.json` | `cursor-agent login` inside the container (deva prints the URL) |
+
+Login-in-container flows persist because the auth home is mounted —
+the second run is authed without repeating the step.
+
+To smoke-test without touching your default identity, point the run
+at a throwaway config home:
+
+```bash
+deva.sh dsh -c "$(mktemp -d)"
+```
+
+api-key modes need no first-run step at all — export the key
+(`DEEPSEEK_API_KEY`, `CURSOR_API_KEY`, provider keys for pi, ...) and
+run with `--auth-with api-key`. See each agent's section above for
+which env var decides billing.
 
 ## Debugging Auth
 

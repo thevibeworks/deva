@@ -83,7 +83,7 @@ deva.sh grok
 deva.sh kimi
 deva.sh opencode
 deva.sh pi
-deva.sh dsh
+deva.sh dsh              # web UI on http://127.0.0.1:3080; repo auto-added as workspace
 deva.sh cursor
 ```
 
