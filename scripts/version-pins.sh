@@ -103,6 +103,11 @@ PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION
 # CloakBrowser npm wrapper version. This also pins the Chromium binary:
 # the wrapper hardcodes per-arch free-binary versions (linux-x64 146.x.x.5,
 # linux-arm64 146.x.x.3), so bumping the wrapper is what moves Chromium.
+# HOLD below 0.7.0: from 0.7.0 the installer (cloakbrowser install) exits 1
+# without a license key ("Get one free ... the key is also emailed to you").
+# Taking that on is a decision about upstream's terms, not a pin bump.
+# update-version-pins.sh will keep proposing 0.7.x; the cloak CI build
+# fails loudly when it does.
 CLOAKBROWSER_WRAPPER_VERSION=$CLOAKBROWSER_WRAPPER_VERSION
 # Kimi WebBridge daemon + extension. No npm package; resolved from
 # cdn.kimi.com/webbridge/latest/version.json. Not consumed by any
