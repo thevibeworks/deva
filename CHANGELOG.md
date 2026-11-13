@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Agent CLI pins refreshed.** `deva:latest` (v0.20.0) ships Claude Code
+  2.1.302, which cannot run Fable 5.2 (needs 2.1.321) and predates the
+  permission and sandbox security fixes in 2.1.323. Now 2.1.323. Also
+  Codex 0.168.0, Gemini CLI 0.68.0, Grok CLI 1.0.77, Kimi Code 2.6.1,
+  opencode 1.19.5, pi 1.5.2, dsh 0.2.2-rc.1, cursor 2026.11.11-b912975,
+  Go 1.27.4, Playwright 1.65.0, CloakBrowser wrapper 0.6.5, Kimi
+  WebBridge v2.0.36. Nightly has built these upstream versions green.
+- **CloakBrowser held below 0.7.0.** From 0.7.0 its installer refuses to
+  run without a license key, which would fail the cloak image build.
+
 ## [0.20.0] - 2026-10-17
 
 ### Changed
