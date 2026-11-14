@@ -41,7 +41,7 @@ deva.sh grok
 deva.sh kimi
 deva.sh opencode
 deva.sh pi
-deva.sh dsh
+deva.sh dsh              # boots the dsh web UI on http://127.0.0.1:3080
 deva.sh cursor
 
 deva.sh claude --rm      # throwaway container
