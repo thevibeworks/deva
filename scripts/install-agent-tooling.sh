@@ -369,6 +369,67 @@ install_cursor_agent() {
     log "cursor-agent installed"
 }
 
+# Antigravity CLI (agy) is one closed Go binary, not on npm. Each GitHub
+# release carries a tarball per platform holding a single file,
+# `antigravity`; the official installer (antigravity.google/cli/install.sh)
+# saves it as `agy` and offers no pin hook, so fetch the pinned tarball
+# directly. The glibc build, not the _musl one: the image is Ubuntu.
+#
+# The pin needs defending. agy's background updater replaces its own binary
+# about 40s into the first session (measured: 1.5.13 -> 1.5.15, old binary
+# left beside it as agy.<n>.old), and it has no off switch -- no env var, no
+# settings key. What it does have is a guard: it resolves the binary's real
+# directory and, when that is not writable, logs "is not fully accessible
+# ... skipping update" and does nothing. So the binary lives in its own
+# versioned directory with the write bit stripped (as cursor's does), behind
+# a symlink at ~/.local/bin/agy. That path is also load-bearing: agy writes
+# it into the antigravity-cli/bin/agentapi shim inside its home, so every
+# container sharing that home must agree on it.
+#
+# AGY_VERSION is checked here, not at the top of the file: the Dockerfile
+# declares it after the npm layer so a bump does not rebuild that layer.
+install_agy() {
+    : "${AGY_VERSION?AGY_VERSION is required (set it empty to build without agy)}"
+    if [ -z "$AGY_VERSION" ]; then
+        log "AGY_VERSION is empty; skipping the Antigravity CLI"
+        return 0
+    fi
+
+    ensure_safe_cwd
+    mkdir -p "$DEVA_HOME/.local/bin"
+
+    log "Installing Antigravity CLI (agy) pinned to ${AGY_VERSION}"
+    local arch
+    case "$(uname -m)" in
+    x86_64) arch="x64" ;;
+    aarch64 | arm64) arch="arm64" ;;
+    *) die "Unsupported architecture for agy: $(uname -m)" ;;
+    esac
+
+    local tmp_dir target url installed
+    tmp_dir="$(mktemp -d)"
+    target="$DEVA_HOME/.local/share/agy/${AGY_VERSION}"
+    url="https://github.com/google-antigravity/antigravity-cli/releases/download/${AGY_VERSION}/agy_cli_linux_${arch}.tar.gz"
+
+    retry_cmd 3 "download agy tarball" download_to "$url" "$tmp_dir/agy.tar.gz" \
+        || die "agy download failed: $url"
+    tar -xzf "$tmp_dir/agy.tar.gz" -C "$tmp_dir"
+    [ -f "$tmp_dir/antigravity" ] || die "agy tarball missing the antigravity binary"
+    mkdir -p "$target"
+    chmod u+w "$target"   # a re-run meets the write bit stripped below
+    install -m 555 "$tmp_dir/antigravity" "$target/agy"
+    rm -rf "$tmp_dir"
+
+    ln -sf "$target/agy" "$DEVA_HOME/.local/bin/agy"
+    chmod a-w "$target"
+
+    # The tag is the version, verbatim: a mismatch means the wrong asset.
+    installed="$("$DEVA_HOME/.local/bin/agy" --version)" || die "agy verification failed"
+    [ "$installed" = "$AGY_VERSION" ] \
+        || die "agy reports version '$installed', expected '$AGY_VERSION'"
+    log "agy installed"
+}
+
 # cctrace ships no prebuilt binaries; compile the standalone binary with bun.
 # The compiled binary receives argv directly, so `cctrace -- <claude args>`
 # works (bun's CLI would eat the leading "--").
@@ -397,7 +458,7 @@ install_cctrace() {
 }
 
 # DEVA_TOOLING_STAGE splits installs across Docker layers so fast-moving
-# tools (cctrace) can bump without busting the big npm layer.
+# tools (cctrace, agy) can bump without busting the big npm layer.
 main() {
     ensure_safe_cwd
     local stage="${DEVA_TOOLING_STAGE:-all}"
@@ -408,6 +469,9 @@ main() {
             install_cursor_agent
             install_ccx
             ;;
+        agy)
+            install_agy
+            ;;
         cctrace)
             install_cctrace
             ;;
@@ -415,10 +479,11 @@ main() {
             install_npm_agent_tooling
             install_cursor_agent
             install_ccx
+            install_agy
             install_cctrace
             ;;
         *)
-            die "unknown DEVA_TOOLING_STAGE: $stage (agents|cctrace|all)"
+            die "unknown DEVA_TOOLING_STAGE: $stage (agents|agy|cctrace|all)"
             ;;
     esac
 }

@@ -138,6 +138,7 @@ registry_tool() {
         PI_CODING_AGENT_VERSION) echo "pi" ;;
         DSH_VERSION)         echo "dsh" ;;
         CURSOR_CLI_VERSION)  echo "cursor" ;;
+        AGY_VERSION)         echo "agy" ;;
         CCX_VERSION)         echo "ccx" ;;
         COPILOT_API_VERSION) echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)  echo "playwright" ;;
@@ -237,6 +238,7 @@ main() {
     pin "pi"             PI_CODING_AGENT_VERSION npm "@earendil-works/pi-coding-agent"
     pin "dsh"            DSH_VERSION           npm  "@deepseek-ai/dsh"
     pin "cursor"         CURSOR_CLI_VERSION    cursor
+    pin "agy"            AGY_VERSION           git-tag  "https://github.com/google-antigravity/antigravity-cli.git"
     pin "CCX"            CCX_VERSION           git-tag  "https://github.com/thevibeworks/ccx.git"
     pin "Copilot API"    COPILOT_API_VERSION   git-commit  "https://github.com/ericc-ch/copilot-api.git" "refs/heads/master"
 

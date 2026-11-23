@@ -88,6 +88,7 @@ jobs:
             --build-arg PI_CODING_AGENT_VERSION="${{ steps.pins.outputs.pi_coding_agent_version }}" \
             --build-arg DSH_VERSION="${{ steps.pins.outputs.dsh_version }}" \
             --build-arg CURSOR_CLI_VERSION="${{ steps.pins.outputs.cursor_cli_version }}" \
+            --build-arg AGY_VERSION="${{ steps.pins.outputs.agy_version }}" \
             --build-arg CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             --build-arg COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             .
@@ -115,6 +116,7 @@ jobs:
             PI_CODING_AGENT_VERSION="${{ steps.pins.outputs.pi_coding_agent_version }}" \
             DSH_VERSION="${{ steps.pins.outputs.dsh_version }}" \
             CURSOR_CLI_VERSION="${{ steps.pins.outputs.cursor_cli_version }}" \
+            AGY_VERSION="${{ steps.pins.outputs.agy_version }}" \
             CCX_VERSION="${{ steps.pins.outputs.ccx_version }}" \
             COPILOT_API_VERSION="${{ steps.pins.outputs.copilot_api_version }}" \
             PLAYWRIGHT_VERSION="${{ steps.pins.outputs.playwright_version }}" \

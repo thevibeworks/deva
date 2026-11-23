@@ -22,6 +22,7 @@ _CLI_OPENCODE="${OPENCODE_VERSION:-}"
 _CLI_PI="${PI_CODING_AGENT_VERSION:-}"
 _CLI_DSH="${DSH_VERSION:-}"
 _CLI_CURSOR="${CURSOR_CLI_VERSION:-}"
+_CLI_AGY="${AGY_VERSION:-}"
 _CLI_CCX="${CCX_VERSION:-}"
 _CLI_COPILOT="${COPILOT_API_VERSION:-}"
 _CLI_PLAYWRIGHT="${PLAYWRIGHT_VERSION:-}"
@@ -75,7 +76,7 @@ Options:
   --only LIST     Upgrade only these tools (comma-separated); the rest
                   stay pinned to versions.env. Tools: claude-code,
                   cctrace, codex, gemini-cli, grok-cli, kimi-code,
-                  opencode, pi, dsh, cursor, ccx, copilot-api,
+                  opencode, pi, dsh, cursor, agy, ccx, copilot-api,
                   playwright, cloakbrowser,
                   kimi-webbridge
   -h, --help      Show this help
@@ -98,6 +99,7 @@ Environment:
   PI_CODING_AGENT_VERSION Override pi version
   DSH_VERSION           Override dsh version
   CURSOR_CLI_VERSION    Override cursor version
+  AGY_VERSION           Override agy version
   CCX_VERSION     Override ccx version
   COPILOT_API_VERSION   Override copilot-api version
   PLAYWRIGHT_VERSION    Override playwright version (rust image only)
@@ -128,7 +130,7 @@ apply_only_filter() {
     [[ -n $ONLY ]] || return 0
 
     local tool
-    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code opencode pi dsh cursor ccx copilot-api playwright cloakbrowser kimi-webbridge"
+    local known="claude-code cctrace codex gemini-cli grok-cli kimi-code opencode pi dsh cursor agy ccx copilot-api playwright cloakbrowser kimi-webbridge"
     for tool in ${ONLY//,/ }; do
         case " $known " in
             *" $tool "*) ;;
@@ -148,6 +150,7 @@ apply_only_filter() {
     tool_selected pi          || _CLI_PI="${_CLI_PI:-$PI_CODING_AGENT_VERSION}"
     tool_selected dsh         || _CLI_DSH="${_CLI_DSH:-$DSH_VERSION}"
     tool_selected cursor      || _CLI_CURSOR="${_CLI_CURSOR:-$CURSOR_CLI_VERSION}"
+    tool_selected agy         || _CLI_AGY="${_CLI_AGY:-$AGY_VERSION}"
     tool_selected ccx         || _CLI_CCX="${_CLI_CCX:-$CCX_VERSION}"
     tool_selected copilot-api || _CLI_COPILOT="${_CLI_COPILOT:-$COPILOT_API_VERSION}"
     tool_selected playwright  || _CLI_PLAYWRIGHT="${_CLI_PLAYWRIGHT:-$PLAYWRIGHT_VERSION}"
@@ -240,7 +243,7 @@ main() {
 
     # Resolve build versions early so we can show the manifest before countdown.
     # CLI override wins; otherwise use whatever load_versions fetched.
-    local claude_ver cctrace_ver codex_ver gemini_ver grok_ver kimi_ver opencode_ver pi_ver dsh_ver cursor_ver ccx_ver copilot_ver playwright_ver
+    local claude_ver cctrace_ver codex_ver gemini_ver grok_ver kimi_ver opencode_ver pi_ver dsh_ver cursor_ver agy_ver ccx_ver copilot_ver playwright_ver
     claude_ver="${_CLI_CLAUDE_CODE:-$(get_latest "claude-code")}"
     cctrace_ver="${_CLI_CCTRACE:-$(get_latest "cctrace")}"
     codex_ver="${_CLI_CODEX:-$(get_latest "codex")}"
@@ -251,6 +254,7 @@ main() {
     pi_ver="${_CLI_PI:-$(get_latest "pi")}"
     dsh_ver="${_CLI_DSH:-$(get_latest "dsh")}"
     cursor_ver="${_CLI_CURSOR:-$(get_latest "cursor")}"
+    agy_ver="${_CLI_AGY:-$(get_latest "agy")}"
     ccx_ver="${_CLI_CCX:-$(get_latest "ccx")}"
     copilot_ver="${_CLI_COPILOT:-$(get_latest "copilot-api")}"
     playwright_ver="${_CLI_PLAYWRIGHT:-${PLAYWRIGHT_VERSION}}"
@@ -265,6 +269,7 @@ main() {
     [[ -z $pi_ver ]] && missing+=("PI_CODING_AGENT_VERSION")
     [[ -z $dsh_ver ]] && missing+=("DSH_VERSION")
     [[ -z $cursor_ver ]] && missing+=("CURSOR_CLI_VERSION")
+    [[ -z $agy_ver ]] && missing+=("AGY_VERSION")
     [[ -z $ccx_ver ]] && missing+=("CCX_VERSION")
     [[ -z $copilot_ver ]] && missing+=("COPILOT_API_VERSION")
     [[ -z $playwright_ver ]] && missing+=("PLAYWRIGHT_VERSION")
@@ -287,6 +292,7 @@ main() {
         "pi|pi_ver|_CLI_PI|pi"
         "dsh|dsh_ver|_CLI_DSH|dsh"
         "cursor|cursor_ver|_CLI_CURSOR|cursor"
+        "agy|agy_ver|_CLI_AGY|agy"
         "CCX|ccx_ver|_CLI_CCX|ccx"
         "Copilot API|copilot_ver|_CLI_COPILOT|copilot-api"
         "Playwright|playwright_ver|_CLI_PLAYWRIGHT|playwright"
@@ -419,6 +425,7 @@ main() {
         --build-arg PI_CODING_AGENT_VERSION="$pi_ver" \
         --build-arg DSH_VERSION="$dsh_ver" \
         --build-arg CURSOR_CLI_VERSION="$cursor_ver" \
+        --build-arg AGY_VERSION="$agy_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
         --build-arg COPILOT_API_VERSION="$copilot_ver" \
         -t "$BUILD_IMAGE" .
@@ -438,6 +445,7 @@ main() {
         --build-arg PI_CODING_AGENT_VERSION="$pi_ver" \
         --build-arg DSH_VERSION="$dsh_ver" \
         --build-arg CURSOR_CLI_VERSION="$cursor_ver" \
+        --build-arg AGY_VERSION="$agy_ver" \
         --build-arg CCX_VERSION="$ccx_ver" \
         --build-arg PLAYWRIGHT_VERSION="$playwright_ver" \
         --build-arg RUST_TOOLCHAINS="$RUST_TOOLCHAINS" \
@@ -471,6 +479,7 @@ main() {
     PI_CODING_AGENT_VERSION="$pi_ver"
     DSH_VERSION="$dsh_ver"
     CURSOR_CLI_VERSION="$cursor_ver"
+    AGY_VERSION="$agy_ver"
     CCX_VERSION="$ccx_ver"
     COPILOT_API_VERSION="$copilot_ver"
     PLAYWRIGHT_VERSION="$playwright_ver"
