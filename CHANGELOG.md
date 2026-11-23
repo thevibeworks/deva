@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **agy (Google's Antigravity CLI) in the image (#574).** Pinned as
+  `AGY_VERSION` on its own layer and tracked by `make versions-pin` and
+  `make versions-up` like every other agent CLI. It is not on npm: the
+  image fetches the release tarball from
+  `google-antigravity/antigravity-cli` directly. It is installed
+  read-only, in a versioned dir behind `~/.local/bin/agy`, because agy's
+  self-updater has no off switch and replaced a pinned 1.5.13 with 1.5.15
+  about 40s into a session; against a directory it cannot write it logs
+  `skipping update` and the pin holds. An empty `AGY_VERSION` builds
+  without it. Image only: there is no `deva.sh agy` yet.
+
 ### Changed
 - **Agent CLI pins refreshed.** `deva:latest` (v0.20.0) ships Claude Code
   2.1.302, which cannot run Fable 5.2 (needs 2.1.321) and predates the

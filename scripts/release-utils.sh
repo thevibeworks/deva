@@ -35,6 +35,7 @@ TOOL_REGISTRY=(
     "pi|npm|@earendil-works/pi-coding-agent|org.opencontainers.image.pi_coding_agent_version|https://www.npmjs.com/package/@earendil-works/pi-coding-agent|github:earendil-works/pi|agent|main"
     "dsh|npm|@deepseek-ai/dsh|org.opencontainers.image.dsh_version|https://www.npmjs.com/package/@deepseek-ai/dsh|github:deepseek-ai/deepseek-harness|agent|main"
     "cursor|cursor-installer|cursor.com/install|org.opencontainers.image.cursor_cli_version|https://cursor.com/docs/cli||agent|main"
+    "agy|github-release|google-antigravity/antigravity-cli|org.opencontainers.image.agy_version|https://antigravity.google/product/antigravity-cli|github:google-antigravity/antigravity-cli|agent|main"
     "ccx|github-release|thevibeworks/ccx|org.opencontainers.image.ccx_version|https://github.com/thevibeworks/ccx|github:thevibeworks/ccx|agent|main"
     "copilot-api|github-commit|ericc-ch/copilot-api|org.opencontainers.image.copilot_api_version|https://github.com/ericc-ch/copilot-api||agent|main"
     "cctrace|npm|@thevibeworks/cctrace|org.opencontainers.image.cctrace_version|https://www.npmjs.com/package/@thevibeworks/cctrace|github:thevibeworks/cctrace|agent|main"

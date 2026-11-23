@@ -10,7 +10,8 @@ load_version_pins
 tmp_root="$(mktemp -d)"
 cleanup() {
     chmod 700 "$tmp_root/deny" 2>/dev/null || true
-    # install_cursor_agent strips the write bit from its versions dir
+    # install_cursor_agent strips the write bit from its versions dir, and
+    # install_agy from its version dir
     chmod -R u+w "$tmp_root" 2>/dev/null || true
     rm -rf "$tmp_root"
 }
@@ -119,6 +120,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$url" in
+    *"antigravity-cli/releases/download/"*)
+        tarball_dir="$(mktemp -d)"
+        printf '#!/usr/bin/env bash\necho "__AGY_VERSION__"\n' >"$tarball_dir/antigravity"
+        chmod +x "$tarball_dir/antigravity"
+        tar -czf "$out" -C "$tarball_dir" antigravity
+        rm -rf "$tarball_dir"
+        ;;
     *"/releases/download/"*)
         exit 22
         ;;
@@ -187,7 +195,8 @@ BIN
 chmod +x "$out"
 EOF
 
-sed -i -e "s#__CURSOR_CLI_VERSION__#$CURSOR_CLI_VERSION#g" "$fake_bin/curl"
+sed -i -e "s#__CURSOR_CLI_VERSION__#$CURSOR_CLI_VERSION#g" \
+    -e "s#__AGY_VERSION__#$AGY_VERSION#g" "$fake_bin/curl"
 chmod +x "$fake_bin/npm" "$fake_bin/curl" "$fake_bin/go" "$fake_bin/bun"
 
 mkdir -p "$tmp_root/deny"
@@ -223,6 +232,16 @@ mkdir -p "$tmp_root/deny"
     [ "$("$fake_home/.local/bin/cursor-agent")" = "$CURSOR_CLI_VERSION" ]
     # updater-starving write-bit strip
     test ! -w "$fake_home/.local/share/cursor-agent/versions"
+    grep -F "Installing Antigravity CLI (agy) pinned to $AGY_VERSION" <<<"$output" >/dev/null
+    grep -F "agy installed" <<<"$output" >/dev/null
+    # ~/.local/bin/agy is the path agy writes into its agentapi shim; the
+    # binary itself sits behind it in a versioned dir.
+    test -L "$fake_home/.local/bin/agy"
+    [ "$(readlink "$fake_home/.local/bin/agy")" = "$fake_home/.local/share/agy/$AGY_VERSION/agy" ]
+    [ "$("$fake_home/.local/bin/agy")" = "$AGY_VERSION" ]
+    # the pin's only defence: agy's updater skips a directory it cannot write
+    test ! -w "$fake_home/.local/share/agy/$AGY_VERSION"
+    test ! -w "$fake_home/.local/share/agy/$AGY_VERSION/agy"
     grep -F "Installing ccx pinned to $CCX_VERSION" <<<"$output" >/dev/null
     grep -F "falling back to go install" <<<"$output" >/dev/null
     grep -F "ccx installed" <<<"$output" >/dev/null
@@ -231,3 +250,48 @@ mkdir -p "$tmp_root/deny"
     grep -F "cctrace installed" <<<"$output" >/dev/null
     test -x "$fake_home/.local/bin/cctrace"
 )
+
+# agy on its own layer (the stage the Dockerfile runs), twice into one home:
+# a pin re-run must get past the write bit the first run stripped.
+agy_home="$tmp_root/home-agy"
+mkdir -p "$agy_home"
+for _ in 1 2; do
+    output="$(
+        PATH="$fake_bin:/usr/bin:/bin" \
+        HOME="$agy_home" \
+        DEVA_HOME="$agy_home" \
+        DEVA_TOOLING_STAGE=agy \
+        bash "$REPO_ROOT/scripts/install-agent-tooling.sh" 2>&1
+    )"
+    grep -F "agy installed" <<<"$output" >/dev/null
+done
+[ "$("$agy_home/.local/bin/agy")" = "$AGY_VERSION" ]
+test ! -e "$agy_home/.npm-global"
+
+# A binary that reports another version is the wrong asset: fail the build.
+if output="$(
+    PATH="$fake_bin:/usr/bin:/bin" \
+    HOME="$tmp_root/home-agy-mismatch" \
+    DEVA_HOME="$tmp_root/home-agy-mismatch" \
+    DEVA_TOOLING_STAGE=agy \
+    AGY_VERSION=0.0.0-not-the-pin \
+    bash "$REPO_ROOT/scripts/install-agent-tooling.sh" 2>&1
+)"; then
+    echo "expected the agy version mismatch to fail the install" >&2
+    exit 1
+fi
+grep -F "agy reports version '$AGY_VERSION', expected '0.0.0-not-the-pin'" <<<"$output" >/dev/null
+
+# Empty pin = an image built without agy: skipped, nothing installed, green.
+output="$(
+    PATH="$fake_bin:/usr/bin:/bin" \
+    HOME="$tmp_root/home-agy-disabled" \
+    DEVA_HOME="$tmp_root/home-agy-disabled" \
+    DEVA_TOOLING_STAGE=agy \
+    AGY_VERSION="" \
+    bash "$REPO_ROOT/scripts/install-agent-tooling.sh" 2>&1
+)"
+grep -F "AGY_VERSION is empty; skipping the Antigravity CLI" <<<"$output" >/dev/null
+test ! -e "$tmp_root/home-agy-disabled/.local/bin/agy"
+test ! -e "$tmp_root/home-agy-disabled/.local/share/agy"
+

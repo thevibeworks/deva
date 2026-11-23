@@ -36,6 +36,7 @@ main() {
     resolve_tool "pi_coding_agent_version" "pi"
     resolve_tool "dsh_version" "dsh"
     resolve_tool "cursor_cli_version" "cursor"
+    resolve_tool "agy_version" "agy"
     resolve_tool "ccx_version" "ccx"
     resolve_tool "copilot_api_version" "copilot-api"
 }

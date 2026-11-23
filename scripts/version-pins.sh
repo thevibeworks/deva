@@ -23,6 +23,7 @@ VERSION_PIN_VARS=(
     PI_CODING_AGENT_VERSION
     DSH_VERSION
     CURSOR_CLI_VERSION
+    AGY_VERSION
     CCX_VERSION
     COPILOT_API_VERSION
     PLAYWRIGHT_VERSION
@@ -97,6 +98,12 @@ DSH_VERSION=$DSH_VERSION
 # downloads.cursor.com/lab/<version>/linux/<arch>/agent-cli-package.tar.gz
 # so the image fetches the tarball directly. Version format YYYY.MM.DD-hash.
 CURSOR_CLI_VERSION=$CURSOR_CLI_VERSION
+# Antigravity CLI (agy). Not on npm: one GitHub release tarball per
+# platform, tag = version with no "v" prefix. The image installs it
+# read-only, because agy's self-updater has no off switch and otherwise
+# replaces the binary about 40s into a session
+# (scripts/install-agent-tooling.sh install_agy). Empty = built without agy.
+AGY_VERSION=$AGY_VERSION
 CCX_VERSION=$CCX_VERSION
 COPILOT_API_VERSION=$COPILOT_API_VERSION
 PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION

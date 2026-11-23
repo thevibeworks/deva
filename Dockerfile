@@ -238,6 +238,14 @@ COPY --chown=deva:deva scripts/install-agent-tooling.sh /tmp/install-agent-tooli
 RUN --mount=type=cache,target=/home/deva/.npm,uid=${DEVA_UID},gid=${DEVA_GID},sharing=locked \
     DEVA_TOOLING_STAGE=agents bash /tmp/install-agent-tooling.sh
 
+# agy (Antigravity CLI) releases almost daily and is a 90 MB download: own
+# ARG + layer, so its pin bump rebuilds neither the npm agent layer above
+# nor the other way round. Empty = skipped.
+ARG AGY_VERSION=1.5.13
+LABEL org.opencontainers.image.agy_version=${AGY_VERSION}
+
+RUN DEVA_TOOLING_STAGE=agy bash /tmp/install-agent-tooling.sh
+
 # cctrace moves fast: own ARG + layer, declared here so a pin bump
 # rebuilds only this layer, not the npm agent layer above.
 ARG CCTRACE_VERSION=0.16.0

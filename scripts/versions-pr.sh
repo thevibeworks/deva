@@ -64,6 +64,7 @@ pin_label() {
         GROK_CLI_VERSION)             echo "grok" ;;
         KIMI_CODE_VERSION)            echo "kimi-code" ;;
         OPENCODE_VERSION)             echo "opencode" ;;
+        AGY_VERSION)                  echo "agy" ;;
         CCX_VERSION)                  echo "ccx" ;;
         COPILOT_API_VERSION)          echo "copilot-api" ;;
         PLAYWRIGHT_VERSION)           echo "playwright" ;;

@@ -32,6 +32,7 @@ inspect)
   "org.opencontainers.image.pi_coding_agent_version":"0.84.0",
   "org.opencontainers.image.dsh_version":"0.1.0-rc.5",
   "org.opencontainers.image.cursor_cli_version":"2026.08.10-0000000",
+  "org.opencontainers.image.agy_version":"1.5.13",
   "org.opencontainers.image.ccx_version":"v0.7.0",
   "org.opencontainers.image.copilot_api_version":"0ea08febdd7e3e055b03dd298bf57e669500b5c1",
   "org.opencontainers.image.playwright_version":"1.59.0"
@@ -69,6 +70,15 @@ fi
 case "${2:-}" in
 repos/thevibeworks/ccx/releases/latest)
     echo "v0.7.0"
+    ;;
+repos/google-antigravity/antigravity-cli/releases/latest)
+    echo "1.5.13"
+    ;;
+repos/google-antigravity/antigravity-cli/releases/tags/1.5.13)
+    echo "2026-11-19T21:48:43Z"
+    ;;
+repos/google-antigravity/antigravity-cli/releases)
+    echo '[]'
     ;;
 repos/ericc-ch/copilot-api/branches/master)
     echo "0ea08febdd7e3e055b03dd298bf57e669500b5c1"
@@ -187,6 +197,7 @@ for expected in \
     "--build-arg GROK_CLI_VERSION=0.2.93" \
     "--build-arg KIMI_CODE_VERSION=0.28.0" \
     "--build-arg PI_CODING_AGENT_VERSION=0.84.1" \
+    "--build-arg AGY_VERSION=1.5.13" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "--build-arg GO_VERSION=1.26.2"
@@ -206,6 +217,7 @@ for expected in \
     "--build-arg GROK_CLI_VERSION=0.2.93" \
     "--build-arg KIMI_CODE_VERSION=0.28.0" \
     "--build-arg PI_CODING_AGENT_VERSION=0.84.1" \
+    "--build-arg AGY_VERSION=1.5.13" \
     "--build-arg CCX_VERSION=v0.7.0" \
     "--build-arg PLAYWRIGHT_VERSION=1.60.0"
 do
@@ -237,6 +249,7 @@ for expected in \
     "PI_CODING_AGENT_VERSION=0.84.1" \
     "DSH_VERSION=0.1.0-rc.6" \
     "CURSOR_CLI_VERSION=2026.08.11-e8db854" \
+    "AGY_VERSION=1.5.13" \
     "CCX_VERSION=v0.7.0" \
     "COPILOT_API_VERSION=0ea08febdd7e3e055b03dd298bf57e669500b5c1" \
     "PLAYWRIGHT_VERSION=1.60.0" \
